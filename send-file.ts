@@ -45,6 +45,7 @@ export function sendFile(
   path: string,
   caption: string,
   runner = spawnSync,
+  service = "iMessage",
 ): SendFileResult {
   const fail = (error: string, online = true): SendFileResult => ({ ok: false, online, error });
 
@@ -81,8 +82,10 @@ export function sendFile(
   // Caption rides on stdin ahead of the file bytes (--text-stdin-bytes N), so
   // message text never appears in any process's argv on either machine.
   const cap = Buffer.from(caption.trim(), "utf8");
+  const svc = service === "SMS" || service === "RCS" ? service : "iMessage";
   const args = [
     ...target.args,
+    "--service", svc,
     "--file-stdin",
     "--name", basename(path),
     "--yes",
@@ -102,12 +105,21 @@ export function sendFile(
 if (import.meta.main) {
   const chat = process.argv[2] ?? "";
   const path = process.argv[3] ?? "";
+  // Optional --service flag may appear before --caption-stdin; allow both orders.
+  let svc = "iMessage";
+  let captionIdx = 4;
+  if (process.argv[4] === "--service" && process.argv[5]) {
+    svc = String(process.argv[5]);
+    captionIdx = 6;
+  } else if (process.argv[4] === "--service") {
+    captionIdx = 5;
+  }
   // Caption arrives on stdin (--caption-stdin) so it never sits in this process's argv.
-  const caption = process.argv[4] === "--caption-stdin"
+  const caption = process.argv[captionIdx] === "--caption-stdin"
     ? readFileSync(0, "utf8")
-    : process.argv.slice(4).join(" ");
+    : process.argv.slice(captionIdx).join(" ");
   try {
-    console.log(JSON.stringify(sendFile(chat, path, caption)));
+    console.log(JSON.stringify(sendFile(chat, path, caption, undefined, svc)));
   } catch (e) {
     console.log(JSON.stringify({ ok: false, online: true, error: String(e) }));
   }

@@ -138,7 +138,12 @@ BarWidget {
   // Single click = panel (opens immediately — no double-click lag); a second
   // click within the double-click window = close the panel and open the APP.
   Timer { id: dblClick; interval: 320 }
+  property bool suppressNextLeftClick: false
   function leftClick() {
+    if (suppressNextLeftClick) {
+      suppressNextLeftClick = false
+      return
+    }
     if (dblClick.running) {
       dblClick.stop()
       root.close()
@@ -568,6 +573,14 @@ BarWidget {
       if (code === Qt.MiddleButton) root.refresh(false, false)
       else if (code === Qt.RightButton) root.markAllRead()
       else root.leftClick()
+    }
+    onDoublePressed: function(code) {
+      if (code === Qt.LeftButton) {
+        suppressNextLeftClick = true
+        dblClick.stop()
+        root.close()
+        root.showApp()
+      }
     }
 
     Row {

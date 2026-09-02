@@ -598,7 +598,9 @@ FocusScope {
       // send-file.ts owns target resolution (group guid or DM handle).
       sendDraftPath = draftPath
       // caption on stdin — never in this process's argv (audit #4, war room #1/#13)
-      fileSendProc.command = ["bun", root.sendFileScript, sendChat, draftPath, "--caption-stdin"]
+      var svc2 = String(root.active.service || "iMessage")
+      if (svc2 !== "iMessage" && svc2 !== "SMS" && svc2 !== "RCS") svc2 = "iMessage"
+      fileSendProc.command = ["bun", root.sendFileScript, sendChat, draftPath, "--service", svc2, "--caption-stdin"]
       fileSendProc.stdinEnabled = true
       fileSendProc.running = true
       fileSendProc.write(trimmed !== "" ? text : "")
@@ -608,10 +610,13 @@ FocusScope {
 
     // Body on STDIN (--text-stdin), never argv: argv is readable by every
     // process on this machine and travels through ssh into the Mac's ps.
+    // SMS/RCS vs iMessage: active.service travels from chat.db (collector.ts:386)
+    var svc = String(root.active.service || "iMessage")
+    if (svc !== "iMessage" && svc !== "SMS" && svc !== "RCS") svc = "iMessage"
     var target = root.activeIsGroup
       ? ["--chat-id", String(root.active.guid)]
       : ["--to", sendChat]
-    sendProc.command = [root.home + "/bin/imsg-send"].concat(target).concat(["--yes", "--text-stdin", "--keep-dashes"])
+    sendProc.command = [root.home + "/bin/imsg-send"].concat(target).concat(["--service", svc, "--yes", "--text-stdin", "--keep-dashes"])
     sendProc.stdinEnabled = true
     sendProc.running = true
     sendProc.write(text)
