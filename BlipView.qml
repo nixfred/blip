@@ -1263,6 +1263,7 @@ FocusScope {
                       source: root.avatarFiles[avatarCircle.avatarHandle] || ""
                       asynchronous: true
                       fillMode: Image.PreserveAspectCrop
+                      autoTransform: true
                       sourceSize.width: 96
                       sourceSize.height: 96
                       // a stale/corrupt cache file → initials, and no retry this session
@@ -1620,6 +1621,11 @@ FocusScope {
                       source: chipRow.showImage ? chipRow.fileUrl : ""
                       asynchronous: true
                       fillMode: Image.PreserveAspectFit
+                      // iPhone photos store rotation as an EXIF tag, not in
+                      // the pixels (sips keeps the tag when it converts HEIC);
+                      // Qt ignores it unless asked, so portraits came out on
+                      // their side. implicitWidth/Height follow the transform.
+                      autoTransform: true
                       // bound the DECODE in BOTH axes, not just the paint — a
                       // 12MP photo (or a 100×100000 sliver) must not cost
                       // 50 MB of texture (Codex review points 19 and #3)
@@ -1713,6 +1719,7 @@ FocusScope {
                         source: linkCard.imgUrl
                         asynchronous: true
                         fillMode: Image.PreserveAspectCrop
+                        autoTransform: true
                         sourceSize.width: 800
                         sourceSize.height: 800
                       }

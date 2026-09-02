@@ -142,6 +142,11 @@ what it is handed. Keep it that way.
   re-maps one), and focus is fired via `Quickshell.execDetached` — a
   `Process` silently ignores `running=true` on the zombie. Deploy with a
   restart, never rely on hot-reload for anything IPC.
+- **Every `Image` sets `autoTransform: true`.** iPhone photos carry rotation
+  as an EXIF tag; `sips` preserves it when converting HEIC, and Qt ignores it
+  by default — a portrait photo renders on its side (4032×3024 pixels tagged
+  "Rotate 90 CW"). With the flag, implicit size follows the rotation and the
+  `sourceSize` decode bound still applies. Verified on Qt 6.11.
 - **Never let one delegate's implicit width exceed the panel.** A single
   RowLayout of N attachment chips summed implicit widths and silently
   stretched the whole conversation column to 2× panel width — every

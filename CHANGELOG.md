@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **iPhone photos rendered on their side.** A camera photo stores its
+  rotation as an EXIF orientation tag, and `sips` keeps that tag when the
+  bridge converts HEIC to JPEG — so the pixels arrive landscape with a
+  "rotate 90°" note Qt only honours on request. Every `Image` in the
+  conversation (inline attachments, link-card previews, avatars) now sets
+  `autoTransform: true`; `implicitWidth`/`implicitHeight` follow the
+  rotated shape, so the bubble sizes correctly too. (Adam Gamble)
+
 ## 2.2.2 — 2026-09-02
 
 - **Group sends failed with -1728 on Macs that keep one chat row per
