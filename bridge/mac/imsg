@@ -637,10 +637,24 @@ def cmd_groups(con, args):
                  WHERE cmj.chat_id = c.ROWID) AS last_date
         FROM chat c
         WHERE c.style = 43
-        ORDER BY last_date DESC
-        LIMIT ?""",
-        (args.n,),
+        ORDER BY last_date DESC""",
     ).fetchall()
+    # macOS keeps one `chat` row per service, so one conversation that moved
+    # from iMessage to SMS to RCS leaves several rows sharing a chat_identifier.
+    # The rows it no longer uses hold zero messages, and AppleScript cannot
+    # resolve one of those: `send ... to chat id "SMS;+;chat<digits>"`
+    # fails with -1728, "Can't get chat id". Callers key on chat_identifier and
+    # let the last row win, so an empty row can replace the live one.
+    # Rows arrive newest first and SQLite sorts a NULL last_date last, so the
+    # first row for an identifier is the live one. Keep it and drop the rest.
+    seen = set()
+    live = []
+    for r in rows:
+        if r["chat_identifier"] in seen:
+            continue
+        seen.add(r["chat_identifier"])
+        live.append(r)
+    rows = live[: args.n]
     if args.json:
         print(
             json.dumps(
