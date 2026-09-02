@@ -33,6 +33,13 @@ describe("QML safety invariants", () => {
     expect(panel).not.toContain('["--yes", "--", text]');
   });
 
+  test("browser-focus jq is passed outside the QML shell string", () => {
+    expect(panel).toContain("try .[0].address catch empty");
+    expect(panel).toContain('jq -r --arg b "$b" "$2"');
+    expect(panel).not.toContain('.class // ""');
+    expect(panel).not.toContain('.address // empty');
+  });
+
   test("read marks are queued and only applied after a successful load", () => {
     expect(widget).toContain("property var refreshQueue: []");
     expect(widget).not.toContain("property var queued: null");

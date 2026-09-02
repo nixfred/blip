@@ -285,9 +285,10 @@ FocusScope {
     // .desktop name (brave-browser, firefox, chromium, google-chrome…).
     Quickshell.execDetached(["sh", "-c",
       'xdg-open "$1" >/dev/null 2>&1; b=$(xdg-settings get default-web-browser 2>/dev/null | sed "s/\\.desktop$//" | tr "[:upper:]" "[:lower:]"); [ -n "$b" ] || exit 0; ' +
-      'for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do a=$(hyprctl clients -j 2>/dev/null | jq -r --arg b "$b" '[.[] | select(((.class // "") | ascii_downcase | contains($b)) or ((.initialClass // "") | ascii_downcase | contains($b)))] | sort_by(.focusHistoryID) | .[0].address // empty'); ' +
+      'for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do a=$(hyprctl clients -j 2>/dev/null | jq -r --arg b "$b" "$2"); ' +
       '[ -n "$a" ] && { hyprctl dispatch "hl.dsp.focus({ window = \\"address:$a\\" })" >/dev/null 2>&1; exit 0; }; sleep 0.2; done',
-      "blip", u])
+      "blip", u,
+      "[.[] | select(((.class? | strings) | ascii_downcase | contains($b)) or ((.initialClass? | strings) | ascii_downcase | contains($b)))] | sort_by(.focusHistoryID) | try .[0].address catch empty"])
   }
 
 
