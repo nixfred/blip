@@ -1789,14 +1789,12 @@ FocusScope {
 
                     // iMessage squares off the corner nearest the sender on the
                     // last bubble of a run — the "tail" without drawing a tail.
-                    Rectangle {
-                      visible: modelData.groupEnd === true
-                      width: Style.space(16); height: Style.space(16)
-                      color: bubble.color
-                      anchors.bottom: parent.bottom
-                      anchors.right: bubbleRow.mine ? parent.right : undefined
-                      anchors.left: bubbleRow.mine ? undefined : parent.left
-                    }
+                    // Per-corner radius (Qt 6.7+), NOT a second Rectangle over
+                    // the corner: theirsFill is translucent, and stacking two
+                    // copies of it double-alphas the overlap into a visibly
+                    // lighter square (seen on every received run-ending bubble).
+                    bottomLeftRadius: modelData.groupEnd === true && !bubbleRow.mine ? 0 : radius
+                    bottomRightRadius: modelData.groupEnd === true && bubbleRow.mine ? 0 : radius
 
                     // TextEdit, not Text: read-only but selectable, so a message
                     // can be highlighted and Ctrl+C'd like any other text.
