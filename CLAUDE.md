@@ -142,11 +142,16 @@ what it is handed. Keep it that way.
   re-maps one), and focus is fired via `Quickshell.execDetached` — a
   `Process` silently ignores `running=true` on the zombie. Deploy with a
   restart, never rely on hot-reload for anything IPC.
-- **Every `Image` sets `autoTransform: true`.** iPhone photos carry rotation
-  as an EXIF tag; `sips` preserves it when converting HEIC, and Qt ignores it
-  by default — a portrait photo renders on its side (4032×3024 pixels tagged
-  "Rotate 90 CW"). With the flag, implicit size follows the rotation and the
-  `sourceSize` decode bound still applies. Verified on Qt 6.11.
+- **EXIF orientation is baked at fetch time, and every `Image` sets
+  `autoTransform: true`.** iPhone photos carry rotation as an EXIF tag;
+  `sips` preserves it when converting HEIC, Qt ignores it by default, and imv
+  (Omarchy's default viewer, what `xdg-open` launches) ignores it always —
+  a portrait photo rendered on its side in both places (4032×3024 pixels
+  tagged "Rotate 90 CW"). `fetch.ts` rotates the JPEG losslessly with
+  `jpegtran -copy icc` (libjpeg-turbo, a hard dependency of Qt) before
+  caching, dropping the EXIF block so nothing double-rotates; the QML flag
+  covers files cached before that, and the fall-back when jpegtran fails.
+  Never move this to the Mac side: `sips` cannot auto-orient.
 - **Never let one delegate's implicit width exceed the panel.** A single
   RowLayout of N attachment chips summed implicit widths and silently
   stretched the whole conversation column to 2× panel width — every

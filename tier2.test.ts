@@ -1,11 +1,46 @@
 import { describe, expect, test } from "bun:test";
 
-import { cacheFileName, fetchAttachment, lruEvictions, sanitizeName, wantsJpeg } from "./fetch";
+import { CACHE_DIR, bakeOrientation, cacheFileName, exifOrientation, fetchAttachment, jpegtranArgs, lruEvictions, sanitizeName, wantsJpeg } from "./fetch";
 import { extFor, pickImageType } from "./paste";
 import { resolveTarget, sendFile } from "./send-file";
 import { linkHost, linkify, normalizeLink, selectThread } from "./thread";
 import { AVATAR_DIR, avatarKey, fetchAvatar } from "./avatar";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+
+// A real 16×8 baseline JPEG (ImageMagick, -strip): no APP1 at all.
+const TINY_JPEG = Buffer.from(
+  "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABsSFBcUERsXFhceHBsgKEIrKCUlKFE6PTBCYFVlZF9VXVtqeJmBanGQc1tdhbWGkJ6jq62rZ4C8ybqmx5moq6T/2wBDARweHigjKE4rK06kbl1upKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKT/wAARCAAIABADASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAT/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAABAb/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCAANSP/9k=",
+  "base64",
+);
+
+/** Insert an APP1 Exif segment carrying just an Orientation tag after SOI. */
+function withExif(jpeg: Buffer, orientation: number, littleEndian = true): Buffer {
+  const tiff = Buffer.alloc(8 + 2 + 12 + 4);
+  const w16 = (o: number, v: number) => (littleEndian ? tiff.writeUInt16LE(v, o) : tiff.writeUInt16BE(v, o));
+  const w32 = (o: number, v: number) => (littleEndian ? tiff.writeUInt32LE(v, o) : tiff.writeUInt32BE(v, o));
+  tiff.write(littleEndian ? "II" : "MM", 0, "latin1");
+  w16(2, 0x2a); w32(4, 8);          // IFD0 at offset 8
+  w16(8, 1);                        // one entry
+  w16(10, 0x0112); w16(12, 3); w32(14, 1); w16(18, orientation); w16(20, 0);
+  w32(22, 0);                       // no IFD1
+  const body = Buffer.concat([Buffer.from("Exif\0\0", "latin1"), tiff]);
+  const seg = Buffer.alloc(4);
+  seg[0] = 0xff; seg[1] = 0xe1; seg.writeUInt16BE(body.length + 2, 2);
+  return Buffer.concat([jpeg.subarray(0, 2), seg, body, jpeg.subarray(2)]);
+}
+
+/** Width × height from the SOF0/SOF2 marker. */
+function sofSize(b: Buffer): [number, number] {
+  for (let p = 2; p + 9 < b.length; ) {
+    const m = b[p + 1];
+    const len = b.readUInt16BE(p + 2);
+    if (m === 0xc0 || m === 0xc2) return [b.readUInt16BE(p + 7), b.readUInt16BE(p + 5)];
+    p += 2 + len;
+  }
+  return [0, 0];
+}
 
 describe("fetch cache", () => {
   test("HEIC wants a Mac-side JPEG conversion, others stream raw", () => {
@@ -61,6 +96,67 @@ describe("fetch cache", () => {
     const r = fetchAttachment("123456789012345", "x.png", "image/png", runner);
     expect(r.ok).toBe(false);
     expect(r.online).toBe(false);
+  });
+});
+
+describe("EXIF orientation is baked into cached JPEGs", () => {
+  test("orientation is read from APP1 in either byte order; anything else is 1", () => {
+    expect(exifOrientation(TINY_JPEG)).toBe(1);
+    expect(exifOrientation(withExif(TINY_JPEG, 6))).toBe(6);
+    expect(exifOrientation(withExif(TINY_JPEG, 8, false))).toBe(8);
+    expect(exifOrientation(withExif(TINY_JPEG, 9))).toBe(1);        // out of range
+    expect(exifOrientation(withExif(TINY_JPEG, 6).subarray(0, 20))).toBe(1);  // truncated
+    expect(exifOrientation(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]))).toBe(1);  // PNG
+    expect(exifOrientation(Buffer.alloc(0))).toBe(1);
+  });
+
+  test("each orientation maps to its lossless jpegtran transform", () => {
+    expect(jpegtranArgs(1)).toBeNull();
+    expect(jpegtranArgs(3)).toEqual(["-rotate", "180"]);
+    expect(jpegtranArgs(6)).toEqual(["-rotate", "90"]);   // iPhone portrait
+    expect(jpegtranArgs(8)).toEqual(["-rotate", "270"]);
+    expect(jpegtranArgs(5)).toEqual(["-transpose"]);
+    expect(jpegtranArgs(0)).toBeNull();
+  });
+
+  test("upright and non-JPEG bytes never spawn jpegtran", () => {
+    let spawned = 0;
+    const runner = (() => { spawned++; return { status: 0, stdout: Buffer.alloc(0) }; }) as never;
+    expect(bakeOrientation(TINY_JPEG, runner)).toBe(TINY_JPEG);
+    expect(bakeOrientation(Buffer.from("not a jpeg"), runner)).toEqual(Buffer.from("not a jpeg"));
+    expect(spawned).toBe(0);
+  });
+
+  test("a fetched portrait photo is cached rotated, ICC kept, EXIF dropped", () => {
+    const tagged = withExif(TINY_JPEG, 6);
+    const rotated = Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.from("ROTATED")]);
+    let seen: { args: string[]; input: Buffer } | null = null;
+    const runner = ((cmd: string, args: string[], opts: { input?: Buffer }) => {
+      if (cmd === "jpegtran") { seen = { args, input: opts.input! }; return { status: 0, stdout: rotated, stderr: "" }; }
+      return { status: 0, stdout: tagged, stderr: "" };
+    }) as never;
+    const r = fetchAttachment("123456789012347", "IMG_1.heic", "image/heic", runner);
+    expect(r.ok).toBe(true);
+    expect(seen!.args).toEqual(["-rotate", "90", "-trim", "-copy", "icc"]);
+    expect(seen!.input.equals(tagged)).toBe(true);           // bytes on stdin, never argv
+    expect(readFileSync(join(CACHE_DIR, cacheFileName("123456789012347", "IMG_1.heic", "image/heic"))).equals(rotated)).toBe(true);
+  });
+
+  test("when jpegtran is missing or fails, the original bytes are cached", () => {
+    const tagged = withExif(TINY_JPEG, 6);
+    const runner = ((cmd: string) =>
+      cmd === "jpegtran" ? { status: null, stdout: null, error: new Error("ENOENT") } : { status: 0, stdout: tagged, stderr: "" }) as never;
+    const r = fetchAttachment("123456789012348", "IMG_2.heic", "image/heic", runner);
+    expect(r.ok).toBe(true);
+    expect(readFileSync(r.path).equals(tagged)).toBe(true);
+  });
+
+  const haveJpegtran = spawnSync("jpegtran", ["-help"]).status !== null;
+  test.skipIf(!haveJpegtran)("real jpegtran turns a tagged 16×8 into an upright 8×16", () => {
+    const out = bakeOrientation(withExif(TINY_JPEG, 6));
+    expect(sofSize(withExif(TINY_JPEG, 6))).toEqual([16, 8]);
+    expect(sofSize(out)).toEqual([8, 16]);
+    expect(exifOrientation(out)).toBe(1);                    // tag gone: no double rotation in Qt
   });
 });
 

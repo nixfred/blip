@@ -98,6 +98,95 @@ function evict(keep: string): void {
   }
 }
 
+/** EXIF orientation (1–8) of a JPEG, or 1 when absent or unparseable. Walks
+ *  the marker chain only as far as the first APP1 Exif segment and never
+ *  decodes pixels. Pure, bounds-checked at every read. */
+export function exifOrientation(b: Buffer): number {
+  if (b.length < 4 || b[0] !== 0xff || b[1] !== 0xd8) return 1;
+  let p = 2;
+  while (p + 4 <= b.length) {
+    if (b[p] !== 0xff) return 1;
+    const marker = b[p + 1];
+    if (marker === 0xff) { p += 1; continue; }                       // fill byte
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) { p += 2; continue; }  // standalone
+    if (marker === 0xda || marker === 0xd9) return 1;                // scan data / EOI: no EXIF ahead
+    const len = b.readUInt16BE(p + 2);
+    if (len < 2 || p + 2 + len > b.length) return 1;
+    if (marker === 0xe1 && len >= 16 && b.toString("latin1", p + 4, p + 10) === "Exif\0\0") {
+      return tiffOrientation(b.subarray(p + 10, p + 2 + len));
+    }
+    p += 2 + len;
+  }
+  return 1;
+}
+
+function tiffOrientation(t: Buffer): number {
+  if (t.length < 8) return 1;
+  const bo = t.toString("latin1", 0, 2);
+  const le = bo === "II";
+  if (!le && bo !== "MM") return 1;
+  const u16 = (o: number) => (le ? t.readUInt16LE(o) : t.readUInt16BE(o));
+  const u32 = (o: number) => (le ? t.readUInt32LE(o) : t.readUInt32BE(o));
+  if (u16(2) !== 0x2a) return 1;
+  const ifd = u32(4);
+  if (ifd + 2 > t.length) return 1;
+  const n = u16(ifd);
+  for (let i = 0; i < n; i++) {
+    const e = ifd + 2 + i * 12;
+    if (e + 12 > t.length) return 1;
+    if (u16(e) === 0x0112) {
+      if (u16(e + 2) !== 3) return 1;   // must be a SHORT
+      const v = u16(e + 8);
+      return v >= 1 && v <= 8 ? v : 1;
+    }
+  }
+  return 1;
+}
+
+/** The lossless jpegtran operation that undoes an EXIF orientation, or null
+ *  when the image is already upright (1) or the tag is nonsense. */
+export function jpegtranArgs(orientation: number): string[] | null {
+  switch (orientation) {
+    case 2: return ["-flip", "horizontal"];
+    case 3: return ["-rotate", "180"];
+    case 4: return ["-flip", "vertical"];
+    case 5: return ["-transpose"];
+    case 6: return ["-rotate", "90"];
+    case 7: return ["-transverse"];
+    case 8: return ["-rotate", "270"];
+    default: return null;
+  }
+}
+
+/** Bake an EXIF orientation into the pixels so the cached file is upright in
+ *  EVERY consumer, not just Qt: a photo taken in portrait arrives from the
+ *  Mac as landscape pixels plus a "rotate 90" tag (sips keeps the tag when
+ *  it converts HEIC), and imv — Omarchy's default viewer — ignores EXIF.
+ *  jpegtran (libjpeg-turbo, a hard dependency of Qt so always installed) does
+ *  the transform losslessly on stdin→stdout; `-copy icc` keeps the colour
+ *  profile (iPhone photos are Display P3) and drops the EXIF block, so no
+ *  stale orientation tag survives to double-rotate in Qt. The same library
+ *  decodes these bytes in the panel anyway, so this adds no attack surface.
+ *  Any failure (no jpegtran, bad stream) keeps the original bytes — the
+ *  panel's autoTransform still shows those upright. */
+export function bakeOrientation(bytes: Buffer, runner = spawnSync): Buffer {
+  const op = jpegtranArgs(exifOrientation(bytes));
+  if (!op) return bytes;
+  let res: { status: number | null; stdout: Buffer | string };
+  try {
+    res = runner("jpegtran", [...op, "-trim", "-copy", "icc"], {
+      input: bytes,
+      timeout: 30000,
+      maxBuffer: FETCH_MAX_BYTES + (1 << 20),
+    });
+  } catch {
+    return bytes;
+  }
+  const out = res.stdout as Buffer;
+  if (res.status !== 0 || !out || out.length < 4 || out[0] !== 0xff || out[1] !== 0xd8) return bytes;
+  return out;
+}
+
 export interface FetchResult {
   ok: boolean;
   online: boolean;
@@ -140,9 +229,10 @@ export function fetchAttachment(
     const err = (res.stderr || "").toString().trim().split("\n")[0] || `imsg exit ${res.status}`;
     return fail(err);
   }
-  const bytes = res.stdout as Buffer;
-  if (!bytes || bytes.length === 0) return fail("empty attachment stream");
-  if (bytes.length > Math.min(maxBytes, FETCH_MAX_BYTES)) return fail("attachment exceeds the fetch ceiling");
+  const raw = res.stdout as Buffer;
+  if (!raw || raw.length === 0) return fail("empty attachment stream");
+  if (raw.length > Math.min(maxBytes, FETCH_MAX_BYTES)) return fail("attachment exceeds the fetch ceiling");
+  const bytes = bakeOrientation(raw, runner);
 
   // tmp + fsync + rename: a killed fetch must never leave a cache hit that
   // looks complete.

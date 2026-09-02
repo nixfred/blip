@@ -2,13 +2,16 @@
 
 ## Unreleased
 
-- **iPhone photos rendered on their side.** A camera photo stores its
-  rotation as an EXIF orientation tag, and `sips` keeps that tag when the
-  bridge converts HEIC to JPEG — so the pixels arrive landscape with a
-  "rotate 90°" note Qt only honours on request. Every `Image` in the
-  conversation (inline attachments, link-card previews, avatars) now sets
-  `autoTransform: true`; `implicitWidth`/`implicitHeight` follow the
-  rotated shape, so the bubble sizes correctly too. (Adam Gamble)
+- **iPhone photos rendered on their side — inline AND in the viewer.** A
+  camera photo stores its rotation as an EXIF orientation tag, and `sips`
+  keeps that tag when the bridge converts HEIC to JPEG — so the pixels
+  arrive landscape with a "rotate 90°" note that Qt only honours on request
+  and imv (Omarchy's default viewer) never does. Two fixes: every `Image` in
+  the conversation sets `autoTransform: true`, and `fetch.ts` now bakes the
+  orientation into the cached JPEG losslessly with `jpegtran` (libjpeg-turbo,
+  already on every Qt box) — colour profile kept, EXIF dropped so nothing
+  double-rotates. Files cached before this release stay as they were; clear
+  `~/.cache/blip/att` to re-fetch them upright. (Adam Gamble)
 
 ## 2.2.2 — 2026-09-02
 
