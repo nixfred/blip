@@ -14,7 +14,8 @@
  *   bun collector.ts            # poll: shallow window, badge + toasts
  *   bun collector.ts --deep     # panel open: wider window, full thread list
  *   bun collector.ts --mark-read        # clear every dot (right-click)
- *   bun collector.ts --read <chat>      # clear one thread's dot (opened it)
+ *   bun collector.ts --read <chat>      # clear one thread's dot (opened it);
+ *                                       # that chat is also skipped for toasts
  */
 
 import { homedir } from "node:os";
@@ -27,7 +28,7 @@ const HOME = process.env.HOME ?? homedir();
 
 /** Watermark + toast dedupe. ~/.local/state is deliberate: never inside a repo. */
 export const STATE_PATH = `${HOME}/.local/state/blip/state.json`;
-/** Handles whose inbound messages are allowed to raise a desktop toast. */
+/** Optional. When set, only these handles raise a desktop toast; empty/missing = every inbound. */
 export const ALLOWLIST_PATH = `${HOME}/.config/blip/allowlist.json`;
 
 /**
@@ -109,6 +110,30 @@ export interface Toast {
   /** Opaque digest persisted for dedupe; never contains message text. */
   key: string;
 }
+
+/**
+ * Who gets a desktop notification.
+ *
+ *   all    — every new inbound (the default when allowlist.json is missing)
+ *   allow  — only listed chats/handles; empty list = nobody
+ *   off    — never interrupt (badge still counts)
+ */
+export type ToastMode = "all" | "allow" | "off";
+
+export interface ToastPolicy {
+  mode: ToastMode;
+  allow: string[];
+}
+
+export const TOAST_ALL: ToastPolicy = { mode: "all", allow: [] };
+export const TOAST_OFF: ToastPolicy = { mode: "off", allow: [] };
+
+/** Newest toasts kept from one collector run; matches the QML queue cap. */
+export const TOAST_BATCH_CAP = 20;
+/** notify-send body cap, including the ellipsis. */
+export const TOAST_BODY_MAX = 220;
+/** How long the daemon should show a Blip toast, in milliseconds. */
+export const TOAST_EXPIRE_MS = 15000;
 
 /**
  * Two marks, deliberately. Collapsing them into one is a bug: the poll
@@ -222,12 +247,55 @@ export function saveState(state: BlipState, path = STATE_PATH): boolean {
 }
 
 export function loadAllowlist(path = ALLOWLIST_PATH): string[] {
+  return loadToastPolicy(path).allow;
+}
+
+function cleanAllow(list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((h): h is string => typeof h === "string")
+    .map((h) => h.trim())
+    .filter((h) => h.length > 0);
+}
+
+/**
+ * Parse ~/.config/blip/allowlist.json.
+ *
+ *   missing file                         → all (new default: don't miss people)
+ *   { "mode": "off" }                    → silence
+ *   { "mode": "all" }                    → every inbound
+ *   { "mode": "allow", "allow": [...] }  → those senders only (empty = nobody)
+ *   { "allow": ["+1…"] } / ["+1…"]       → legacy populated list = allow
+ *   { "allow": [] } / []                 → legacy empty list = off
+ *   corrupt JSON                         → off (fail closed, don't spam)
+ */
+export function parseToastPolicy(raw: unknown): ToastPolicy {
+  if (raw == null) return { ...TOAST_ALL };
+  if (Array.isArray(raw)) {
+    const allow = cleanAllow(raw);
+    return allow.length > 0 ? { mode: "allow", allow } : { ...TOAST_OFF };
+  }
+  if (typeof raw !== "object") return { ...TOAST_ALL };
+  const obj = raw as Record<string, unknown>;
+  const allow = cleanAllow(obj.allow);
+  const mode = typeof obj.mode === "string" ? obj.mode.trim().toLowerCase() : "";
+  if (mode === "off") return { mode: "off", allow };
+  if (mode === "all") return { mode: "all", allow };
+  if (mode === "allow") return { mode: "allow", allow };
+  if (Array.isArray(obj.allow)) {
+    return allow.length > 0 ? { mode: "allow", allow } : { ...TOAST_OFF };
+  }
+  return { ...TOAST_ALL };
+}
+
+export function loadToastPolicy(path = ALLOWLIST_PATH): ToastPolicy {
   try {
-    const raw = JSON.parse(readFileSync(path, "utf8"));
-    const list = Array.isArray(raw) ? raw : raw?.allow;
-    return Array.isArray(list) ? list.filter((h: unknown) => typeof h === "string") : [];
-  } catch {
-    return [];
+    return parseToastPolicy(JSON.parse(readFileSync(path, "utf8")));
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    // Missing = never configured → notify everyone. Anything else (corrupt,
+    // EACCES) fails closed so a half-written file cannot spam or go silent-all.
+    return code === "ENOENT" ? { ...TOAST_ALL } : { ...TOAST_OFF };
   }
 }
 
@@ -409,35 +477,130 @@ export function toastKey(m: ImsgMessage): string {
 }
 
 /**
+ * Fold a handle for allowlist comparison.
+ *
+ * Emails are case-insensitive. Phone-shaped values compare on the last
+ * 10 digits so "+15551234567", "5551234567", and "(555) 123-4567" agree.
+ * Group ids and short codes are exact (after trim/casefold) — extracting
+ * digits from a hex GUID would false-match a phone (audit #8 territory).
+ */
+export function foldHandle(s: string): string {
+  const t = String(s || "").trim();
+  if (!t) return "";
+  if (t.includes("@")) return t.toLowerCase();
+  if (/^\+?[0-9\s().-]+$/.test(t)) {
+    const digits = t.replace(/\D/g, "");
+    if (digits.length >= 10) return digits.slice(-10);
+    return digits;
+  }
+  return t.toLowerCase();
+}
+
+/** True when `chat` or `handle` is on the allowlist. */
+export function allowlisted(chat: string, handle: string, allow: string[]): boolean {
+  if (allow.length === 0) return false;
+  const hay = [chat, handle].map((s) => String(s || "").trim()).filter((s) => s.length > 0);
+  for (const entry of allow) {
+    const e = entry.trim();
+    if (!e) continue;
+    const folded = foldHandle(e);
+    for (const h of hay) {
+      if (h === e) return true;
+      if (folded !== "" && foldHandle(h) === folded) return true;
+    }
+  }
+  return false;
+}
+
+/** Preview shown on the toast. Never empty; attachment-only rows say "New message". */
+export function toastPreview(text: string | null | undefined): string {
+  const raw = String(text ?? "").replace(/\uFFFC/g, "").replace(/\s+/g, " ").trim();
+  if (!raw) return "New message";
+  if (raw.length > TOAST_BODY_MAX) return raw.slice(0, TOAST_BODY_MAX - 1) + "…";
+  return raw;
+}
+
+export function toastName(m: ImsgMessage, groups?: Record<string, GroupInfo>): string {
+  const who = (m.name && String(m.name).trim()) || m.handle || chatKey(m) || "iMessage";
+  const chat = chatKey(m);
+  const group = groups && isGroupChat(chat) ? groups[chat] : undefined;
+  if (group?.name) return `${who} · ${group.name}`;
+  return who;
+}
+
+/**
+ * Canonical notify-send argv. QML renders this same flag set; ui.test.ts
+ * locks the two together. `--` is required: a name or body starting with
+ * `-` is data, not a flag (CLAUDE.md invariant).
+ */
+export function notifySendArgv(t: Pick<Toast, "chat" | "name" | "text">): string[] {
+  return [
+    "notify-send",
+    "--app-name=Blip",
+    "--icon=mail-message-new",
+    "--urgency=normal",
+    "--category=im.received",
+    `--expire-time=${TOAST_EXPIRE_MS}`,
+    "--wait",
+    "--action=default=Open",
+    "--",
+    t.name || t.chat || "iMessage",
+    toastPreview(t.text),
+  ];
+}
+
+export interface SelectToastsOpts {
+  /** Conversation the user is looking at right now — they did not miss it. */
+  skipChats?: Iterable<string>;
+  /** Self-thread ids; the from_me=false twin must not raise a toast. */
+  selfChats?: Iterable<string>;
+  groups?: Record<string, GroupInfo>;
+}
+
+/**
  * Pick the messages that earn a desktop notification.
  *
- * Gated three ways, because chat.db is mostly bank alerts and 2FA codes:
- *   1. inbound only, and strictly newer than the watermark
- *   2. sender (chat OR handle) is on the allowlist
- *   3. not already toasted — this is what stops the self-thread echo storm,
- *      where the user's own sent replies come back as from_me=false
+ *   1. policy.mode is not off
+ *   2. inbound only, strictly newer than the watermark (never the first-run backlog)
+ *   3. not the open conversation, not the self-thread
+ *   4. if mode=allow, sender (chat OR handle) matches the allowlist
+ *   5. not already toasted — stops the self-thread echo storm
+ *   6. newest TOAST_BATCH_CAP only — a catch-up after sleep must not dump 150 cards
  */
 export function selectToasts(
   msgs: ImsgMessage[],
   watermark: string,
-  allow: string[],
+  policy: ToastPolicy,
   toasted: string[],
+  opts: SelectToastsOpts = {},
 ): Toast[] {
   if (!watermark) return [];          // never toast the backlog on first run
-  const allowed = new Set(allow);
+  if (policy.mode === "off") return [];
+  const skip = new Set(opts.skipChats ?? []);
+  const self = new Set(opts.selfChats ?? []);
   const seen = new Set(toasted);
   const out: Toast[] = [];
 
   for (const m of msgs) {
     if (m.from_me) continue;
     if (m.ts <= watermark) continue;
-    if (!allowed.has(chatKey(m)) && !allowed.has(m.handle)) continue;
+    const chat = chatKey(m);
+    if (skip.has(chat) || self.has(chat)) continue;
+    if (policy.mode === "allow" && !allowlisted(chat, m.handle, policy.allow)) continue;
     const key = toastKey(m);
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ chat: chatKey(m), name: m.name ?? m.handle, text: m.text, ts: m.ts, key });
+    out.push({
+      chat,
+      name: toastName(m, opts.groups),
+      text: toastPreview(m.text),
+      ts: m.ts,
+      key,
+    });
   }
-  return out;
+
+  out.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  return out.length > TOAST_BATCH_CAP ? out.slice(-TOAST_BATCH_CAP) : out;
 }
 
 /** How far back a delivery failure is still worth interrupting for. */
@@ -827,7 +990,11 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   // complete list in memory (it skips identical assignments anyway).
   const chats = deep ? fetchChats() : null;
   const threads = chats ? mergeChats(windowThreads, chats, groups, exactCounts) : windowThreads;
-  const toast = selectToasts(msgs, state.watermark, loadAllowlist(), state.toasted);
+  const toast = selectToasts(msgs, state.watermark, loadToastPolicy(), state.toasted, {
+    skipChats: readChat ? [readChat] : [],
+    selfChats,
+    groups,
+  });
   const failures = selectFailures(fetched.msgs, state.toasted, nowTs);
   const unread = Object.values(exactCounts).reduce((n, count) => n + count, 0);
 

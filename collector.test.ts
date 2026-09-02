@@ -15,14 +15,27 @@ import {
   displayName,
   fetchMessages,
   loadAllowlist,
+  loadToastPolicy,
+  parseToastPolicy,
   loadState,
   maxTs,
   saveState,
   selectToasts,
   toastKey,
+  toastPreview,
+  toastName,
+  foldHandle,
+  allowlisted,
+  notifySendArgv,
+  TOAST_ALL,
+  TOAST_OFF,
+  TOAST_BATCH_CAP,
+  TOAST_BODY_MAX,
+  TOAST_EXPIRE_MS,
   unreadCounts,
   unreadOldest,
   type ImsgMessage,
+  type ToastPolicy,
 } from "./collector";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "blip-test-"));
@@ -253,7 +266,7 @@ describe("displayName", () => {
 });
 
 describe("selectToasts", () => {
-  const allow = ["+15550100002"];
+  const allow: ToastPolicy = { mode: "allow", allow: ["+15550100002"] };
 
   test("a null-chat toast carries the handle, never the string null", () => {
     const out = selectToasts(
@@ -311,7 +324,12 @@ describe("selectToasts", () => {
     // In the self-thread, the user's sent replies come back as from_me=false.
     // Without this dedupe the loop would notify on its own output forever.
     const m = msg({ chat: "+15550100001", handle: "+15550100001", ts: "2026-08-30 11:00:00", text: "echo" });
-    const out = selectToasts([m], "2026-08-30 10:00:00", ["+15550100001"], [toastKey(m)]);
+    const out = selectToasts(
+      [m],
+      "2026-08-30 10:00:00",
+      { mode: "allow", allow: ["+15550100001"] },
+      [toastKey(m)],
+    );
     expect(out).toEqual([]);
   });
 
@@ -333,20 +351,232 @@ describe("selectToasts", () => {
     const out = selectToasts(
       [msg({ chat: "053856bb0d9a40e392db59eace1c56d1", handle: "+15550100004", ts: "2026-08-30 11:00:00" })],
       "2026-08-30 10:00:00",
-      ["+15550100004"],
+      { mode: "allow", allow: ["+15550100004"] },
       [],
     );
     expect(out).toHaveLength(1);
   });
 
-  test("an empty allowlist toasts nothing", () => {
+  test("mode=all toasts every inbound, including short codes", () => {
     const out = selectToasts(
-      [msg({ ts: "2026-08-30 11:00:00" })],
+      [msg({ chat: "878478", handle: "878478", name: "Bank", ts: "2026-08-30 11:00:00", text: "code" })],
       "2026-08-30 10:00:00",
+      TOAST_ALL,
       [],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]!.name).toBe("Bank");
+    expect(out[0]!.text).toBe("code");
+  });
+
+  test("mode=all still skips outbound and the backlog", () => {
+    const inboundOld = msg({ ts: "2026-08-30 09:00:00" });
+    const outbound = msg({ from_me: true, ts: "2026-08-30 11:00:00" });
+    expect(selectToasts([inboundOld, outbound], "2026-08-30 10:00:00", TOAST_ALL, [])).toEqual([]);
+  });
+
+  test("mode=off toasts nothing, even allowlisted senders", () => {
+    const out = selectToasts(
+      [msg({ chat: "+15550100002", handle: "+15550100002", ts: "2026-08-30 11:00:00" })],
+      "2026-08-30 10:00:00",
+      TOAST_OFF,
       [],
     );
     expect(out).toEqual([]);
+  });
+
+  test("mode=allow with an empty list toasts nobody", () => {
+    const out = selectToasts(
+      [msg({ ts: "2026-08-30 11:00:00" })],
+      "2026-08-30 10:00:00",
+      { mode: "allow", allow: [] },
+      [],
+    );
+    expect(out).toEqual([]);
+  });
+
+  test("does not toast the conversation the user is currently reading", () => {
+    const open = msg({ chat: "+15550100002", handle: "+15550100002", ts: "2026-08-30 11:00:00" });
+    const other = msg({ chat: "+15550100009", handle: "+15550100009", ts: "2026-08-30 11:00:01" });
+    const out = selectToasts([open, other], "2026-08-30 10:00:00", TOAST_ALL, [], {
+      skipChats: ["+15550100002"],
+    });
+    expect(out.map((t) => t.chat)).toEqual(["+15550100009"]);
+  });
+
+  test("does not toast the self-thread", () => {
+    const mine = msg({ chat: "+15550100001", handle: "+15550100001", ts: "2026-08-30 11:00:00" });
+    const out = selectToasts([mine], "2026-08-30 10:00:00", TOAST_ALL, [], {
+      selfChats: ["+15550100001"],
+    });
+    expect(out).toEqual([]);
+  });
+
+  test("a catch-up batch keeps the newest TOAST_BATCH_CAP and drops older ones", () => {
+    const msgs = Array.from({ length: TOAST_BATCH_CAP + 7 }, (_, i) =>
+      msg({
+        chat: `+15550100${String(100 + i).slice(-3)}`,
+        handle: `+15550100${String(100 + i).slice(-3)}`,
+        ts: `2026-08-30 11:${String(i).padStart(2, "0")}:00`,
+        text: `n${i}`,
+      }),
+    );
+    const out = selectToasts(msgs, "2026-08-30 10:00:00", TOAST_ALL, []);
+    expect(out).toHaveLength(TOAST_BATCH_CAP);
+    expect(out[0]!.text).toBe("n7");
+    expect(out[out.length - 1]!.text).toBe(`n${TOAST_BATCH_CAP + 6}`);
+  });
+
+  test("phone formatting variants match an E.164 allowlist entry", () => {
+    const out = selectToasts(
+      [msg({ chat: "5550100002", handle: "(555) 010-0002", ts: "2026-08-30 11:00:00" })],
+      "2026-08-30 10:00:00",
+      { mode: "allow", allow: ["+1 555 010 0002"] },
+      [],
+    );
+    expect(out).toHaveLength(1);
+  });
+
+  test("email allowlist entries match case-insensitively", () => {
+    const out = selectToasts(
+      [msg({ chat: "them@icloud.com", handle: "Them@iCloud.com", ts: "2026-08-30 11:00:00" })],
+      "2026-08-30 10:00:00",
+      { mode: "allow", allow: ["THEM@icloud.com"] },
+      [],
+    );
+    expect(out).toHaveLength(1);
+  });
+
+  test("a hex group id is not folded into a phone number", () => {
+    // 32 hex chars contain plenty of digits; extracting them must not
+    // satisfy an allowlist entry for a real person.
+    const guid = "a5550100002aaaaaaaaaaaaaaaaaaaaa";
+    const out = selectToasts(
+      [msg({ chat: guid, handle: "ALICE", ts: "2026-08-30 11:00:00" })],
+      "2026-08-30 10:00:00",
+      { mode: "allow", allow: ["+15550100002"] },
+      [],
+    );
+    expect(out).toEqual([]);
+  });
+
+  test("group toasts name the sender and the group", () => {
+    const guid = "053856bb0d9a40e392db59eace1c56d1";
+    const out = selectToasts(
+      [msg({ chat: guid, handle: "ALICE", name: "Alice", ts: "2026-08-30 11:00:00", text: "hi" })],
+      "2026-08-30 10:00:00",
+      TOAST_ALL,
+      [],
+      { groups: { [guid]: { name: "Family", guid: "any;+;" + guid, participants: ["ALICE"] } } },
+    );
+    expect(out[0]!.name).toBe("Alice · Family");
+  });
+
+  test("emits a sanitized preview, not the raw attachment placeholder", () => {
+    const out = selectToasts(
+      [msg({ ts: "2026-08-30 11:00:00", text: "\uFFFC" })],
+      "2026-08-30 10:00:00",
+      TOAST_ALL,
+      [],
+    );
+    expect(out[0]!.text).toBe("New message");
+  });
+});
+
+describe("toast preview and notify-send argv", () => {
+  test("blank and attachment-only bodies become 'New message'", () => {
+    expect(toastPreview("")).toBe("New message");
+    expect(toastPreview("   ")).toBe("New message");
+    expect(toastPreview("\uFFFC")).toBe("New message");
+    expect(toastPreview("\uFFFC photo")).toBe("photo");
+  });
+
+  test("long bodies are capped and end with an ellipsis", () => {
+    const long = "x".repeat(TOAST_BODY_MAX + 40);
+    const preview = toastPreview(long);
+    expect(preview.length).toBe(TOAST_BODY_MAX);
+    expect(preview.endsWith("…")).toBe(true);
+  });
+
+  test("a name starting with a dash is still positional after --", () => {
+    const argv = notifySendArgv({ chat: "x", name: "-rf", text: "--hint=evil" });
+    const cut = argv.indexOf("--");
+    expect(cut).toBeGreaterThan(0);
+    expect(argv[cut + 1]).toBe("-rf");
+    expect(argv[cut + 2]).toBe("--hint=evil");
+    expect(argv.slice(0, cut)).not.toContain("-rf");
+  });
+
+  test("the canonical argv carries Blip identity, urgency, category, and wait", () => {
+    const argv = notifySendArgv({ chat: "+1", name: "Ada", text: "hi" });
+    expect(argv[0]).toBe("notify-send");
+    expect(argv).toContain("--app-name=Blip");
+    expect(argv).toContain("--urgency=normal");
+    expect(argv).toContain("--category=im.received");
+    expect(argv).toContain(`--expire-time=${TOAST_EXPIRE_MS}`);
+    expect(argv).toContain("--wait");
+    expect(argv).toContain("--action=default=Open");
+  });
+
+  test("toastName falls back to the handle, never the string null", () => {
+    expect(toastName(msg({ name: null as unknown as string, handle: "+1555", chat: null as unknown as string }))).toBe("+1555");
+  });
+});
+
+describe("foldHandle / allowlisted", () => {
+  test("US numbers with punctuation fold to the last ten digits", () => {
+    expect(foldHandle("+1 (555) 010-0002")).toBe("5550100002");
+    expect(foldHandle("5550100002")).toBe("5550100002");
+    expect(foldHandle("+15550100002")).toBe("5550100002");
+  });
+
+  test("emails fold case-insensitively and short codes stay exact", () => {
+    expect(foldHandle("Them@iCloud.com")).toBe("them@icloud.com");
+    expect(foldHandle("878478")).toBe("878478");
+  });
+
+  test("a hex chat id does not fold to a phone", () => {
+    expect(foldHandle("a5550100002aaaaaaaaaaaaaaaaaaaaa")).not.toBe("5550100002");
+  });
+
+  test("allowlisted matches chat or handle, including folded phones", () => {
+    expect(allowlisted("+15550100002", "+15550100002", ["+1 555 010 0002"])).toBe(true);
+    expect(allowlisted("053856bb0d9a40e392db59eace1c56d1", "+15550100004", ["+15550100004"])).toBe(true);
+    expect(allowlisted("878478", "878478", ["+15550100002"])).toBe(false);
+    expect(allowlisted("x", "y", [])).toBe(false);
+  });
+});
+
+describe("parseToastPolicy", () => {
+  test("null/undefined is all — the unconfigured default", () => {
+    expect(parseToastPolicy(null)).toEqual(TOAST_ALL);
+    expect(parseToastPolicy(undefined)).toEqual(TOAST_ALL);
+  });
+
+  test("legacy populated array is allow; empty array is off", () => {
+    expect(parseToastPolicy(["+15551234567"])).toEqual({ mode: "allow", allow: ["+15551234567"] });
+    expect(parseToastPolicy([])).toEqual(TOAST_OFF);
+  });
+
+  test("legacy {allow:[...]} populated is allow; empty is off", () => {
+    expect(parseToastPolicy({ allow: ["+15551234567"] })).toEqual({ mode: "allow", allow: ["+15551234567"] });
+    expect(parseToastPolicy({ allow: [] })).toEqual(TOAST_OFF);
+  });
+
+  test("explicit mode wins, and allow entries are trimmed", () => {
+    expect(parseToastPolicy({ mode: "OFF" })).toEqual({ mode: "off", allow: [] });
+    expect(parseToastPolicy({ mode: "all", allow: [" leftover "] })).toEqual({
+      mode: "all",
+      allow: ["leftover"],
+    });
+    expect(parseToastPolicy({ mode: "allow", allow: ["  +1  ", "", 42] })).toEqual({
+      mode: "allow",
+      allow: ["+1"],
+    });
+  });
+
+  test("whitespace-only legacy entries collapse to off, not a broken allow mode", () => {
+    expect(parseToastPolicy({ allow: ["  ", ""] })).toEqual(TOAST_OFF);
   });
 });
 
@@ -470,6 +700,22 @@ describe("state and allowlist I/O", () => {
 
   test("a missing allowlist is empty, not an error", () => {
     expect(loadAllowlist(join(tmp(), "none.json"))).toEqual([]);
+  });
+
+  test("a missing allowlist.json is toast-all, not silence", () => {
+    expect(loadToastPolicy(join(tmp(), "none.json"))).toEqual(TOAST_ALL);
+  });
+
+  test("corrupt allowlist.json fails closed to off", () => {
+    const p = join(tmp(), "bad.json");
+    writeFileSync(p, "{not json");
+    expect(loadToastPolicy(p)).toEqual(TOAST_OFF);
+  });
+
+  test("reads an explicit mode file", () => {
+    const p = join(tmp(), "mode.json");
+    writeFileSync(p, JSON.stringify({ mode: "off" }));
+    expect(loadToastPolicy(p)).toEqual(TOAST_OFF);
   });
 
   test("non-string entries are filtered out", () => {

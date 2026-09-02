@@ -69,6 +69,15 @@ what it is handed. Keep it that way.
 - **`PanelKeyCatcher` eats keys before focused children.** Any editor that
   should receive typing must be covered by its `blocked:` binding.
 - **Pass `--` before message text** to both `imsg-send` and `notify-send`.
+- **Toasts are a policy, not an allowlist-only gate.** Missing
+  `allowlist.json` notifies every new inbound (`mode=all`). `{ "mode": "off" }`
+  is silence; `{ "mode": "allow", "allow": [...] }` is the old filter; a
+  legacy empty `{ "allow": [] }` stays off. Never toast the conversation
+  currently being read (`--read`), the self-thread, outbound, or the
+  first-run backlog. Cap a batch at `TOAST_BATCH_CAP` (20) newest.
+  Preview text is sanitized in TS (`toastPreview`) before QML interpolates
+  it after `--`. `notifySendArgv()` is the flag contract; `ui.test.ts`
+  fails if BarWidget.qml drifts.
 - **No message content in state.json.** `~/.local/state/blip/state.json` holds
   timestamps, counts, opaque SHA-256 toast keys, self-chat ids, and group
   metadata. It is atomic and `0600`; no message bodies are allowed. EXCEPTION

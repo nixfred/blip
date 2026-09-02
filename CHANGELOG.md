@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.0.4 — 2026-09-01
+
+**Changed**
+- New inbound messages fire a **system notification** by default (Omarchy's
+  notification daemon via `notify-send`). The tiny bar badge is no longer
+  the only alert. Click the toast to open that conversation.
+- `~/.config/blip/allowlist.json` is now a toast *policy*, not a required
+  gate. Missing file = notify everyone. `{ "mode": "off" }` is silence.
+  A populated `{ "allow": ["+1…"] }` still filters to those senders.
+
+**Upgrade note.** If you liked the old quiet default (badge only, no
+toasts until you wrote an allowlist), write:
+
+```json
+{ "mode": "off" }
+```
+
+A legacy empty `{ "allow": [] }` or `[]` still means off. A missing file
+does not.
+
+**Fixed / hardened**
+- Allowlist matching folds US numbers (`+1555…` / `(555) …`) and emails
+  (case-insensitive). Hex group ids are never digit-folded into a phone.
+- The conversation you have open is not toasted — you did not miss it.
+- The self-thread is not toasted.
+- A catch-up after sleep emits at most 20 newest toasts, oldest of that
+  batch first.
+- Attachment-only rows say "New message" instead of the U+FFFC placeholder.
+- Group toasts read `Alice · Family`.
+- Corrupt `allowlist.json` fails closed (off), not open (spam).
+- Toasts stay on screen 15 s (`--urgency=normal`, `--category=im.received`).
+
 ## 2.0.0 — 2026-08-31
 
 The "complete for Fred" release: everything on the roadmap that makes Blip

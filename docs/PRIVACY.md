@@ -10,7 +10,7 @@ inventory of what lands on disk.
 |---|---|---|
 | `~/.config/blip/bridge.conf` (0600) | Mac ssh target, remote tool dir, path of Blip's key, `automation=` switch | credentials |
 | `~/.ssh/blip_ed25519` | Blip's dedicated ssh key — confined on the Mac to the bridge tools | — |
-| `~/.config/blip/allowlist.json` | handles allowed to raise desktop toasts | message text |
+| `~/.config/blip/allowlist.json` | toast policy (`mode` all/allow/off) and optional handles; missing = notify every inbound | message text |
 | `~/.local/state/blip/state.json` (0600, atomic) | poll watermark, read marks, per-chat unread counts and oldest-unread timestamps, self-chat ids, group names/members, opaque SHA-256 toast keys | **message bodies — ever** |
 | `~/.local/state/blip/window.json` | whether the app window was open, its size | anything else |
 | `~/.cache/blip/att/` (0700, files 0600, 500 MB LRU, no expiry) | attachments you viewed (photos, PDFs…), fetched on demand; HEIC arrives converted to JPEG. File names carry the Mac's attachment row id and the sanitized original name | attachments you did not open |
@@ -19,9 +19,9 @@ inventory of what lands on disk.
 | `~/bin/imsg`, `~/bin/imsg-send`, `~/bin/contacts` | the bridge shim (a bash script) | — |
 
 Message text lives only in memory while the panel or window is open. Desktop
-toasts show a sender name and a preview through your notification daemon,
-gated by the allowlist — and your notification daemon may keep its own
-history. Blip itself logs nothing; the shell's stderr (journald) sees
+toasts show a sender name and a truncated preview through your notification
+daemon (every new inbound by default; `{ "mode": "off" }` or an allowlist
+restricts that) — and your notification daemon may keep its own history. Blip itself logs nothing; the shell's stderr (journald) sees
 recipients and exit codes, never bodies (`imsg-send` prints a byte count).
 Message bodies do pass through process arguments on both machines, visible
 to other processes running as you.

@@ -11,9 +11,10 @@ import qs.Ui
 // widget owns the single poller; the panel reads its state rather than running
 // its own collector.
 //
-// Badge counts EVERY unread. Toasts fire only for allowlisted handles
-// (~/.config/blip/allowlist.json) — chat.db is mostly bank alerts and 2FA codes,
-// and none of that deserves an interruption.
+// Badge counts EVERY unread. Toasts fire for every new inbound as a system
+// notification. An optional ~/.config/blip/allowlist.json restricts that to
+// listed handles — chat.db is mostly bank alerts and 2FA codes, so the
+// allowlist is how you quiet the noise without losing the badge.
 //
 // Left-click = panel · double-click = the app window · middle-click = refresh · right-click = mark all read.
 BarWidget {
@@ -417,12 +418,14 @@ BarWidget {
   }
 
   // ------------------------------------------------------------ toasts
-  // One notify-send per allowlisted inbound message. The collector has already
-  // applied the allowlist and the dedupe ring, so anything arriving here is
-  // meant to interrupt. Reuses the no-focus-steal notification behaviour.
+  // One notify-send per Toast the collector emitted. Policy (all / allow /
+  // off), open-chat skip, self-thread skip, preview sanitizing, and the
+  // batch cap all live in collector.ts — this just renders. Reuses the
+  // no-focus-steal notification behaviour.
   // With --wait + actions, clicking the toast (default) or its Reply button
   // opens the panel ON that conversation, compose focused — the daemon
   // advertises the "actions" capability (verified via GetCapabilities).
+  // Flag set must match collector.notifySendArgv (ui.test.ts).
   Process {
     id: notifyProc
     stdout: StdioCollector {
@@ -458,7 +461,9 @@ BarWidget {
       "notify-send",
       "--app-name=Blip",
       "--icon=mail-message-new",
-      "--expire-time=8000",
+      "--urgency=normal",
+      "--category=im.received",
+      "--expire-time=15000",
       // --wait blocks until the toast closes and prints the chosen action.
       // Only `default` (clicking the card): the Omarchy notification daemon
       // renders no action BUTTONS and only ever invokes default — an

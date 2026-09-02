@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { notifySendArgv } from "./collector";
 
 // The renderer moved from Panel.qml into BlipView.qml in 1.8.0 (shared with the app window).
 const panel = readFileSync(new URL("./BlipView.qml", import.meta.url), "utf8");
@@ -40,5 +41,16 @@ describe("QML safety invariants", () => {
     const mark = panel.indexOf("markThreadRead(root.threadRunningChat)");
     expect(success).toBeGreaterThan(-1);
     expect(mark).toBeGreaterThan(success);
+  });
+
+  test("notify-send is the system-notification path and matches the canonical argv", () => {
+    // Logic lives in collector.notifySendArgv; QML must not drift off it.
+    const argv = notifySendArgv({ chat: "+1555", name: "Ada", text: "hi" });
+    for (const flag of argv) {
+      if (flag === "notify-send" || flag === "--" || flag === "Ada" || flag === "hi") continue;
+      expect(widget).toContain(flag);
+    }
+    expect(widget).toContain('"--"');
+    expect(widget).toContain("notify-send");
   });
 });

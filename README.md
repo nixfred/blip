@@ -15,7 +15,7 @@
   <img alt="Omarchy" src="https://img.shields.io/badge/Omarchy-plugin-5fd7ff?style=flat-square">
   <img alt="QuickShell" src="https://img.shields.io/badge/QuickShell-QML-0a84ff?style=flat-square">
   <img alt="bun" src="https://img.shields.io/badge/bun-TypeScript-f9f1e1?style=flat-square">
-  <img alt="tests" src="https://img.shields.io/badge/tests-177%20passing-2ea043?style=flat-square">
+  <img alt="tests" src="https://img.shields.io/badge/tests-206%20passing-2ea043?style=flat-square">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
@@ -98,8 +98,9 @@ Linux side. If the Mac is asleep, the widget dims and says so.
 - compose box at the bottom, Enter sends — **DMs and groups**
 
 **Toasts**
-- desktop notification only for senders on your allowlist
-- everything else still counts and still shows; it just doesn't interrupt you
+- every new inbound fires a **system notification** (Omarchy's notification daemon via `notify-send`) — sender, preview, 15 s, click opens that thread
+- the conversation you have open is not toasted; neither is the self-thread
+- optional allowlist / `{ "mode": "off" }` if you want the old quiet default; everything else still counts on the badge
 
 **Toast actions**
 - click a toast and the panel opens ON that conversation with the compose
@@ -232,10 +233,26 @@ bubble is in your bar.
 
 **Toasts**
 
+New inbound messages fire a desktop notification by default — the same
+system notifications as everything else on Omarchy, not a tiny in-bar
+flash. Click the card to open that conversation with compose focused.
+
+`~/.config/blip/allowlist.json` is re-read every poll (no restart):
+
 ```jsonc
-// ~/.config/blip/allowlist.json — re-read every poll, no restart
-{ "allow": ["+15551234567", "them@icloud.com"] }
+// missing file          → notify everyone (the default)
+// { "mode": "all" }     → same, explicit
+{ "mode": "off" }        // badge only — never interrupt
+{ "mode": "allow", "allow": ["+15551234567", "them@icloud.com"] }
+
+// legacy, still honoured:
+{ "allow": ["+15551234567"] }   // populated → allow those senders
+{ "allow": [] }                 // empty → off (the old quiet default)
 ```
+
+Phone entries match across formatting (`+15551234567`, `(555) 123-4567`).
+Emails match case-insensitively. A hex group id is never mistaken for a
+phone. After a long sleep, at most the 20 newest messages toast.
 
 ## Keyboard
 
@@ -274,6 +291,13 @@ it has *seen* — drives toasts) separate from `readMark` and per-thread
 `readMarks` (highest timestamp *you* have looked at — drives the badge and the
 dots). Fold them together and the badge flashes to 1 and resets on the next
 poll. Yes, that shipped once.
+
+**Toasts are a policy.** Missing `allowlist.json` notifies every new inbound
+as a system notification. `{ "mode": "off" }` is the old quiet default. The
+open conversation, the self-thread, outbound, and the first-run backlog
+never toast. A catch-up after sleep is capped at 20. Preview text is
+sanitized in TypeScript (`toastPreview`) before QML interpolates it after
+`--` on `notify-send`.
 
 **Unread is a ledger, not a window.** The latest 150 rows are enough for normal
 previews, but unread counts and oldest-unread timestamps live in a metadata-only
@@ -319,7 +343,7 @@ The 273,000-message history stays on the Mac where it lives.
 ## Development
 
 ```sh
-bun test                                     # 177 tests, ~70 ms
+bun test                                     # 206 tests, ~70 ms
 bun collector.ts --deep | jq '.unread, (.threads|length)'
 bun thread.ts +15551234567 40 | jq '.bubbles[-1]'
 ```

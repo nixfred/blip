@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "nixfred.blip",
   "name": "Blip",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "author": "Larry & Fred",
   "license": "MIT",
-  "description": "iMessage in the Omarchy bar. Reads and sends through a Mac you own over a multiplexed SSH socket — iMessage is macOS-only, so this machine is a thin client and the Mac is the gateway. Bar badge counts every unread; desktop toasts fire only for handles on your allowlist, because chat.db is mostly bank alerts and 2FA codes. Left-click = panel (thread list, history, compose). Middle-click = refresh. Right-click = mark all read.",
+  "description": "iMessage in the Omarchy bar. Reads and sends through a Mac you own over a multiplexed SSH socket — iMessage is macOS-only, so this machine is a thin client and the Mac is the gateway. Bar badge counts every unread; new inbound messages fire a system notification (optional allowlist if you want to quiet bank alerts and 2FA). Left-click = panel (thread list, history, compose). Middle-click = refresh. Right-click = mark all read.",
   "kinds": [
     "bar-widget"
   ],
