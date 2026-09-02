@@ -39,7 +39,9 @@ what it is handed. Keep it that way.
   member spoke last. `isSendable()` tests the *chat* id; groups send
   `--chat-id <full guid>` (`any;+;<32hex>`, or `<Service>;+;chat<digits>` on
   Macs that keep one chat row per service — `imsg groups` returns ONE row per
-  identifier, the newest, so an empty shell never wins; #8), DMs send `--to <chat>`.
+  identifier, the newest, so an empty shell never wins; #8), DMs send `--to <chat>`
+  and `--service SMS|RCS` when last inbound (or a failed iMessage to a phone)
+  says so.
 - **Two read marks.** `watermark` = what the collector has seen (drives toasts).
   `readMark` / `readMarks[chat]` = what the user has looked at (drives the badge
   and the blue dots). Collapsing them makes the badge flash and reset.

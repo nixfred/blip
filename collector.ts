@@ -360,6 +360,46 @@ export function groupName(chat: string, info: GroupInfo | undefined, byHandle: M
   return members.length ? members.join(", ") : chat;
 }
 
+export type SendService = "iMessage" | "SMS" | "RCS";
+
+/** Map a chat.db / thread service string onto what `imsg-send --service` accepts. */
+export function normalizeSendService(raw: string | undefined | null): SendService {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (s === "sms") return "SMS";
+  if (s === "rcs") return "RCS";
+  return "iMessage";
+}
+
+/**
+ * Service a DM should send on.
+ *
+ * Last inbound wins (the service they actually receive on). A failed iMessage
+ * outbound must not flip an SMS contact back to iMessage. No inbound → last
+ * successful outbound. Only failed iMessage rows to a phone number → SMS:
+ * AppleScript does not fall back the way Messages.app GUI does (error 22 =
+ * not registered for iMessage). Groups send `--chat-id` and ignore this.
+ */
+export function sendServiceForMessages(msgs: ImsgMessage[]): SendService {
+  if (!msgs.length) return "iMessage";
+  const sorted = [...msgs].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    if (!sorted[i]!.from_me) return normalizeSendService(sorted[i]!.service);
+  }
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const m = sorted[i]!;
+    if (m.from_me && !(typeof m.error === "number" && m.error !== 0)) {
+      return normalizeSendService(m.service);
+    }
+  }
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const s = normalizeSendService(sorted[i]!.service);
+    if (s !== "iMessage") return s;
+  }
+  const chat = chatKey(sorted[sorted.length - 1]);
+  if (/^\+?[0-9]{5,}$/.test(chat)) return "SMS";
+  return "iMessage";
+}
+
 export function buildThreads(
   msgs: ImsgMessage[],
   watermark: string,
@@ -392,7 +432,7 @@ export function buildThreads(
       guid: isGroupChat(chat) ? groups[chat]?.guid ?? "" : "",
       name: isGroupChat(chat) ? groupName(chat, groups[chat], byHandle) : displayName(sorted),
       handle: String(last.handle || chat),
-      service: last.service,
+      service: sendServiceForMessages(sorted),
       last_ts: last.ts,
       last_text: last.text,
       last_from_me: last.from_me,

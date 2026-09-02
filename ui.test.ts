@@ -11,6 +11,11 @@ describe("QML safety invariants", () => {
     expect(panel).toContain('["--to", sendChat]');
   });
 
+  test("DM sends pass SMS after a failed iMessage to a phone", () => {
+    expect(panel).toContain("function sendService()");
+    expect(panel).toContain("root.bubbles[i].failed === true) return \"SMS\"");
+  });
+
   test("thread results are accepted only for the active chat", () => {
     expect(panel).toContain('String(root.active.chat) === root.threadRunningChat');
     expect(panel).toContain("if (!belongsHere) return");

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Failed iMessage to a phone number sends SMS next.** 2.2.0 already passes
+  `--service` when the thread is already SMS/RCS. A new chat to an Android
+  number still starts as iMessage; AppleScript then fails with error 22
+  (not registered) and the last bubble stays iMessage, so the next Enter
+  retried iMessage. Last inbound still wins; if there is none and the only
+  rows are failed iMessage to a phone, the next send is SMS. Compose
+  placeholder follows. (PR #4)
+
 ## 2.2.2 — 2026-09-02
 
 - **Group sends failed with -1728 on Macs that keep one chat row per

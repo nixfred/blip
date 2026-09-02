@@ -569,6 +569,20 @@ FocusScope {
     }))
   }
 
+  /** SMS/RCS, or SMS after a failed iMessage to a phone (error 22). */
+  function sendService() {
+    var chat = String(root.active && root.active.chat ? root.active.chat : "")
+    var phone = /^\+?[0-9]{5,}$/.test(chat)
+    if (phone) {
+      for (var i = 0; i < root.bubbles.length; i++) {
+        if (root.bubbles[i].from_me === true && root.bubbles[i].failed === true) return "SMS"
+      }
+    }
+    var s = String(root.active && root.active.service ? root.active.service : "")
+    if (s === "SMS" || s === "RCS") return s
+    return "iMessage"
+  }
+
   function send() {
     var text = composeField.text
     if (!root.inThread) return
@@ -602,7 +616,7 @@ FocusScope {
       sendDraftPath = draftPath
       // caption on stdin — never in this process's argv (audit #4, war room #1/#13)
       fileSendProc.command = ["bun", root.sendFileScript, sendChat, draftPath, "--caption-stdin"]
-        .concat(/^(SMS|RCS)$/i.test(String(root.active.service || "")) ? ["--service", String(root.active.service).toUpperCase()] : [])
+        .concat(/^(SMS|RCS)$/i.test(root.sendService()) ? ["--service", root.sendService()] : [])
       fileSendProc.stdinEnabled = true
       fileSendProc.running = true
       fileSendProc.write(trimmed !== "" ? text : "")
@@ -615,9 +629,10 @@ FocusScope {
     var target = root.activeIsGroup
       ? ["--chat-id", String(root.active.guid)]
       : ["--to", sendChat]
-    // green-bubble (SMS/RCS) threads send on their own service (war room #2)
-    var svc = String(root.active.service || "")
-    if (!root.activeIsGroup && /^(SMS|RCS)$/i.test(svc)) target = target.concat(["--service", svc.toUpperCase()])
+    // green-bubble (SMS/RCS) threads send on their own service (war room #2).
+    // A failed iMessage to a phone (error 22) also sends SMS on the next try.
+    var svc = root.sendService()
+    if (!root.activeIsGroup && /^(SMS|RCS)$/i.test(svc)) target = target.concat(["--service", svc])
     sendProc.command = [root.home + "/bin/imsg-send"].concat(target).concat(["--yes", "--text-stdin", "--keep-dashes"])
     sendProc.stdinEnabled = true
     sendProc.running = true
@@ -1991,7 +2006,7 @@ FocusScope {
             readOnly: !root.online || !root.isSendable(root.active)
             placeholderText: root.draftPath !== ""
               ? "caption (optional) — Enter sends the file"
-              : root.isSendable(root.active) ? "iMessage" : "Read-only — group id unknown"
+              : root.isSendable(root.active) ? root.sendService() : "Read-only — group id unknown"
             foreground: root.foreground
             accent: root.mineFill
             font.family: root.fontFamily

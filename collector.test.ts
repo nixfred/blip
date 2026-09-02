@@ -17,7 +17,9 @@ import {
   loadAllowlist,
   loadState,
   maxTs,
+  normalizeSendService,
   saveState,
+  sendServiceForMessages,
   selectToasts,
   toastKey,
   unreadCounts,
@@ -110,6 +112,25 @@ describe("buildThreads", () => {
 
   test("handles an empty window", () => {
     expect(buildThreads([], "2026-01-01 00:00:00")).toEqual([]);
+  });
+
+  test("SMS inbound then a failed iMessage still sends as SMS", () => {
+    const threads = buildThreads(
+      [
+        msg({ ts: "2026-09-01 13:00:00", from_me: false, service: "SMS", text: "in" }),
+        msg({ ts: "2026-09-01 21:45:00", from_me: true, service: "iMessage", text: "out", error: 3 }),
+      ],
+      "2026-09-01 12:00:00",
+    );
+    expect(threads[0]!.service).toBe("SMS");
+  });
+
+  test("a failed iMessage to a phone with no inbound sends as SMS next", () => {
+    const threads = buildThreads(
+      [msg({ ts: "2026-09-02 16:21:00", from_me: true, service: "iMessage", error: 22, text: "out" })],
+      "2026-09-02 16:00:00",
+    );
+    expect(threads[0]!.service).toBe("SMS");
   });
 
   test("a per-thread read mark clears only that thread", () => {
@@ -715,6 +736,46 @@ describe("failed-delivery detection", () => {
     const first = selectFailures([mine({ error: 25 })], [], now);
     const again = selectFailures([mine({ error: 25 })], first.map((f) => f.key), now);
     expect(again.length).toBe(0);
+  });
+});
+
+describe("send service", () => {
+  test("normalizes sms/rcs and defaults everything else to iMessage", () => {
+    expect(normalizeSendService("SMS")).toBe("SMS");
+    expect(normalizeSendService("rcs")).toBe("RCS");
+    expect(normalizeSendService("")).toBe("iMessage");
+  });
+
+  test("last inbound SMS wins over a later failed iMessage outbound", () => {
+    expect(sendServiceForMessages([
+      msg({ ts: "2026-09-01 13:00:00", from_me: false, service: "SMS" }),
+      msg({ ts: "2026-09-01 21:45:00", from_me: true, service: "iMessage", error: 3 }),
+    ])).toBe("SMS");
+  });
+
+  test("last inbound iMessage wins over older SMS history", () => {
+    expect(sendServiceForMessages([
+      msg({ ts: "2026-08-01 10:00:00", from_me: false, service: "SMS" }),
+      msg({ ts: "2026-09-01 10:00:00", from_me: false, service: "iMessage" }),
+    ])).toBe("iMessage");
+  });
+
+  test("failed iMessage to a phone with no inbound is SMS next (error 22)", () => {
+    expect(sendServiceForMessages([
+      msg({ ts: "2026-09-02 16:21:00", from_me: true, service: "iMessage", error: 22 }),
+    ])).toBe("SMS");
+  });
+
+  test("failed iMessage to an email stays iMessage", () => {
+    expect(sendServiceForMessages([
+      msg({ chat: "them@icloud.com", handle: "them@icloud.com", from_me: true, service: "iMessage", error: 22 }),
+    ])).toBe("iMessage");
+  });
+
+  test("successful iMessage with no inbound stays iMessage", () => {
+    expect(sendServiceForMessages([
+      msg({ from_me: true, service: "iMessage", error: 0 }),
+    ])).toBe("iMessage");
   });
 });
 
