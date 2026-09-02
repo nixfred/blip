@@ -25,7 +25,7 @@ BarWidget {
     decodeURIComponent(Qt.resolvedUrl("collector.ts").toString().replace(/^file:\/\//, ""))
 
   // ---- collector state
-  property var threads: []           // [{chat,name,handle,service,last_ts,last_text,last_from_me,count,unread}]
+  property var threads: []           // [{chat,name,handle,service,last_ts,last_text,last_from_me,count,unread,pinned,pin_order}]
   property string threadsJson: ""    // last assigned list, for no-op detection
   property int unread: 0
   property bool online: false        // the Mac is reachable

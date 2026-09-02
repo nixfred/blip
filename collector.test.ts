@@ -8,6 +8,7 @@ import {
   detectSelfChats,
   fetchMessagesAfter,
   CATCHUP_MAX_ROWS,
+  fetchChats,
   fetchGroups,
   groupName,
   dedupeSelfEcho,
@@ -723,14 +724,15 @@ describe("complete conversation list (mergeChats)", () => {
   const windowThread = {
     chat: "+15551234567", guid: "", name: "Pat", handle: "+15551234567", service: "iMessage",
     last_ts: "2026-08-31 20:00:00", last_text: "hi", last_from_me: false, count: 3, unread: 1,
+    pinned: false, pin_order: null,
   };
   const chats = [
     { id: "+15551234567", name: null, service: "iMessage", last: "2026-08-31 20:00:00",
-      last_text: "hi", last_from_me: false, last_handle: "+15551234567", last_name: "Pat" },
+      last_text: "hi", last_from_me: false, last_handle: "+15551234567", last_name: "Pat", pinned: false, pin_order: null },
     { id: "ce5a593a78af408282d61461ade89135", name: "Lunch Crew", service: "iMessage", last: "2026-08-31 19:00:00",
-      last_text: "Nice", last_from_me: false, last_handle: "+15550001111", last_name: "Sam" },
+      last_text: "Nice", last_from_me: false, last_handle: "+15550001111", last_name: "Sam", pinned: false, pin_order: null },
     { id: "+15559990000", name: null, service: "SMS", last: "2026-08-20 09:00:00",
-      last_text: "old news", last_from_me: true, last_handle: "+15559990000", last_name: "Quiet Q" },
+      last_text: "old news", last_from_me: true, last_handle: "+15559990000", last_name: "Quiet Q", pinned: false, pin_order: null },
   ];
 
   test("quiet conversations outside the window appear, newest first", () => {
@@ -752,6 +754,53 @@ describe("complete conversation list (mergeChats)", () => {
     const out = mergeChats([], chats, {}, {});
     expect(out.find((t) => t.chat === "+15559990000")!.name).toBe("Quiet Q");
     expect(out.find((t) => t.chat === "ce5a593a78af408282d61461ade89135")!.name).toBe("Lunch Crew");
+  });
+
+  test("mirrored pins sort first in Messages pin order, ahead of activity", () => {
+    const out = mergeChats(
+      [
+        { ...windowThread, last_ts: "2026-08-31 22:00:00" },
+        { ...windowThread, chat: "+15557770000", last_ts: "2026-08-31 21:00:00", pinned: false, pin_order: null },
+      ],
+      [
+        { ...chats[0]!, pinned: false, pin_order: null },
+        { ...chats[1]!, pinned: true, pin_order: 1 },
+      ],
+      {},
+      {},
+    );
+    expect(out.map((t) => t.chat)).toEqual([
+      "ce5a593a78af408282d61461ade89135",
+      "+15551234567",
+      "+15557770000",
+    ]);
+    expect(out[0]!.pinned).toBe(true);
+    expect(out[0]!.pin_order).toBe(1);
+  });
+});
+
+describe("pinned conversation metadata", () => {
+  test("fetchChats preserves pin state and tolerates an older bridge", () => {
+    const runner = ((_: string, __: string[]) => ({
+      status: 0,
+      stdout: JSON.stringify([
+        {
+          id: "+15551234567", name: "Pat", service: "iMessage", last: "2026-08-31 20:00:00",
+          last_text: "hi", last_from_me: false, last_handle: "+15551234567", last_name: "Pat",
+          pinned: true, pin_order: 0,
+        },
+        {
+          id: "+15550001111", name: null, service: "SMS", last: "2026-08-31 19:00:00",
+          last_text: "old", last_from_me: true, last_handle: "+15550001111", last_name: null,
+        },
+      ]),
+      stderr: "",
+    })) as never;
+    const out = fetchChats(runner)!;
+    expect(out[0]!.pinned).toBe(true);
+    expect(out[0]!.pin_order).toBe(0);
+    expect(out[1]!.pinned).toBe(false);
+    expect(out[1]!.pin_order).toBe(null);
   });
 });
 

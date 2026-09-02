@@ -100,6 +100,10 @@ export interface Thread {
   last_from_me: boolean;
   count: number;       // messages for this chat inside the fetched window
   unread: number;      // inbound newer than the global/per-thread read mark
+  /** Mirrored from Messages' pinning preferences; Blip never changes it. */
+  pinned: boolean;
+  /** Position in Messages' pinned section, when pinned. */
+  pin_order: number | null;
 }
 
 export interface Toast {
@@ -398,11 +402,26 @@ export function buildThreads(
       last_from_me: last.from_me,
       count: sorted.length,
       unread,
+      pinned: false,
+      pin_order: null,
     });
   }
 
-  threads.sort((a, b) => (a.last_ts < b.last_ts ? 1 : a.last_ts > b.last_ts ? -1 : 0));
+  threads.sort(compareThreads);
   return threads;
+}
+
+/** Messages keeps pinned conversations ahead of the activity-sorted list. */
+export function compareThreads(a: Thread, b: Thread): number {
+  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+  if (a.pinned && b.pinned) {
+    if (a.pin_order !== null && b.pin_order !== null && a.pin_order !== b.pin_order) {
+      return a.pin_order - b.pin_order;
+    }
+    if (a.pin_order !== null && b.pin_order === null) return -1;
+    if (a.pin_order === null && b.pin_order !== null) return 1;
+  }
+  return a.last_ts < b.last_ts ? 1 : a.last_ts > b.last_ts ? -1 : 0;
 }
 
 function digest(value: string): string {
@@ -655,7 +674,7 @@ export function unreadOldest(
 }
 
 /** `imsg --json groups` — claude-on-mac ≥ 1.4.0. */
-/** One row of `imsg --json chats`: a conversation with its latest preview. */
+/** One row of `imsg --json chats`: a conversation with preview + pin metadata. */
 export interface ChatInfo {
   id: string;
   name: string | null;
@@ -665,15 +684,19 @@ export interface ChatInfo {
   last_from_me: boolean;
   last_handle: string;
   last_name: string | null;
+  /** Mirrored from Messages' pinning preferences; absent on old bridges. */
+  pinned: boolean;
+  pin_order: number | null;
 }
 
 /** How many conversations the sidebar lists (chat.db has hundreds). */
 export const CHAT_LIST_LIMIT = 300;
 
 /**
- * The COMPLETE conversation list (imsg ≥1.11.0 `chats` with previews). The
- * message window only ever covers the busiest few days — deriving the list
- * from it lost every quiet conversation ("where is my quiet group?").
+ * The COMPLETE conversation list (imsg ≥1.11.0 `chats` with previews and pin
+ * metadata). The message window only ever covers the busiest few days —
+ * deriving the list from it lost every quiet conversation ("where is my quiet
+ * group?").
  * Fetched on deep runs only; the shallow poll keeps the last list in the
  * widget's memory. Previews are never persisted (no content on disk).
  */
@@ -697,6 +720,8 @@ export function fetchChats(runner = spawnSync): ChatInfo[] | null {
         last_from_me: r.last_from_me === true,
         last_handle: String(r.last_handle ?? ""),
         last_name: typeof r.last_name === "string" ? r.last_name : null,
+        pinned: r.pinned === true,
+        pin_order: Number.isInteger(r.pin_order) ? Number(r.pin_order) : null,
       }));
   } catch {
     return null;
@@ -715,8 +740,18 @@ export function mergeChats(
   groups: Record<string, GroupInfo>,
   unreadCounts: Record<string, number>,
 ): Thread[] {
+  const infoByChat = new Map(chats.map((c) => [c.id, c]));
+  const applyPin = (thread: Thread): Thread => {
+    const info = infoByChat.get(thread.chat);
+    if (!info) return thread;
+    const pinned = info.pinned === true;
+    const pin_order = Number.isInteger(info.pin_order) ? Number(info.pin_order) : null;
+    return thread.pinned === pinned && thread.pin_order === pin_order
+      ? thread
+      : { ...thread, pinned, pin_order };
+  };
   const have = new Set(threads.map((t) => t.chat));
-  const out = [...threads];
+  const out = threads.map(applyPin);
   for (const c of chats) {
     if (have.has(c.id)) continue;
     have.add(c.id);
@@ -735,9 +770,11 @@ export function mergeChats(
       last_from_me: c.last_from_me,
       count: 0,
       unread: unreadCounts[c.id] ?? 0,
+      pinned: c.pinned === true,
+      pin_order: Number.isInteger(c.pin_order) ? Number(c.pin_order) : null,
     });
   }
-  return out.sort((a, b) => (a.last_ts < b.last_ts ? 1 : a.last_ts > b.last_ts ? -1 : 0));
+  return out.sort(compareThreads);
 }
 
 export function fetchGroups(runner = spawnSync): Record<string, GroupInfo> | null {

@@ -104,6 +104,8 @@ FocusScope {
   property string pasteChat: ""
 
   readonly property var threads: hostWidget ? hostWidget.threads : []
+  readonly property var pinnedThreads: root.threads.filter(function(t) { return t.pinned === true })
+  readonly property var unpinnedThreads: root.threads.filter(function(t) { return t.pinned !== true })
   readonly property bool online: hostWidget ? hostWidget.online : false
   readonly property int unread: hostWidget ? hostWidget.unread : 0
 
@@ -122,6 +124,21 @@ FocusScope {
   property string sendChat: ""          // immutable context for the current send
   property string sendText: ""
   property string reloadChat: ""
+
+  function threadIndex(thread) {
+    for (var i = 0; i < root.threads.length; i++) {
+      if (String(root.threads[i].chat) === String(thread.chat)) return i
+    }
+    return -1
+  }
+
+  function avatarInitials(thread) {
+    var n = String(thread.name || "")
+    if (/^[+0-9]/.test(n) || n === "") return "#"
+    var parts = n.trim().split(/\s+/).filter(function(p) { return p.length > 0 })
+    if (parts.length === 0) return "#"
+    return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase()
+  }
 
   readonly property bool inThread: active !== null
   // last_ts of the open conversation as of its last load — the push watcher
@@ -1140,6 +1157,107 @@ FocusScope {
               Keys.onEscapePressed: root.exitSearch()
             }
 
+            // Read-only mirror of Messages' pinned section. These tiles have
+            // no preview: the Mac owns pinning, while Blip only renders the
+            // ordered avatars and names above the ordinary conversation rows.
+            GridLayout {
+              id: pinnedGrid
+              Layout.fillWidth: true
+              visible: root.online && root.listShowing && !root.searchShowing && !root.newMode
+                       && root.pinnedThreads.length > 0
+              columns: 3
+              columnSpacing: Style.space(8)
+              rowSpacing: Style.space(10)
+              Layout.topMargin: Style.space(8)
+              Layout.bottomMargin: Style.space(8)
+
+              Repeater {
+                model: pinnedGrid.visible ? root.pinnedThreads : []
+                delegate: Rectangle {
+                  required property var modelData
+                  Layout.fillWidth: true
+                  Layout.preferredWidth: Math.max(1, (pinnedGrid.width - pinnedGrid.columnSpacing * 2) / 3)
+                  implicitHeight: pinnedColumn.implicitHeight + Style.space(4)
+                  radius: Style.cornerRadius
+                  color: pinnedHover.hovered
+                    ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+                    : "transparent"
+
+                  HoverHandler { id: pinnedHover }
+                  TapHandler { onTapped: root.openThread(modelData) }
+
+                  ColumnLayout {
+                    id: pinnedColumn
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    spacing: Style.space(4)
+
+                    Rectangle {
+                      id: pinnedAvatar
+                      Layout.alignment: Qt.AlignHCenter
+                      width: Math.min(88, Math.max(56,
+                        (pinnedGrid.width - pinnedGrid.columnSpacing * 2) / 3 * 0.62))
+                      height: width
+                      radius: width / 2
+                      color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
+                      readonly property string avatarHandle: String(modelData.handle || modelData.chat || "")
+                      Component.onCompleted: if (!root.isGroupId(String(modelData.chat || ""))) root.requestAvatar(avatarHandle)
+
+                      Image {
+                        id: pinnedAvatarImg
+                        anchors.fill: parent
+                        visible: false
+                        source: root.avatarFiles[pinnedAvatar.avatarHandle] || ""
+                        asynchronous: true
+                        fillMode: Image.PreserveAspectCrop
+                        sourceSize.width: 192
+                        sourceSize.height: 192
+                        onStatusChanged: if (status === Image.Error && pinnedAvatar.avatarHandle !== "") {
+                          var m = Object.assign({}, root.avatarFiles); m[pinnedAvatar.avatarHandle] = ""; root.avatarFiles = m
+                        }
+                      }
+                      Item {
+                        id: pinnedAvatarMask
+                        anchors.fill: parent
+                        visible: false
+                        layer.enabled: true
+                        Rectangle { anchors.fill: parent; radius: width / 2 }
+                      }
+                      MultiEffect {
+                        anchors.fill: parent
+                        source: pinnedAvatarImg
+                        visible: pinnedAvatarImg.status === Image.Ready
+                        maskEnabled: true
+                        maskSource: pinnedAvatarMask
+                      }
+                      Text {
+                        anchors.centerIn: parent
+                        visible: pinnedAvatarImg.status !== Image.Ready
+                        text: root.avatarInitials(modelData)
+                        color: root.foreground
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.body
+                        font.bold: true
+                      }
+                    }
+
+                    Text {
+                      Layout.fillWidth: true
+                      text: String(modelData.name || modelData.chat)
+                      textFormat: Text.PlainText
+                      horizontalAlignment: Text.AlignHCenter
+                      elide: Text.ElideRight
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                      font.bold: modelData.unread > 0
+                    }
+                  }
+                }
+              }
+            }
+
             Text {
               Layout.fillWidth: true
               visible: root.searching && root.searchNote !== ""
@@ -1219,7 +1337,7 @@ FocusScope {
             }
 
             Repeater {
-              model: root.online && root.listShowing && !root.searchShowing && !root.newMode ? root.threads : []
+              model: root.online && root.listShowing && !root.searchShowing && !root.newMode ? root.unpinnedThreads : []
               delegate: Rectangle {
                 required property var modelData
                 required property int index
@@ -1227,7 +1345,7 @@ FocusScope {
                 Layout.fillWidth: true
                 implicitHeight: rowRow.implicitHeight + Style.space(root.splitView ? 20 : 12)
                 radius: Style.cornerRadius
-                color: rowHover.hovered || root.cursor === index
+                color: rowHover.hovered || root.cursor === root.threadIndex(modelData)
                   ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
                   : "transparent"
 
@@ -1287,13 +1405,7 @@ FocusScope {
                     Text {
                       anchors.centerIn: parent
                       visible: avatarImg.status !== Image.Ready
-                      text: {
-                        var n = String(modelData.name || "")
-                        if (/^[+0-9]/.test(n) || n === "") return "#"
-                        var parts = n.trim().split(/\s+/).filter(function(p) { return p.length > 0 })
-                        if (parts.length === 0) return "#"
-                        return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase()
-                      }
+                      text: root.avatarInitials(modelData)
                       color: root.foreground
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption

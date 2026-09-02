@@ -13,7 +13,7 @@ Subcommands:
   search <text> [N], full-text-ish LIKE search across messages
   thread <handle> [N], same as `from`, oldest→newest
   contacts, list known handles with message counts
-  chats, list chats (group + 1:1) with last activity
+  chats, list chats (group + 1:1) with last activity and pin metadata
   groups [N], group chats with the AppleScript GUID needed to send to them
 
 All output is `ts | who | text` (or JSON with --json).
@@ -25,6 +25,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import plistlib
 import re
 import sqlite3
 import struct
@@ -32,6 +33,13 @@ import sys
 from glob import glob
 
 DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
+PINNING_PLIST_PATHS = (
+    os.path.expanduser("~/Library/Preferences/com.apple.messages.pinning.plist"),
+    os.path.expanduser(
+        "~/Library/Containers/com.apple.MobileSMS/Data/Library/Preferences/"
+        "com.apple.messages.pinning.plist"
+    ),
+)
 APPLE_EPOCH = 978307200  # 2001-01-01 UTC
 
 # ---------- Contacts name resolution (built-in, no external deps) ----------
@@ -170,6 +178,67 @@ def fmt_ts(apple_ns: int | None) -> str:
 
 def message_text(row: sqlite3.Row) -> str:
     return row["text"] or decode_attributed_body(row["attributedBody"]) or ""
+
+
+def pinned_chat_identifiers() -> list[str]:
+    """Read the ordered chat identifiers from Messages' pinning preferences.
+
+    The plist is an undocumented, version-dependent preference, so keep this
+    deliberately tolerant: recursively collect strings and let
+    ``pin_order_for`` decide which ones identify a chat. A missing or
+    unreadable plist simply means that no chats are pinned.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def visit(item) -> None:
+        if isinstance(item, str):
+            item = item.strip()
+            if item and item not in seen:
+                seen.add(item)
+                out.append(item)
+        elif isinstance(item, dict):
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, (list, tuple)):
+            for child in item:
+                visit(child)
+
+    for path in PINNING_PLIST_PATHS:
+        try:
+            with open(path, "rb") as f:
+                visit(plistlib.load(f))
+        except (OSError, plistlib.InvalidFileException, ValueError, TypeError):
+            continue
+    return out
+
+
+def _pin_id(value: str) -> str:
+    """Reduce an Apple chat id (or service-qualified id) to its chat id."""
+    value = str(value or "").strip().lower()
+    for separator in (";+;", ";-;"):
+        if separator in value:
+            value = value.rsplit(separator, 1)[1]
+    return value
+
+
+def _same_chat_id(left: str, right: str) -> bool:
+    left = _pin_id(left)
+    right = _pin_id(right)
+    if left == right:
+        return True
+    # Some preference/database versions omit the plus on phone identifiers.
+    if re.fullmatch(r"\+?[0-9]{5,}", left) and re.fullmatch(r"\+?[0-9]{5,}", right):
+        return left.lstrip("+") == right.lstrip("+")
+    return False
+
+
+def pin_order_for(pin_ids: list[str], chat_identifier: str, guid: str | None) -> int | None:
+    """Return the Messages pin position for one chat, or None."""
+    for index, pin_id in enumerate(pin_ids):
+        if _same_chat_id(pin_id, chat_identifier) or (guid and _same_chat_id(pin_id, guid)):
+            return index
+    return None
 
 
 # ---------- --rich enrichment (tapbacks, read receipts, replies, attachments) ----------
@@ -569,7 +638,7 @@ def cmd_chats(con, args):
     # the latest visible message so the list needs no second query.
     rows = con.execute(
         f"""
-        SELECT c.ROWID AS cid, c.chat_identifier, c.display_name, c.room_name,
+        SELECT c.ROWID AS cid, c.chat_identifier, c.guid, c.display_name, c.room_name,
                c.service_name, MAX(m.date) AS last_date,
                COUNT(m.ROWID) AS n
         FROM chat c
@@ -582,8 +651,10 @@ def cmd_chats(con, args):
         (args.n,),
     ).fetchall()
     if args.json:
+        pin_ids = pinned_chat_identifiers()
         out = []
         for r in rows:
+            pin_order = pin_order_for(pin_ids, r["chat_identifier"], r["guid"])
             last = con.execute(
                 f"""SELECT m.text, m.attributedBody, m.is_from_me, h.id AS handle
                     FROM chat_message_join cmj
@@ -603,6 +674,8 @@ def cmd_chats(con, args):
                 "last_from_me": bool(last["is_from_me"]) if last else False,
                 "last_handle": (last["handle"] if last else None) or "",
                 "last_name": (name_for(last["handle"]) if last and last["handle"] and not args.no_names else None),
+                "pinned": pin_order is not None,
+                "pin_order": pin_order,
             })
         print(json.dumps(out, indent=2, ensure_ascii=False))
         return

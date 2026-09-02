@@ -22,6 +22,9 @@ changes to the Mac beyond claude-on-mac updates.
   `.pluginPayloadAttachment` link-preview blobs filtered (imsg 1.5.1).
 - [x] **Send-effect labels** — shipped 0.8.0: "· sent with confetti" in the
   time row.
+- [x] **Pinned conversation mirror** — reads the Mac's ordered Messages pin
+  metadata and keeps those conversations at the top of Blip's list; Blip has
+  no pin or unpin control and writes nothing back.
 
 ## Tier 2 — attachments both directions (SHIPPED 0.9.0, 2026-08-31)
 

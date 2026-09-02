@@ -78,6 +78,7 @@ Linux side. If the Mac is asleep, the widget dims and says so.
 
 **Thread list**
 - contact photo (from the Mac's Contacts) or initials, name, preview, time
+- **pinned conversations mirrored from Messages on the Mac**, kept in the same order at the top (read-only)
 - **blue dot** that stays until you open *that* conversation — iMessage semantics, not "I glanced at the list"
 - groups titled the way Messages.app titles them: the group's name, else its members
 

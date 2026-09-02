@@ -37,10 +37,10 @@ Threat model and the audit findings behind these notes: [SECURITY.md](SECURITY.m
 | `~/Pictures/.blip-outbox/<id>/` | a file you are sending, for the seconds until Messages copies it into its own store; then moved to `~/.blip/sent` (leftovers older than an hour are swept) |
 | `~/.blip/sent/<id>/` (200 MB LRU) | files Blip sent — kept because Messages often leaves the attachment record pointing at the staging path instead of copying it, and Blip would otherwise never be able to show your own photo again |
 
-The tools read `~/Library/Messages/chat.db` and the AddressBook database
-read-only, and drive Messages.app through AppleScript. They write nothing
-else. Messages.app itself keeps your conversation history exactly as it
-always has.
+The tools read `~/Library/Messages/chat.db`, the AddressBook database, and
+Messages' pinning preferences read-only, and drive Messages.app through
+AppleScript. They write nothing else. Messages.app itself keeps your
+conversation history exactly as it always has.
 
 ## Permissions the Mac asks for
 
@@ -53,8 +53,9 @@ missing. Blip never asks for Contacts, Camera, Microphone, or Location.
 
 ## What crosses the network
 
-Only ssh between the two machines: message queries and previews, attachment
-bytes you request, and files you send. Push notifications use a
+Only ssh between the two machines: message queries and previews, ordered
+conversation-pin metadata, attachment bytes you request, and files you send.
+Push notifications use a
 content-free "something changed" ping — a watcher on the Mac emits a
 timestamp when `chat.db` changes; the client then fetches privately.
 
