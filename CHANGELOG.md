@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Location-sharing notices no longer show up as empty unread messages.**
+  Messages.app writes its own announcements — someone joined or left, a
+  rename, location sharing started or stopped — into the message table with
+  `item_type != 0`, and never marks them read. The bridge passed them through,
+  so each one became an empty bubble that counted as unread forever and pulled
+  its conversation to the top; an iCloud re-sync after a restart lands several
+  at once. `imsg` now hides them at the source, next to Recently Deleted, so
+  every query agrees. Group names are unaffected: rename rows are still read
+  for that. Mac side: re-run the install one-liner so `~/.blip/bin/imsg` picks
+  it up.
 - **Reads now reach the Mac, and your phone.** Blip's "mark all read" cleared
   the badge on Linux and nothing else; the iPhone kept its red dots. The old
   note called this impossible because `open imessage://<handle>` does not flip

@@ -129,13 +129,13 @@ def open_db() -> sqlite3.Connection:
         sys.exit(f"chat.db not found at {DB_PATH}")
     # mode=ro alone (without immutable=1) so we still see uncommitted WAL writes
     con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-    # macOS 12 and earlier have no Recently Deleted table: read the plain message
-    # table instead of dying with a traceback on every command.
+    # macOS 12 and earlier have no Recently Deleted table: filter without it
+    # instead of dying with a traceback on every command.
     global MESSAGE_SRC
-    if "chat_recoverable_message_join" in MESSAGE_SRC and not con.execute(
+    if not con.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_recoverable_message_join'"
     ).fetchone():
-        MESSAGE_SRC = "message"
+        MESSAGE_SRC = message_src(has_recently_deleted=False)
     con.row_factory = sqlite3.Row
     return con
 
@@ -534,14 +534,29 @@ def render(rows, as_json: bool, with_names: bool = True, con=None, rich: bool = 
         print(f"{fmt_ts(r['date'])}  {who:>30}{chat_tag}: {text}")
 
 
-# Recently Deleted (the 30-day bin, synced from iPhone via Messages in iCloud)
-# keeps its rows in chat.db. Hide them by default, or a conversation deleted on
-# the phone lingers in every client for a month. IMSG_INCLUDE_DELETED=1 shows them.
-MESSAGE_SRC = (
-    "message"
-    if os.environ.get("IMSG_INCLUDE_DELETED") == "1"
-    else "(SELECT * FROM message WHERE ROWID NOT IN (SELECT message_id FROM chat_recoverable_message_join))"
-)
+# Two kinds of rows live in the message table without being messages. Both are
+# hidden at the source, so every query — recent, thread, chats, unread — agrees.
+#
+#   Recently Deleted: the 30-day bin, synced from the iPhone via Messages in
+#   iCloud. Left in, a conversation deleted on the phone lingers in every client
+#   for a month. IMSG_INCLUDE_DELETED=1 shows them.
+#
+#   Announcements (item_type != 0): someone joined or left, a rename, location
+#   sharing started or stopped. Messages.app draws them as grey centered text
+#   and never marks them read, so left in they surface as empty bubbles that
+#   count as unread forever. Group names are still recovered from rename rows;
+#   cmd_groups reads the raw table for that.
+HIDE_DELETED = os.environ.get("IMSG_INCLUDE_DELETED") != "1"
+
+
+def message_src(has_recently_deleted: bool) -> str:
+    where = ["item_type = 0"]
+    if HIDE_DELETED and has_recently_deleted:
+        where.append("ROWID NOT IN (SELECT message_id FROM chat_recoverable_message_join)")
+    return f"(SELECT * FROM message WHERE {' AND '.join(where)})"
+
+
+MESSAGE_SRC = message_src(has_recently_deleted=True)
 
 _BASE_SELECT_CACHE: str | None = None
 

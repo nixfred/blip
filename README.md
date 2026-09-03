@@ -388,6 +388,11 @@ Deleted" bin that is still in `chat.db`. claude-on-mac's `imsg` hides those rows
 a conversation you delete on the phone disappears from Blip within one poll of
 the iCloud sync. `IMSG_INCLUDE_DELETED=1` shows them again.
 
+**Notices are not messages.** Messages.app writes its grey centered notices —
+someone joined, a group was renamed, location sharing started — into the same
+table as messages, and never marks them read. `imsg` hides them, or every one
+would be an empty bubble that counts as unread until the end of time.
+
 **No message bodies are stored on Linux.** `~/.local/state/blip/state.json`
 holds timestamps, unread counts, SHA-256 toast-dedupe keys, inferred self-chat
 ids, and group metadata. It is written atomically with mode `0600`; legacy
