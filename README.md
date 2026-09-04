@@ -353,6 +353,28 @@ else still counts and still shows.
 { "allow": ["+15551234567", "them@icloud.com"] }
 ```
 
+**Mute (spam)** — the allowlist's opposite: a muted conversation does not
+show at all. No sidebar row, no unread count, no toast. This is the knob for
+political fundraising blasts — the "the deadline is TONIGHT, rush $25,
+Reply STOP2END" texts that arrive from a short code you have never seen and
+that will be a different short code next week. Listing the number is
+whack-a-mole, so list the words instead: the PAC platform's name (`ActBlue`,
+`WinRed`) and the opt-out footer the law makes every one of them carry
+(`Stop2End`) survive the rotation.
+
+```jsonc
+// ~/.config/blip/mutelist.json — re-read every poll, no restart
+{ "mute": ["ActBlue", "WinRed", "Stop2End", "78462"] }
+```
+
+An entry matches a handle or chat id **exactly** (like the allowlist), or a
+**phrase** of two or more characters anywhere in an inbound message,
+case-insensitively. One match mutes that whole conversation — a blast puts
+its footer on some messages and not others. Only inbound text is tested, so
+forwarding "another ActBlue text, unbelievable" to a friend never mutes the
+friend. Nothing is deleted: the messages are untouched on the Mac and in
+Messages, Blip simply stops showing them.
+
 **Outside North America:** set `country_code=44` (etc.) in
 `~/.config/blip/bridge.conf` so a number typed without a country code in
 "New message" resolves correctly. Green-bubble (SMS/RCS) conversations

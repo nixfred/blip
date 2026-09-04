@@ -30,6 +30,8 @@ const HOME = process.env.HOME ?? homedir();
 export const STATE_PATH = `${HOME}/.local/state/blip/state.json`;
 /** Handles whose inbound messages are allowed to raise a desktop toast. */
 export const ALLOWLIST_PATH = `${HOME}/.config/blip/allowlist.json`;
+/** Handles and phrases whose conversations Blip does not show at all. */
+export const MUTELIST_PATH = `${HOME}/.config/blip/mutelist.json`;
 
 /**
  * Shallow poll window for previews and toasts. An exact metadata-only unread
@@ -262,6 +264,30 @@ export function loadAllowlist(path = ALLOWLIST_PATH): string[] {
     const raw = JSON.parse(readFileSync(path, "utf8"));
     const list = Array.isArray(raw) ? raw : raw?.allow;
     return Array.isArray(list) ? list.filter((h: unknown) => typeof h === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The mute list: political fundraising blasts and their kin, gone.
+ *
+ * Same shape as the allowlist and read the same way — a bare array or
+ * `{ "mute": [...] }`, re-read every poll, absent file means an empty list —
+ * but the opposite polarity, and it silences the whole conversation rather
+ * than just its toast. An entry matches either
+ *   • a handle or chat id EXACTLY (`"+15551234567"`), like the allowlist, or
+ *   • a phrase, case-insensitively, anywhere in an inbound message's text
+ *     (`"ActBlue"`, `"Stop2End"`, `"Reply STOP2END"`).
+ * Phrases are the useful half: the short codes these blasts arrive from
+ * rotate every cycle, but the opt-out footer the law makes them carry does
+ * not. Two characters minimum, so a stray `"a"` cannot mute the world.
+ */
+export function loadMutelist(path = MUTELIST_PATH): string[] {
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8"));
+    const list = Array.isArray(raw) ? raw : raw?.mute;
+    return Array.isArray(list) ? list.filter((h: unknown) => typeof h === "string" && h !== "") : [];
   } catch {
     return [];
   }
@@ -551,6 +577,63 @@ export function selectToasts(
     out.push({ chat: chatKey(m), name: m.name ?? m.handle, text: m.text, ts: m.ts, key });
   }
   return out;
+}
+
+/** One mute entry against one message: an exact handle/chat id, or a phrase
+ *  (two characters or more) anywhere in the text, case-insensitively. */
+export function matchesMute(m: ImsgMessage, mute: string[]): boolean {
+  if (mute.length === 0) return false;
+  const chat = chatKey(m);
+  const text = String(m.text ?? "").toLowerCase();
+  for (const entry of mute) {
+    if (entry === chat || entry === m.handle) return true;
+    if (entry.length >= 2 && text !== "" && text.includes(entry.toLowerCase())) return true;
+  }
+  return false;
+}
+
+/**
+ * Conversations the mute list silences — matched on INBOUND messages only, so
+ * quoting "ActBlue" to a friend never mutes the friend.
+ *
+ * One match mutes the whole chat, not the single message: a fundraising blast
+ * carries its opt-out footer on some messages and not others, and half a
+ * conversation left in the sidebar is worse than none.
+ */
+export function mutedChats(msgs: ImsgMessage[], mute: string[]): string[] {
+  if (mute.length === 0) return [];
+  const out = new Set<string>();
+  for (const m of msgs) if (!m.from_me && matchesMute(m, mute)) out.add(chatKey(m));
+  return [...out];
+}
+
+/** Drop muted conversations before anything is counted. Filtering here rather
+ *  than in the QML is the point: a muted blast never reaches the unread
+ *  ledger, the thread list, or a toast, so it cannot badge the bar either. */
+export function dropMuted(msgs: ImsgMessage[], muted: string[]): ImsgMessage[] {
+  if (muted.length === 0) return msgs;
+  const gone = new Set(muted);
+  return msgs.filter((m) => !gone.has(chatKey(m)));
+}
+
+/**
+ * The same cut on `imsg chats` rows. A deep run completes the sidebar from the
+ * chat list, which reaches back further than the message window — without
+ * this, a blast last seen a month ago would reappear the moment the panel
+ * opened. Rows are matched on their id, their aliases, and their last preview
+ * text, which is the only body a chat row carries.
+ */
+export function dropMutedChats(chats: ChatInfo[] | null, mute: string[], muted: string[]): ChatInfo[] | null {
+  if (chats === null || (mute.length === 0 && muted.length === 0)) return chats;
+  const gone = new Set(muted);
+  const phrases = mute.filter((e) => e.length >= 2).map((e) => e.toLowerCase());
+  return chats.filter((c) => {
+    const ids = [c.id, ...c.aliases];
+    if (ids.some((id) => gone.has(id) || mute.includes(id))) return false;
+    if (c.last_from_me) return true;   // your own reply is not the blast
+    const text = c.last_text.toLowerCase();
+    return text === "" || !phrases.some((p) => text.includes(p));
+  });
 }
 
 /** First http(s) URL in a message, or "". Trailing punctuation that a person
@@ -1136,7 +1219,13 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   const groups = (deep ? fetchGroups() : null) ?? state.groups;
   // persist only on two independent twins; one may be a coincidence (#6)
   const selfChats = [...new Set([...state.selfChats, ...detectSelfChats(fetched.msgs, 2)])];
-  const msgs = dedupeSelfEcho(fetched.msgs, selfChats);
+  // The mute list cuts here, upstream of every count: a muted conversation is
+  // absent from the ledger, the thread list and the toasts alike, exactly as
+  // if the Mac had never received it. Read fresh each poll, like the allowlist.
+  const mute = loadMutelist();
+  const deduped = dedupeSelfEcho(fetched.msgs, selfChats);
+  const muted = mutedChats(deduped, mute);
+  const msgs = dropMuted(deduped, muted);
   let exactCounts = unreadCounts(msgs, state.readMark, state.readMarks, selfChats);
   let exactOldest = unreadOldest(msgs, state.readMark, state.readMarks, selfChats);
   if (markRead) {
@@ -1155,7 +1244,7 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   // Deep runs (a surface is open) complete the list from `imsg chats`; a
   // shallow poll returns the window's rows and the widget keeps its last
   // complete list in memory (it skips identical assignments anyway).
-  const chats = deep ? fetchChats() : null;
+  const chats = deep ? dropMutedChats(fetchChats(), mute, muted) : null;
   // One entry per CONVERSATION. A re-keyed group has several chat rows; the
   // bridge names the older ones as aliases of the live row, and the map is
   // cached so shallow polls fold identically (a conversation must never

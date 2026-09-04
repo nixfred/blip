@@ -16,6 +16,11 @@ import {
   displayName,
   fetchMessages,
   loadAllowlist,
+  loadMutelist,
+  matchesMute,
+  mutedChats,
+  dropMuted,
+  dropMutedChats,
   loadState,
   validPins,
   pinsFromChats,
@@ -27,6 +32,7 @@ import {
   unreadCounts,
   unreadOldest,
   type ImsgMessage,
+  type ChatInfo,
 } from "./collector";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "blip-test-"));
@@ -1108,5 +1114,112 @@ describe("pins survive shallow polls", () => {
     expect(validPins({ A: 0, B: null, C: "1", D: 1.5, "": 2, E: 3 })).toEqual({ A: 0, B: null, E: 3 });
     expect(validPins(undefined)).toEqual({});
     expect(validPins("nope")).toEqual({});
+  });
+});
+
+describe("mute list", () => {
+  // A political fundraising blast, in the shape they actually arrive in: a
+  // rotating short code, a body that names the PAC, and the legally required
+  // opt-out footer that never changes.
+  const blast = (over: Partial<ImsgMessage> = {}) =>
+    msg({
+      chat: "78462", handle: "78462", name: null,
+      text: "The deadline is TONIGHT. Rush $25 now: actblue.com/x Reply STOP2END",
+      ...over,
+    });
+
+  test("reads a bare-array mute list", () => {
+    const p = join(tmp(), "mute.json");
+    writeFileSync(p, JSON.stringify(["ActBlue"]));
+    expect(loadMutelist(p)).toEqual(["ActBlue"]);
+  });
+
+  test("reads a {mute:[...]} mute list", () => {
+    const p = join(tmp(), "mute2.json");
+    writeFileSync(p, JSON.stringify({ mute: ["Stop2End"], note: "ignored" }));
+    expect(loadMutelist(p)).toEqual(["Stop2End"]);
+  });
+
+  test("a missing mute list is empty, not an error", () => {
+    expect(loadMutelist(join(tmp(), "none.json"))).toEqual([]);
+  });
+
+  test("non-string and empty entries are filtered out", () => {
+    const p = join(tmp(), "mixed.json");
+    writeFileSync(p, JSON.stringify(["ActBlue", "", 42, null]));
+    expect(loadMutelist(p)).toEqual(["ActBlue"]);
+  });
+
+  test("a phrase matches anywhere in the text, case-insensitively", () => {
+    expect(matchesMute(blast(), ["stop2end"])).toBe(true);
+    expect(matchesMute(blast(), ["ActBlue"])).toBe(true);
+  });
+
+  test("a handle or chat id matches exactly, like the allowlist", () => {
+    expect(matchesMute(blast(), ["78462"])).toBe(true);
+    // ...and only exactly: a substring of a number is not a number.
+    expect(matchesMute(blast({ text: "" }), ["784"])).toBe(false);
+  });
+
+  test("a one-character entry cannot mute the world", () => {
+    expect(matchesMute(msg({ text: "hello" }), ["h"])).toBe(false);
+  });
+
+  test("an empty mute list mutes nothing", () => {
+    expect(matchesMute(blast(), [])).toBe(false);
+    expect(mutedChats([blast()], [])).toEqual([]);
+  });
+
+  test("quoting a muted phrase to a friend does not mute the friend", () => {
+    // Outbound only: you forwarding "look what ActBlue sent me" is not spam.
+    const mine = msg({ chat: "+15550100002", handle: "+15550100002", from_me: true,
+      text: "another ActBlue text, unbelievable" });
+    expect(mutedChats([mine], ["ActBlue"])).toEqual([]);
+  });
+
+  test("one match mutes the whole conversation, not just that message", () => {
+    const window = [
+      blast({ ts: "2026-08-30 09:00:00" }),
+      blast({ ts: "2026-08-30 10:00:00", text: "Are you still with us?" }),
+      msg({ chat: "+15550100002", handle: "+15550100002", text: "lunch?" }),
+    ];
+    const muted = mutedChats(window, ["Stop2End"]);
+    expect(muted).toEqual(["78462"]);
+    const kept = dropMuted(window, muted);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.text).toBe("lunch?");
+  });
+
+  test("the chat list drops muted rows too, by id, alias, or preview text", () => {
+    const row = (id: string, last_text: string, aliases: string[] = []): ChatInfo => ({
+      id, name: id, service: "SMS", last: "2026-08-30 10:00:00", last_text,
+      last_from_me: false, last_handle: id, last_name: null, pinned: false, pin_order: null, aliases,
+    });
+    const chats = [
+      row("78462", "Rush $25 now. Reply STOP2END"),
+      row("+15550100002", "lunch?"),
+      row("chat9", "hi", ["78462"]),
+    ];
+    const out = dropMutedChats(chats, ["Stop2End"], ["78462"])!;
+    expect(out.map((c) => c.id)).toEqual(["+15550100002"]);
+  });
+
+  test("your own reply keeps a chat row alive", () => {
+    const row: ChatInfo = {
+      id: "+15550100002", name: "Alex Rivera", service: "iMessage", last: "2026-08-30 10:00:00",
+      last_text: "ugh, ActBlue again", last_from_me: true, last_handle: "+15550100002",
+      last_name: null, pinned: false, pin_order: null, aliases: [],
+    };
+    expect(dropMutedChats([row], ["ActBlue"], [])).toHaveLength(1);
+  });
+
+  test("a shallow poll has no chat list to filter", () => {
+    expect(dropMutedChats(null, ["ActBlue"], [])).toBeNull();
+  });
+
+  test("a muted conversation never toasts, because it never reaches selectToasts", () => {
+    const window = [blast({ ts: "2026-08-30 11:00:00" })];
+    const kept = dropMuted(window, mutedChats(window, ["ActBlue"]));
+    expect(selectToasts(kept, "2026-08-30 10:00:00", ["78462"], [])).toEqual([]);
   });
 });
