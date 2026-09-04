@@ -14,6 +14,7 @@ import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 import {
   chatKey,
+  applyIdentityOverrides,
   dedupeSelfEcho,
   isGroupChat,
   loadState,
@@ -22,6 +23,7 @@ import {
   type LinkCard,
   type Tapback,
 } from "./collector";
+import { safeReadIdentityConfig } from "./identities";
 export { dedupeSelfEcho };
 
 const HOME = process.env.HOME ?? homedir();
@@ -54,6 +56,8 @@ export const GROUP_GAP_MINUTES = 15;
 export interface Bubble {
   ts: string;
   from_me: boolean;
+  /** Sender handle retained for contact actions; never rendered directly when a name exists. */
+  handle: string;
   name: string;
   text: string;
   /** Non-empty on the first message of a new calendar day: "Today", "Aug 28". */
@@ -76,6 +80,8 @@ export interface Bubble {
   edited: boolean;
   /** Rich-link preview card, null when the message has none. */
   link: LinkCard | null;
+  /** The body is only the shared URL already represented by `link`. */
+  linkOnly: boolean;
   /** An unsent message renders as a tombstone, not a bubble. */
   retracted: boolean;
   /** Screen/bubble effect short name ("confetti"), "" when none. */
@@ -201,6 +207,11 @@ export function minutesBetween(a: string, b: string): number {
   return Math.abs(pb - pa) / 60000;
 }
 
+/** Metadata often canonicalizes a shared URL by dropping tracking parameters. */
+export function standaloneUrl(text: string): boolean {
+  return /^(?:https?:\/\/|www\.)[^\s<>"']+$/i.test(String(text ?? "").trim());
+}
+
 // ---------------------------------------------------------------- decoration
 
 /**
@@ -241,14 +252,17 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
       next.ts.slice(0, 10) !== m.ts.slice(0, 10) ||
       !sameSender(m, next) ||
       minutesBetween(m.ts, next.ts) > GROUP_GAP_MINUTES;
+    const cleanText = (m.text ?? "").replace(/￼/g, "").trim();
+    const link = normalizeLink(m.link);
 
     out.push({
       ts: m.ts,
       from_me: m.from_me,
+      handle: m.handle ?? "",
       name: m.name ?? m.handle ?? "",
       // U+FFFC is the object-replacement placeholder Messages leaves where an
       // attachment sat; the chip row carries that information instead.
-      text: (m.text ?? "").replace(/￼/g, "").trim(),
+      text: cleanText,
       day: newDay ? dayLabel(m.ts, today, formats) : "",
       groupStart,
       groupEnd,
@@ -262,11 +276,12 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
       replyText: m.reply_to?.text ?? "",
       replyMine: m.reply_to?.from_me ?? false,
       edited: m.edited === true,
-      link: normalizeLink(m.link),
+      link,
+      linkOnly: link !== null && standaloneUrl(cleanText),
       retracted: m.retracted === true,
       effect: m.effect ?? "",
       audio: m.audio === true,
-      html: linkify((m.text ?? "").replace(/￼/g, "").trim()),
+      html: linkify(cleanText),
       failed: m.from_me && typeof m.error === "number" && m.error !== 0,
     });
   }
@@ -344,10 +359,12 @@ export function selectThread(
   group: boolean,
   limit: number,
   selfChats: string[] = [],
+  aliases: string[] = [],
 ): ImsgMessage[] {
   // Exact-filter DMs too: `imsg thread` matches the handle by SUBSTRING, so
   // +15551234567 can pull rows from +995551234567 into the wrong conversation
   // (Codex finding #3).
+  const accepted = new Set([chat, ...aliases]);
   // A DM is scoped by CHAT, not by sender: the same handle's messages in a
   // group carry the group's chat id and must stay out of the 1:1 thread.
   // A group request: the bridge already scoped `thread --chat` to the whole
@@ -356,7 +373,7 @@ export function selectThread(
   // 6 bubbles here — Astra #8). Trust the cluster; keep every group row.
   let msgs = group
     ? raw.filter((m) => isGroupChat(chatKey(m)))
-    : raw.filter((m) => chatKey(m) === chat || (m.handle === chat && !isGroupChat(chatKey(m))));
+    : raw.filter((m) => accepted.has(chatKey(m)) || (m.handle === chat && !isGroupChat(chatKey(m))));
   msgs = [...msgs].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
   msgs = dedupeSelfEcho(msgs, selfChats);
   return msgs.length > limit ? msgs.slice(msgs.length - limit) : msgs;
@@ -370,6 +387,7 @@ export function loadThread(
   today: string,
   formats = DEFAULT_FORMATS,
   runner = spawnSync,
+  aliases: string[] = [],
 ): ThreadOutput {
   // Groups load by EXACT chat id (imsg ≥1.8.0 `thread --chat`). The old
   // recent-window scan cost ~20× the rows and missed anything older than
@@ -379,6 +397,10 @@ export function loadThread(
   // window (war room #14). A DM's chat_identifier IS the handle.
   const group = isGroupChat(chat);
   const args = ["--json", "--rich", "thread", "--chat", chat, String(limit)];
+  const safeAliases = [...new Set(aliases)]
+    .filter((alias) => alias !== chat && alias.length > 0 && alias.length <= 512 &&
+      !/[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/.test(alias))
+    .slice(0, 15);
   const res = runner(`${HOME}/bin/imsg`, args, {
     encoding: "utf8",
     timeout: 15000, maxBuffer: 64 * 1024 * 1024,
@@ -394,7 +416,8 @@ export function loadThread(
   try {
     const parsed = JSON.parse(res.stdout as string);
     if (!Array.isArray(parsed)) throw new Error("not an array");
-    const msgs = selectThread(parsed as ImsgMessage[], chat, group, limit, loadState().selfChats);
+    const named = applyIdentityOverrides(parsed as ImsgMessage[], safeReadIdentityConfig());
+    const msgs = selectThread(named, chat, group, limit, loadState().selfChats, safeAliases);
     return { ok: true, online: true, error: "", bubbles: decorate(msgs, today, formats) };
   } catch (e) {
     return { ok: false, online: true, error: `bad JSON from imsg: ${e}`, bubbles: [] };
@@ -416,9 +439,16 @@ export function cliChatArg(raw: string): string {
 if (import.meta.main) {
   const chat = cliChatArg(process.argv[2] ?? "");
   const limit = Number(process.argv[3] ?? 80) || 80;
+  const aliases: string[] = [];
+  for (let i = 4; i < process.argv.length; i++) {
+    const arg = process.argv[i] ?? "";
+    if (arg.startsWith("--")) { i++; continue; }
+    aliases.push(arg);
+  }
   const today = localToday();
   try {
-    console.log(JSON.stringify(loadThread(chat, limit, today, formatsFromArgv(process.argv))));
+    console.log(JSON.stringify(loadThread(
+      chat, limit, today, formatsFromArgv(process.argv), spawnSync, aliases)));
   } catch (e) {
     console.log(JSON.stringify({ ok: false, online: false, error: String(e), bubbles: [] }));
   }

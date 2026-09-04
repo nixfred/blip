@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { CACHE_DIR, bakeOrientation, cacheFileName, exifOrientation, fetchAttachment, imageMetrics, isImageMime, jpegtranArgs, lruEvictions, sanitizeName, wantsJpeg } from "./fetch";
-import { extFor, existingLocalFile, firstFileUri, pickImageType, snapshotClipboard } from "./paste";
+import { extFor, existingLocalFile, firstFileUri, localFileFromPayload, pickFileType, pickImageType, snapshotClipboard } from "./paste";
 import { resolveTarget, sendFile } from "./send-file";
 import { linkHost, linkify, normalizeLink, selectThread } from "./thread";
 import {
@@ -18,7 +18,7 @@ import { AVATAR_DIR, AVATAR_NONE_TTL_MS, AVATAR_TTL_MS, avatarArgs, avatarKey, f
 import { readFileSync, writeFileSync, unlinkSync, utimesSync, mkdtempSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 // A real 16×8 baseline JPEG (ImageMagick, -strip): no APP1 at all.
 const TINY_JPEG = Buffer.from(
@@ -209,6 +209,45 @@ describe("EXIF orientation is baked into cached JPEGs", () => {
     expect(sofSize(withExif(TINY_JPEG, 6))).toEqual([16, 8]);
     expect(sofSize(out)).toEqual([8, 16]);
     expect(exifOrientation(out)).toBe(1);                    // tag gone: no double rotation in Qt
+  });
+});
+
+describe("clipboard file paste", () => {
+  test("prefers a GNOME file object over URI-list and text", () => {
+    expect(pickFileType(["text/plain", "text/uri-list", "x-special/gnome-copied-files"]))
+      .toBe("x-special/gnome-copied-files");
+  });
+
+  test("extracts an existing local file from both supported payloads", () => {
+    const tmp = `${process.env.HOME}/.cache/blip-paste-${process.pid}.vcf`;
+    writeFileSync(tmp, "BEGIN:VCARD\nEND:VCARD\n");
+    const uri = new URL(`file://${tmp}`).href;
+    try {
+      expect(localFileFromPayload("x-special/gnome-copied-files", `copy\n${uri}\n`)).toBe(tmp);
+      expect(localFileFromPayload("text/uri-list", `# contact\r\n${uri}\r\n`)).toBe(tmp);
+    } finally { unlinkSync(tmp); }
+  });
+
+  test("rejects remote URIs and missing local files", () => {
+    expect(localFileFromPayload("text/uri-list", "https://example.com/person.vcf\n")).toBe("");
+    expect(localFileFromPayload("text/uri-list", "file:///definitely/missing/person.vcf\n")).toBe("");
+  });
+
+  test("snapshot returns a file attachment before attempting text", () => {
+    const tmp = `${process.env.HOME}/.cache/blip-snapshot-${process.pid}.vcf`;
+    writeFileSync(tmp, "BEGIN:VCARD\nEND:VCARD\n");
+    const calls: string[][] = [];
+    const runner = ((_cmd: string, args: string[]) => {
+      calls.push(args);
+      if (args.includes("--list-types")) {
+        return { status: 0, stdout: "text/plain\nx-special/gnome-copied-files\n" };
+      }
+      return { status: 0, stdout: `copy\n${new URL(`file://${tmp}`).href}\n` };
+    }) as never;
+    try {
+      expect(snapshotClipboard(runner)).toMatchObject({ kind: "file", path: tmp, name: basename(tmp) });
+      expect(calls.some((args) => args.includes("text"))).toBe(false);
+    } finally { unlinkSync(tmp); }
   });
 });
 

@@ -12,7 +12,7 @@
 # key=value — keys: host (ssh target), key (dedicated identity, default
 # ~/.ssh/blip_ed25519; absent → general ssh), remote_bin (dir on the Mac
 # holding the tools; default ~/.blip/bin), python (default python3),
-# automation (on|off — read by the plugin, not the shim).
+# automation and contact_writes (on|off — read by the plugin, not the shim).
 #
 # The connectivity probe MUST be `ssh -n`: a bare probe eats stdin and
 # silently empties `imsg-send --file-stdin` payloads (learned the hard way).

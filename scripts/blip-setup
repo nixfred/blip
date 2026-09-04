@@ -32,11 +32,12 @@ conf_dir="$HOME/.config/blip"
 conf="$conf_dir/bridge.conf"
 
 # bridge.conf is DATA (audit #7): read the two keys we care about, never source it.
-prev_automation=""; prev_country=""
+prev_automation=""; prev_country=""; prev_contact_writes=""
 if [[ -r "$conf" ]]; then
   [[ -z "$host" ]] && host="$(sed -n 's/^host=//p' "$conf" | head -1 | tr -d '"\x27 ')"
   prev_automation="$(sed -n 's/^automation=//p' "$conf" | head -1 | tr -d '"\x27 ')"
   prev_country="$(sed -n 's/^country_code=//p' "$conf" | head -1 | tr -d '"\x27 ')"
+  prev_contact_writes="$(sed -n 's/^contact_writes=//p' "$conf" | head -1 | tr -d '"\x27 ')"
 fi
 if [[ -z "${host:-}" ]]; then
   read -r -p "Mac ssh target ([user@]host, Tailscale name works best): " host
@@ -50,7 +51,7 @@ fi
 # ui_font, ui_font_size, anything set by hand — must survive a re-run; a
 # wholesale rewrite silently re-enabled what the user had turned off (Astra #18).
 kept=""
-[[ -r "$conf" ]] && kept="$(grep -vE '^[[:space:]]*(#|$|host=|remote_bin=|python=|key=|automation=|country_code=)' "$conf" || true)"
+[[ -r "$conf" ]] && kept="$(grep -vE '^[[:space:]]*(#|$|host=|remote_bin=|python=|key=|automation=|country_code=|contact_writes=)' "$conf" || true)"
 mkdir -p "$conf_dir"
 {
   echo "# Blip bridge — read (never sourced) by ~/bin/imsg, imsg-send, imsg-read, contacts"
@@ -63,6 +64,8 @@ mkdir -p "$conf_dir"
   echo "automation=${BLIP_AUTOMATION:-${prev_automation:-off}}"   # a re-run keeps a hand-set value
   echo "# country calling code for numbers typed without one (1 = US/Canada, 44 = UK, 49 = DE…)"
   echo "country_code=${prev_country:-1}"
+  echo "# on = show confirmed, undoable Mac Contacts repair controls"
+  echo "contact_writes=${BLIP_CONTACT_WRITES:-${prev_contact_writes:-off}}"
   if [[ -n "$kept" ]]; then echo "# kept from the previous bridge.conf"; printf '%s\n' "$kept"; fi
 } > "$conf"
 chmod 0600 "$conf"
@@ -112,6 +115,14 @@ if ssh -n -o ConnectTimeout=6 -o BatchMode=yes "$host" true 2>/dev/null; then
   if ! ssh "$host" "python3 -c 'import sqlite3, subprocess'" >/dev/null 2>&1; then
     echo "✗ python3 on $host cannot run: install Xcode Command Line Tools there —  xcode-select --install  — then re-run blip-setup" >&2
     exit 1
+  fi
+
+  # Contact writes require a second, Mac-local gate that the restricted Blip
+  # key cannot create for itself. Only an explicit setup environment opt-in
+  # installs it; ordinary setup remains read-only/open-only.
+  if [[ "${BLIP_CONTACT_WRITES:-off}" == on ]]; then
+    ssh "$host" 'umask 077; mkdir -p ~/.blip; printf "enabled-v1\n" > ~/.blip/contact-writes-enabled; chmod 0600 ~/.blip/contact-writes-enabled'
+    echo "✓ Mac contact-write gate enabled (explicit BLIP_CONTACT_WRITES=on)"
   fi
 
   # 4b. Dedicated key, confined on the Mac to blip-dispatch (restrict = no
