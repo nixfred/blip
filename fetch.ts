@@ -38,6 +38,7 @@ const HOME = process.env.HOME ?? homedir();
 export const CACHE_DIR = join(process.env.XDG_CACHE_HOME ?? join(HOME, ".cache"), "blip", "att");
 export const CACHE_CAP_BYTES = 500 * 1024 * 1024;
 export const FETCH_MAX_BYTES = 100 * 1024 * 1024;
+
 /** Long edge for an auto-fetched inline preview. The bubble decodes at 800;
  *  1600 keeps it crisp on a HiDPI panel and still lands well under any cap. */
 export const PREVIEW_MAX_DIM = 1600;

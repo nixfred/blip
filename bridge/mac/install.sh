@@ -17,7 +17,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 dest="$HOME/.blip/bin"
 mkdir -p "$dest"
-for t in imsg imsg-send imsg-read contacts tcc-check blip-check blip-dispatch; do
+for t in imsg imsg-send imsg-read contacts contact-repair.js tcc-check blip-check blip-dispatch; do
   if [[ -f "$here/$t" ]]; then
     install -m 0755 "$here/$t" "$dest/$t"
   else

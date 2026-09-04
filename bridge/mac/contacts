@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-contacts: read-only Apple Contacts query tool
+contacts: bounded Apple Contacts query tool
 
 Reads ~/Library/Application Support/AddressBook/Sources/*/AddressBook-v22.abcddb
 (per-account SQLite stores). Each iCloud / CardDAV account gets its own source
@@ -11,6 +11,10 @@ Subcommands:
   find <query> [N], substring search across name/org/phone/email
   lookup <phone-or-email>, resolve to a contact (best-effort match);
                                 exit 0 + name on stdout, exit 1 if no match
+  resolve, bounded JSON identity resolver over stdin. Read-only:
+                                candidate lookup, a store fingerprint, a bulk
+                                handle audit, and opening one matching card
+                                in Contacts.app
   dump [--json], full dump of every contact
   sources, list configured Contacts sources
 
@@ -28,19 +32,41 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import plistlib
 import re
+import selectors
 import sqlite3
+import stat
+import subprocess
 import sys
+import time
+import urllib.parse
 from glob import glob
 from typing import Iterable
 
 ADDRESSBOOK_DIR = os.path.expanduser(
     "~/Library/Application Support/AddressBook"
 )
+ACCOUNTS_DB = os.path.expanduser("~/Library/Accounts/Accounts4.sqlite")
 APPLE_EPOCH = 978307200  # 2001-01-01 UTC
+MAX_RESOLVE_INPUT_BYTES = 48 * 1024
+MAX_RESOLVE_OUTPUT_BYTES = 48 * 1024
+MAX_RESOLVE_SOURCES = 64
+MAX_MATCH_RECORDS = 64
+MAX_CANDIDATES = 8
+MAX_HANDLE_CHARS = 320
+MAX_NAME_CHARS = 160
+MAX_SOURCE_NAME_CHARS = 120
+MAX_REPAIR_FIELDS = 8
+MAX_AUDIT_HANDLES = 200
+MAX_REPAIR_INPUT_BYTES = 48 * 1024
+MAX_REPAIR_PROCESS_BYTES = 48 * 1024
+REPAIR_TIMEOUT_SECONDS = 25
+_UNSAFE_TEXT = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+_CONTACT_TOKEN = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 _ACCOUNTS_DB = os.path.expanduser("~/Library/Accounts/Accounts4.sqlite")
 
@@ -92,13 +118,27 @@ def _ab_sources() -> list[str]:
 
 def source_dbs() -> list[str]:
     """All AddressBook-v22.abcddb files (one per source/account), minus
-    Family Sharing child-delegate mirrors (see _child_delegate_sources)."""
+    Family Sharing child-delegate mirrors (see _child_delegate_sources).
+
+    Ordered by contact count, largest account first, so account numbering and
+    the compare/merge card order stay stable across contacts — the biggest
+    store is always card 1 instead of whichever store's folder name happens
+    to sort first. Ties and unreadable stores fall back to path order.
+    """
     paths = _ab_sources()
     # Also include the root db if non-trivial
     root = os.path.join(ADDRESSBOOK_DIR, "AddressBook-v22.abcddb")
     if os.path.exists(root):
         paths.append(root)
-    return paths
+
+    def record_count(path: str) -> int:
+        try:
+            with open_db(path) as con:
+                return int(con.execute("SELECT COUNT(*) FROM ZABCDRECORD").fetchone()[0])
+        except (sqlite3.Error, OSError, TypeError, ValueError):
+            return -1
+
+    return sorted(paths, key=lambda item: (-record_count(item), item))
 
 
 def open_db(path: str) -> sqlite3.Connection:
@@ -106,6 +146,58 @@ def open_db(path: str) -> sqlite3.Connection:
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     return con
+
+
+def source_identifier(path: str) -> str:
+    """Private stable id for one Contacts store; never emitted to Blip."""
+    parent = os.path.dirname(path)
+    if os.path.basename(os.path.dirname(parent)) == "Sources":
+        return os.path.basename(parent)
+    return "__on_my_mac__"
+
+
+def contact_source_names(paths: list[str]) -> dict[str, str]:
+    """Map private Contacts store ids to bounded user-facing account names."""
+    labels = {"__on_my_mac__": "On My Mac"}
+    wanted = {source_identifier(path) for path in paths}
+    if wanted == {"__on_my_mac__"}:
+        return labels
+    try:
+        info = os.lstat(ACCOUNTS_DB)
+        if (not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)
+                or info.st_uid != os.getuid()):
+            return labels
+        with open_db(ACCOUNTS_DB) as con:
+            rows = con.execute(
+                """
+                SELECT a.ZIDENTIFIER AS identifier,
+                       a.ZACCOUNTDESCRIPTION AS description,
+                       a.ZUSERNAME AS username,
+                       p.ZACCOUNTDESCRIPTION AS parent_description,
+                       p.ZUSERNAME AS parent_username,
+                       t.ZACCOUNTTYPEDESCRIPTION AS account_type
+                FROM ZACCOUNT a
+                LEFT JOIN ZACCOUNTTYPE t ON t.Z_PK = a.ZACCOUNTTYPE
+                LEFT JOIN ZACCOUNT p ON p.Z_PK = a.ZPARENTACCOUNT
+                WHERE a.ZACTIVE = 1
+                """
+            ).fetchall()
+    except (OSError, sqlite3.DatabaseError):
+        return labels
+    for row in rows:
+        identifier = clean_text(row["identifier"], 200)
+        if identifier not in wanted:
+            continue
+        label = (
+            clean_text(row["parent_description"], MAX_SOURCE_NAME_CHARS)
+            or clean_text(row["description"], MAX_SOURCE_NAME_CHARS)
+            or clean_text(row["parent_username"], MAX_SOURCE_NAME_CHARS)
+            or clean_text(row["username"], MAX_SOURCE_NAME_CHARS)
+            or clean_text(row["account_type"], MAX_SOURCE_NAME_CHARS)
+        )
+        if label:
+            labels[identifier] = label
+    return labels
 
 
 def normalize_phone(s: str) -> str:
@@ -117,6 +209,476 @@ def normalize_phone(s: str) -> str:
 
 def normalize_email(s: str) -> str:
     return (s or "").strip().lower()
+
+
+def clean_text(value: object, maximum: int) -> str:
+    """One-line, bounded text safe to retain in the long-lived QML host."""
+    text = _UNSAFE_TEXT.sub(" ", str(value or ""))
+    return re.sub(r"\s+", " ", text).strip()[:maximum]
+
+
+def normalize_resolve_handle(value: object) -> tuple[str, str, bool]:
+    handle = clean_text(value, MAX_HANDLE_CHARS + 1)
+    if not handle or len(handle) > MAX_HANDLE_CHARS:
+        raise ValueError("handle must be between 1 and 320 characters")
+    if "@" in handle:
+        key = normalize_email(handle)
+        if len(key) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+", key):
+            raise ValueError("handle is not a valid email address")
+        return handle, key, True
+    if not re.fullmatch(r"\+?[0-9][0-9 ()./-]{2,39}", handle):
+        raise ValueError("handle is not a valid phone number")
+    key = normalize_phone(handle)
+    if len(key) < 5:
+        raise ValueError("phone handle is too short")
+    return handle, key, False
+
+
+def resolve_token(key: str, name: str) -> str:
+    digest = hashlib.sha256(
+        b"blip-contact-choice-v1\0" + key.encode("utf-8") + b"\0" + name.casefold().encode("utf-8")
+    ).hexdigest()
+    return "sha256:" + digest
+
+
+def card_token(key: str, source: str, uid: str) -> str:
+    """Opaque token for one exact source card; raw source ids never leave the Mac."""
+    digest = hashlib.sha256(
+        b"blip-contact-card-v1\0"
+        + key.encode("utf-8")
+        + b"\0"
+        + source.encode("utf-8")
+        + b"\0"
+        + uid.encode("utf-8")
+    ).hexdigest()
+    return "sha256:" + digest
+
+
+def bounded_source_dbs() -> list[str]:
+    paths = source_dbs()
+    if len(paths) > MAX_RESOLVE_SOURCES:
+        raise RuntimeError("Contacts has too many account stores to resolve safely")
+    accepted = []
+    for path in paths:
+        try:
+            info = os.lstat(path)
+        except OSError:
+            continue
+        if stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode) and info.st_uid == os.getuid():
+            accepted.append(path)
+    return accepted
+
+
+def matching_records(handle: object) -> tuple[str, str, list[dict]]:
+    """Return a small metadata-only set; never load the complete address book."""
+    original, key, email = normalize_resolve_handle(handle)
+    matches: dict[tuple[str, str], dict] = {}
+    matched_fields = 0
+    paths = bounded_source_dbs()
+    source_names = contact_source_names(paths)
+    for path in paths:
+        if matched_fields >= MAX_MATCH_RECORDS:
+            raise RuntimeError("too many matching contact cards; refine them in Contacts")
+        try:
+            with open_db(path) as con:
+                if email:
+                    kind = "email"
+                    rows = con.execute(
+                        """
+                        SELECT r.ZUNIQUEID AS uid, r.ZFIRSTNAME AS first,
+                               r.ZLASTNAME AS last, r.ZNICKNAME AS nick,
+                               r.ZORGANIZATION AS org,
+                               r.ZMODIFICATIONDATE AS modified,
+                               CASE WHEN r.ZTHUMBNAILIMAGEDATA IS NOT NULL
+                                          OR r.ZIMAGEDATA IS NOT NULL THEN 1 ELSE 0 END AS photo,
+                               e.ZADDRESS AS value, e.ZUNIQUEID AS field_uid,
+                               e.ZLABEL AS label
+                        FROM ZABCDEMAILADDRESS e
+                        JOIN ZABCDRECORD r ON r.Z_PK = e.ZOWNER
+                        WHERE lower(e.ZADDRESS) = ?
+                        LIMIT ?
+                        """,
+                        (key, MAX_MATCH_RECORDS + 1),
+                    ).fetchall()
+                else:
+                    kind = "phone"
+                    rows = con.execute(
+                        """
+                        SELECT r.ZUNIQUEID AS uid, r.ZFIRSTNAME AS first,
+                               r.ZLASTNAME AS last, r.ZNICKNAME AS nick,
+                               r.ZORGANIZATION AS org,
+                               r.ZMODIFICATIONDATE AS modified,
+                               CASE WHEN r.ZTHUMBNAILIMAGEDATA IS NOT NULL
+                                          OR r.ZIMAGEDATA IS NOT NULL THEN 1 ELSE 0 END AS photo,
+                               p.ZFULLNUMBER AS value, p.ZUNIQUEID AS field_uid,
+                               p.ZLABEL AS label
+                        FROM ZABCDPHONENUMBER p
+                        JOIN ZABCDRECORD r ON r.Z_PK = p.ZOWNER
+                        WHERE p.ZLASTFOURDIGITS = ?
+                        LIMIT ?
+                        """,
+                        (key[-4:], MAX_MATCH_RECORDS + 1),
+                    ).fetchall()
+        except sqlite3.DatabaseError:
+            continue
+        for row in rows:
+            row_key = normalize_email(row["value"]) if email else normalize_phone(row["value"])
+            if row_key != key:
+                continue
+            matched_fields += 1
+            if matched_fields > MAX_MATCH_RECORDS:
+                raise RuntimeError("too many matching contact fields; refine them in Contacts")
+            name = clean_text(
+                " ".join(filter(None, [row["first"], row["last"]])).strip()
+                or row["org"] or row["nick"] or "",
+                MAX_NAME_CHARS,
+            )
+            uid = clean_text(row["uid"], 200)
+            if not name or not uid:
+                continue
+            source = source_identifier(path)
+            card_key = (source, uid)
+            record = matches.setdefault(card_key, {
+                "name": name,
+                "uid": uid,
+                "source": source,
+                "sourceName": source_names.get(source, "Contacts"),
+                "modified": float(row["modified"] or 0),
+                "photo": row["photo"] == 1,
+                "kind": kind,
+                "fields": [],
+            })
+            field_uid = clean_text(row["field_uid"], 200)
+            field_value = clean_text(row["value"], 320)
+            if field_uid and field_value and len(record["fields"]) < MAX_REPAIR_FIELDS:
+                record["fields"].append({
+                    "id": field_uid,
+                    "value": field_value,
+                    "label": clean_text(row["label"], 80),
+                })
+            elif len(record["fields"]) >= MAX_REPAIR_FIELDS:
+                raise RuntimeError("too many matching fields on one contact card")
+    return original, key, list(matches.values())
+
+
+def contact_candidates(handle: object) -> tuple[str, list[dict], dict[str, list[dict]]]:
+    original, key, records = matching_records(handle)
+    if records:
+        active = active_record_uids(records)
+        records = [record for record in records if record["uid"] in active]
+    by_name: dict[str, list[dict]] = {}
+    display_name: dict[str, str] = {}
+    for record in records:
+        folded = record["name"].casefold()
+        by_name.setdefault(folded, []).append(record)
+        display_name.setdefault(folded, record["name"])
+    if len(by_name) > MAX_CANDIDATES:
+        raise RuntimeError("too many possible names; refine the matching cards in Contacts")
+    candidates = []
+    # matching_records walks the stores in source_dbs() order — largest
+    # account first — so first appearance IS the global account order. Rank
+    # sources by it so account numbering and card order stay stable across
+    # every contact instead of following store UUIDs or photo recency.
+    source_rank: dict[str, int] = {}
+    for record in records:
+        source_rank.setdefault(record["source"], len(source_rank))
+    for folded, named_records in by_name.items():
+        name = display_name[folded]
+        source_numbers = {
+            source: index + 1
+            for index, source in enumerate(sorted(
+                {r["source"] for r in named_records},
+                key=lambda source: (source_rank.get(source, len(source_rank)), source),
+            ))
+        }
+        source_names = {
+            source: next((clean_text(record.get("sourceName"), MAX_SOURCE_NAME_CHARS)
+                          for record in named_records
+                          if record["source"] == source
+                          and clean_text(record.get("sourceName"), MAX_SOURCE_NAME_CHARS)), "")
+            for source in source_numbers
+        }
+        ordered_records = sorted(
+            named_records,
+            key=lambda r: (source_rank.get(r["source"], len(source_rank)),
+                           -int(r["photo"]), -r["modified"], r["uid"]),
+        )
+        # cards and the raw record list are consumed positionally together
+        # (owned_card, compare) — keep them in the SAME order
+        by_name[folded] = ordered_records
+        candidates.append({
+            "token": resolve_token(key, name),
+            "name": name,
+            "recordCount": len(named_records),
+            "sourceCount": len({r["source"] for r in named_records}),
+            "hasPhoto": any(r["photo"] for r in named_records),
+            "cards": [
+                {
+                    "token": card_token(key, record["source"], record["uid"]),
+                    "accountNumber": source_numbers[record["source"]],
+                    "sourceName": source_names[record["source"]]
+                        or f"Contact source {source_numbers[record['source']]}",
+                    "hasPhoto": record["photo"],
+                    "matchCount": max(1, len(record.get("fields", []))),
+                }
+                for record in ordered_records
+            ],
+            "_modified": max(r["modified"] for r in named_records),
+        })
+    candidates.sort(key=lambda c: (-int(c["hasPhoto"]), -c["_modified"], c["name"].casefold()))
+    for candidate in candidates:
+        del candidate["_modified"]
+    return original, candidates, by_name
+
+
+def store_fingerprint() -> str:
+    """Cheap change detector for the whole Contacts dataset: per store, the
+    row count and newest modification stamp. Any add/edit/delete moves it
+    (sync churn may too — a false miss only costs a re-scan). Lets callers
+    reuse cached cleanup-scan results when nothing changed on the Mac."""
+    parts = []
+    for path in bounded_source_dbs():
+        count, newest = -1, -1.0
+        try:
+            with open_db(path) as con:
+                row = con.execute(
+                    "SELECT COUNT(*), COALESCE(MAX(ZMODIFICATIONDATE), 0) FROM ZABCDRECORD"
+                ).fetchone()
+                count, newest = int(row[0]), float(row[1])
+        except (sqlite3.Error, OSError, TypeError, ValueError):
+            pass
+        parts.append([source_identifier(path), count, newest])
+    digest = hashlib.sha256(
+        ("blip-contact-store-v1\0" + json.dumps(parts, sort_keys=True)).encode("utf-8")
+    ).hexdigest()
+    return "sha256:" + digest
+
+
+def audit_contact_handles(value: object) -> dict:
+    """Classify a bounded handle list without changing Contacts or returning unmatched handles."""
+    if not isinstance(value, list) or not value or len(value) > MAX_AUDIT_HANDLES:
+        raise ValueError("contact audit handle list is invalid")
+    seen: set[str] = set()
+    single_cards = []
+    duplicates = []
+    conflicts = []
+    no_match_count = 0
+    for raw_handle in value:
+        original, key, _ = normalize_resolve_handle(raw_handle)
+        if key in seen:
+            raise ValueError("contact audit contains a duplicate handle")
+        seen.add(key)
+        resolved, candidates, _ = contact_candidates(original)
+        entry = {"handle": resolved, "candidates": candidates}
+        if not candidates:
+            no_match_count += 1
+        elif len(candidates) > 1:
+            conflicts.append(entry)
+        elif candidates[0]["recordCount"] > 1:
+            duplicates.append(entry)
+        else:
+            single_cards.append(entry)
+    return {
+        "handleCount": len(value),
+        "noMatchCount": no_match_count,
+        "singleCards": single_cards,
+        "duplicates": duplicates,
+        "conflicts": conflicts,
+    }
+
+
+def read_resolve_request() -> dict:
+    raw = sys.stdin.buffer.read(MAX_RESOLVE_INPUT_BYTES + 1)
+    if len(raw) > MAX_RESOLVE_INPUT_BYTES:
+        raise ValueError("identity request is too large")
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ValueError("identity request must be a JSON object")
+    if not isinstance(value, dict):
+        raise ValueError("identity request must be a JSON object")
+    return value
+
+
+def emit_resolve(value: dict, maximum: int = MAX_RESOLVE_OUTPUT_BYTES) -> None:
+    output = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if len(output.encode("utf-8")) > maximum:
+        raise RuntimeError("identity response exceeded its size contract")
+    print(output)
+
+
+def selected_card(handle: object, token: object) -> tuple[str, str, dict, dict, int, int]:
+    """Freshly resolve one opaque card token to Mac-only record metadata."""
+    token_text = clean_text(token, 80)
+    if not _CONTACT_TOKEN.fullmatch(token_text):
+        raise ValueError("the selected card token is invalid")
+    original, candidates, by_name = contact_candidates(handle)
+    _, key, _ = normalize_resolve_handle(original)
+    for candidate in candidates:
+        records = sorted(
+            by_name[candidate["name"].casefold()],
+            key=lambda record: (-int(record["photo"]), -record["modified"], record["uid"]),
+        )
+        for index, record in enumerate(records):
+            if card_token(key, record["source"], record["uid"]) != token_text:
+                continue
+            return (
+                original, key, candidate, record, index + 1,
+                candidate["cards"][index]["accountNumber"],
+            )
+    raise ValueError("the selected contact card is no longer a candidate")
+
+
+def run_bounded_process(
+    argv: list[str], payload: bytes, output_limit: int = MAX_REPAIR_PROCESS_BYTES,
+) -> tuple[int, bytes, bytes]:
+    """Drain both pipes incrementally, kill at either cap, and keep a total deadline."""
+    process = subprocess.Popen(
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+    selector = None
+    try:
+        process.stdin.write(payload)
+        process.stdin.close()
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+        selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+        output = {"stdout": bytearray(), "stderr": bytearray()}
+        deadline = time.monotonic() + REPAIR_TIMEOUT_SECONDS
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                process.kill()
+                raise RuntimeError(
+                    "Contacts automation timed out; an Allow prompt may be waiting on the Mac"
+                )
+            for key, _ in selector.select(min(0.25, remaining)):
+                chunk = os.read(key.fd, 4096)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                target = output[key.data]
+                target.extend(chunk)
+                if len(target) > output_limit:
+                    process.kill()
+                    raise RuntimeError("Contacts automation returned too much data")
+        remaining = max(0.0, deadline - time.monotonic())
+        code = process.wait(timeout=remaining)
+        return code, bytes(output["stdout"]), bytes(output["stderr"])
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        if selector is not None:
+            selector.close()
+        if not process.stdin.closed:
+            process.stdin.close()
+        process.stdout.close()
+        process.stderr.close()
+
+
+def run_contact_repair(request: dict) -> dict:
+    script = os.path.join(os.path.dirname(os.path.realpath(__file__)), "contact-repair.js")
+    info = os.lstat(script)
+    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or info.st_uid != os.getuid():
+        raise RuntimeError("Contacts repair helper is unsafe")
+    payload = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(payload) > MAX_REPAIR_INPUT_BYTES:
+        raise RuntimeError("Contacts repair request is too large")
+    code, stdout, stderr = run_bounded_process(
+        ["/usr/bin/osascript", "-l", "JavaScript", script], payload
+    )
+    try:
+        response = json.loads(stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        message = clean_text(stderr.decode("utf-8", "replace"), 180)
+        raise RuntimeError(message or "Contacts automation returned invalid data")
+    if code != 0 or not isinstance(response, dict) or response.get("ok") is not True:
+        raise RuntimeError(clean_text(response.get("error") if isinstance(response, dict) else "", 180)
+                           or "Contacts automation failed")
+    return response
+
+
+def active_record_uids(records: list[dict]) -> set[str]:
+    """Cards addressable through Contacts, excluding inactive account caches."""
+    uids = list(dict.fromkeys(clean_text(record.get("uid"), 200) for record in records))
+    if not uids or len(uids) > MAX_MATCH_RECORDS or any(not uid for uid in uids):
+        raise RuntimeError("Contacts returned an invalid candidate-card list")
+    result = run_contact_repair({"operation": "available", "personUids": uids})
+    available = result.get("available")
+    if not isinstance(available, list) or len(available) > len(uids):
+        raise RuntimeError("Contacts returned an invalid active-card list")
+    accepted = set()
+    permitted = set(uids)
+    for raw in available:
+        uid = clean_text(raw, 200)
+        if not uid or uid not in permitted or uid in accepted:
+            raise RuntimeError("Contacts returned an invalid active-card id")
+        accepted.add(uid)
+    return accepted
+
+
+def _cmd_resolve(args):
+    request = read_resolve_request()
+    operation = request.get("operation")
+    if operation == "candidates":
+        original, candidates, _ = contact_candidates(request.get("handle"))
+        emit_resolve({
+            "ok": True,
+            "handle": original,
+            "ambiguous": len(candidates) > 1,
+            "candidates": candidates,
+        })
+        return
+    if operation == "fingerprint":
+        emit_resolve({"ok": True, "fingerprint": store_fingerprint()})
+        return
+    if operation == "audit":
+        # fingerprint taken BEFORE the scan: a change landing mid-scan makes
+        # the next freshness check miss, which is the safe direction
+        fingerprint = store_fingerprint()
+        emit_resolve({"ok": True, "fingerprint": fingerprint,
+                      **audit_contact_handles(request.get("handles"))})
+        return
+    if operation == "open":
+        _, _, selected, selected_record, selected_card_number, selected_account_number = selected_card(
+            request.get("handle"), request.get("token")
+        )
+        url = "addressbook://" + urllib.parse.quote(selected_record["uid"], safe="")
+        result = subprocess.run(
+            ["/usr/bin/open", url], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            raise RuntimeError("Contacts.app could not open the selected card")
+        emit_resolve({
+            "ok": True,
+            "opened": True,
+            "name": selected["name"],
+            "cardNumber": selected_card_number,
+            "cardCount": selected["recordCount"],
+            "accountNumber": selected_account_number,
+            "sourceName": selected["cards"][selected_card_number - 1]["sourceName"],
+        })
+        return
+    raise ValueError(
+        "operation must be candidates, fingerprint, audit, or open"
+    )
+
+
+def cmd_resolve(args):
+    try:
+        _cmd_resolve(args)
+    except Exception as error:
+        message = clean_text(str(error), 180) or "contact identity operation failed"
+        try:
+            emit_resolve({"ok": False, "error": message})
+        finally:
+            raise SystemExit(1)
 
 
 def fetch_contacts(con: sqlite3.Connection) -> list[dict]:
@@ -290,24 +852,27 @@ def cmd_dump(args):
 
 def cmd_sources(args):
     paths = source_dbs()
+    labels = contact_source_names(paths)
     if args.json:
         rows = []
         for p in paths:
+            source_name = labels.get(source_identifier(p), "Contacts")
             try:
                 with open_db(p) as con:
                     n = con.execute("SELECT COUNT(*) FROM ZABCDRECORD").fetchone()[0]
-                rows.append({"path": p, "records": n, "size": os.path.getsize(p)})
+                rows.append({"name": source_name, "records": n, "size": os.path.getsize(p)})
             except sqlite3.DatabaseError:
-                rows.append({"path": p, "error": "open failed"})
+                rows.append({"name": source_name, "error": "open failed"})
         print(json.dumps(rows, indent=2))
         return
     for p in paths:
+        source_name = labels.get(source_identifier(p), "Contacts")
         try:
             with open_db(p) as con:
                 n = con.execute("SELECT COUNT(*) FROM ZABCDRECORD").fetchone()[0]
-            print(f"{n:>6} records  {os.path.getsize(p):>12} bytes  {p}")
+            print(f"{n:>6} records  {os.path.getsize(p):>12} bytes  {source_name}")
         except sqlite3.DatabaseError as e:
-            print(f"  ERROR ({e})  {p}")
+            print(f"  ERROR ({e})  {source_name}")
 
 
 def main() -> None:
@@ -322,6 +887,7 @@ def main() -> None:
     s = sub.add_parser("list");    s.add_argument("n", nargs="?", type=int, default=50); s.set_defaults(func=cmd_list)
     s = sub.add_parser("find");    s.add_argument("query"); s.add_argument("n", nargs="?", type=int, default=20); s.set_defaults(func=cmd_find)
     s = sub.add_parser("lookup");  s.add_argument("handle"); s.set_defaults(func=cmd_lookup)
+    s = sub.add_parser("resolve");  s.set_defaults(func=cmd_resolve)
     s = sub.add_parser("dump");    s.set_defaults(func=cmd_dump)
     s = sub.add_parser("sources"); s.set_defaults(func=cmd_sources)
 

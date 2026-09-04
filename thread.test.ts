@@ -169,6 +169,7 @@ describe("decorate", () => {
     expect(b[0]!.groupStart).toBe(true);
     expect(b[0]!.groupEnd).toBe(true);
     expect(b[0]!.time).toBe("12:00 PM");
+    expect(b[0]!.handle).toBe("+15551234567");
   });
 
   test("the patterns reach the divider, the timestamp and the read receipt", () => {
@@ -436,10 +437,29 @@ describe("selectThread", () => {
     expect(seen).toContain("--chat");
     expect(seen[seen.indexOf("--chat") + 1]).toBe(guid);
   });
+
+  test("a coalesced group loads and selects every exact historical alias", () => {
+    const oldGuid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const raw = [
+      msg({ chat: oldGuid, ts: "2026-08-29 12:00:00", text: "old history" }),
+      msg({ chat: guid, ts: "2026-08-30 12:00:00", text: "new history" }),
+    ];
+    expect(selectThread(raw, guid, true, 80, [], [oldGuid]).map((m) => m.text))
+      .toEqual(["old history", "new history"]);
+    let seen: string[] = [];
+    const runner = ((_: string, args: string[]) => {
+      seen = args;
+      return { status: 0, stdout: JSON.stringify(raw), stderr: "" };
+    }) as never;
+    const out = loadThread(guid, 80, "2026-08-30", DEFAULT_FORMATS, runner, [oldGuid]);
+    expect(seen).not.toContain("--also-chat");
+    expect(seen[seen.indexOf("--chat") + 1]).toBe(guid);
+    expect(out.bubbles.map((bubble) => bubble.text)).toEqual(["old history", "new history"]);
+  });
 });
 
 describe("linkify", () => {
-  const { linkify } = require("./thread") as typeof import("./thread");
+  const { linkify, standaloneUrl } = require("./thread") as typeof import("./thread");
 
   test("no URL → empty string (PlainText fast path)", () => {
     expect(linkify("just words")).toBe("");
@@ -472,6 +492,11 @@ describe("linkify", () => {
 
   test("newlines become <br> in the rich path", () => {
     expect(linkify("https://a.io\nline2")).toBe('<a href="https://a.io">https://a.io</a><br>line2');
+  });
+
+  test("a standalone shared URL is recognized even when metadata canonicalizes it", () => {
+    expect(standaloneUrl("https://example.com/reel/one?tracking=abc")).toBe(true);
+    expect(standaloneUrl("look https://example.com/reel/one")).toBe(false);
   });
 });
 
@@ -508,6 +533,21 @@ describe("rich decoration", () => {
       today,
     );
     expect(out[0]!.attachments.map((a) => a.name)).toEqual(["real.pdf"]);
+  });
+
+  test("an unfurled card suppresses a URL-only body but keeps a real caption", () => {
+    const link = {
+      url: "https://example.com/reel/one",
+      title: "One reel",
+      summary: "",
+      image_id: "10",
+    };
+    const out = decorate([
+      msg({ text: "https://example.com/reel/one?tracking=abc", link }),
+      msg({ ts: "2026-08-30 12:01:00", text: "Look at this https://example.com/reel/one", link }),
+    ], today);
+    expect(out[0]!.linkOnly).toBe(true);
+    expect(out[1]!.linkOnly).toBe(false);
   });
 
   test("attachment placeholder char is stripped, chips pass through", () => {
@@ -548,6 +588,7 @@ describe("rich decoration", () => {
     expect(out[0]!.replyText).toBe("");
     expect(out[0]!.edited).toBe(false);
     expect(out[0]!.retracted).toBe(false);
+    expect(out[0]!.linkOnly).toBe(false);
   });
 });
 

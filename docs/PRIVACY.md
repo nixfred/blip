@@ -12,6 +12,8 @@ inventory of what lands on disk.
 | `~/.ssh/blip_ed25519` | Blip's dedicated ssh key — confined on the Mac to the bridge tools | — |
 | `~/.config/blip/allowlist.json` | handles allowed to raise desktop toasts | message text |
 | `~/.config/blip/mutelist.json` | handles and phrases you typed, whose conversations Blip hides entirely | message text Blip received |
+| `~/.config/blip/preferences.json` (0600, atomic) | appearance values: bubble colors, opacity, scale, density, widths and sizes | names, handles, message text |
+| `~/.config/blip/identities.json` (0600, atomic) | explicit handle → display-name choices and an opaque Contacts candidate token | message text, contact photos, other contact fields |
 | `~/.local/state/blip/state.json` (0600, atomic) | poll watermark, read marks, per-chat unread counts and oldest-unread timestamps, self-chat ids, group names/members, opaque SHA-256 toast keys | **message bodies — ever** |
 | `~/.local/state/blip/window.json` | whether the app window was open, its size | anything else |
 | `~/.cache/blip/att/` (0700, files 0600, 500 MB LRU, no expiry) | attachments you viewed, plus images ≤ 5 MB and link-preview thumbnails in any conversation you *open* (they render inline, so they are fetched when the thread is). HEIC arrives converted to JPEG. File names carry the Mac's attachment row id and a sanitized name whose extension follows the MIME type | attachments in conversations you never opened |
@@ -43,8 +45,8 @@ toasts show a sender name and a preview through your notification daemon,
 gated by the allowlist — and your notification daemon may keep its own
 history. Blip itself logs nothing; the shell's stderr (journald) sees
 recipients and exit codes, never bodies (`imsg-send` prints a byte count).
-Message bodies do pass through process arguments on both machines, visible
-to other processes running as you.
+Message bodies and identity-resolution handles travel on bounded stdin, not
+process arguments.
 
 Threat model and the audit findings behind these notes: [SECURITY.md](SECURITY.md).
 
@@ -59,23 +61,41 @@ Threat model and the audit findings behind these notes: [SECURITY.md](SECURITY.m
 
 The tools read `~/Library/Messages/chat.db`, the AddressBook database, and
 Messages' pinning preferences read-only, and drive Messages.app through
-AppleScript. They write nothing else. Messages.app itself keeps your
-conversation history exactly as it always has.
+AppleScript. The pinning data contributes only the
+ordered identifiers needed to reproduce Messages.app's pinned-conversation
+grid. The identity guide returns opaque tokens for individual matching source
+cards. Before presenting them, the Mac bridge verifies that each raw database
+row still exists in the Contacts object layer and drops inactive account-cache
+rows. Candidate lookups return only bounded display names, account labels, match
+counts, and opaque card tokens—raw source and record ids do not leave the
+Mac.
+
+**Open card on Mac** opens one validated persistent card and makes no edit.
+The contact review is read-only end to end: Blip never writes Contacts through
+any path, and never touches the private AddressBook SQLite files. Messages.app
+keeps your conversation history exactly as it always has.
 
 ## Permissions the Mac asks for
 
 - **Full Disk Access** for `/usr/libexec/sshd-keygen-wrapper` — so an ssh
   session can read `chat.db`.
 - **Automation → Messages** for the same — so an ssh session can send.
+- Optional **Automation → Contacts** for the same — only if automatic contact
+  repair is explicitly enabled and used.
+- Optional **Accessibility** for the same — only to select exact Contacts cards
+  and invoke an allowlisted, enabled Link/Merge Selected Cards menu action after
+  confirmation.
 
-Both are one-time grants in System Settings; `blip-check` reports which are
-missing. Blip never asks for Contacts, Camera, Microphone, or Location.
+Automation and Full Disk Access are one-time grants in System Settings;
+`blip-check` reports the core grants. Blip never asks for Camera, Microphone,
+or Location.
 
 ## What crosses the network
 
-Only ssh between the two machines: message queries and previews, ordered
-conversation-pin metadata, attachment bytes you request, and files you send.
-Push notifications use a
+Only ssh between the two machines: message queries and previews, pinned chat
+identifiers/order, bounded candidate names/counts and explicitly requested card
+details from the contact resolver, attachment bytes you request, and files you
+send. Push notifications use a
 content-free "something changed" ping — a watcher on the Mac emits a
 timestamp when `chat.db` changes; the client then fetches privately.
 

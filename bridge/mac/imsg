@@ -29,6 +29,7 @@ import plistlib
 import re
 import sqlite3
 import struct
+import subprocess
 import sys
 from glob import glob
 
@@ -41,6 +42,7 @@ PINNING_PLIST_PATHS = (
     ),
 )
 APPLE_EPOCH = 978307200  # 2001-01-01 UTC
+CONTACT_HELPER = os.path.expanduser("~/.blip/bin/contact-delete")
 
 # ---------- Contacts name resolution (built-in, no external deps) ----------
 
@@ -248,6 +250,39 @@ def name_for(handle: str | None) -> str | None:
     if "@" in handle:
         return _NAME_INDEX.get(handle.strip().lower()) or None
     return _NAME_INDEX.get(_normalize_phone(handle)) or None
+
+
+def unified_names(handles: list[str]) -> dict[str, dict[str, str]]:
+    """Resolve a bounded set through the same unified-card view Messages uses."""
+    bounded = []
+    seen = set()
+    for value in handles[:128]:
+        if (isinstance(value, str) and 1 <= len(value) <= 320
+                and not re.search(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]", value)
+                and value not in seen):
+            seen.add(value)
+            bounded.append(value)
+    if not bounded or not os.path.isfile(CONTACT_HELPER):
+        return {}
+    try:
+        result = subprocess.run(
+            [CONTACT_HELPER], input=json.dumps({"operation": "names", "handles": bounded}),
+            text=True, capture_output=True, timeout=10, check=False,
+        )
+        payload = json.loads(result.stdout) if result.returncode == 0 else {}
+        rows = payload.get("names") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            return {}
+        return {
+            row["handle"]: {
+                "name": str(row.get("name") or "")[:160],
+                "short": str(row.get("shortName") or row.get("name") or "")[:160],
+            }
+            for row in rows
+            if isinstance(row, dict) and row.get("handle") in seen and row.get("name")
+        }
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        return {}
 
 
 def label(handle: str | None, is_from_me: int, with_names: bool) -> str:
@@ -852,7 +887,7 @@ def cmd_chats(con, args):
     rows = con.execute(
         f"""
         SELECT c.ROWID AS cid, c.chat_identifier, c.guid, c.group_id,
-               {orig_col} AS original_group_id, c.display_name, c.room_name,
+               {orig_col} AS original_group_id, c.display_name, c.room_name, c.style,
                c.service_name, MAX(m.date) AS last_date,
                COUNT(m.ROWID) AS n
         FROM chat c
@@ -869,20 +904,34 @@ def cmd_chats(con, args):
         # One entry per CONVERSATION: a group re-keyed by Messages leaves
         # several chat rows and used to list once per row.
         clusters = _group_cluster_map(con)
-        merged_counts: dict = {}
+        merged_counts: dict[str, int] = {}
+        pin_orders: dict[str, int] = {}
         for r in rows:
-            canon = clusters.get(r["chat_identifier"])
-            if canon:
-                merged_counts[canon] = merged_counts.get(canon, 0) + r["n"]
-        out = []
+            chat_id = r["chat_identifier"]
+            canon = clusters.get(chat_id, chat_id)
+            merged_counts[canon] = merged_counts.get(canon, 0) + r["n"]
+            order = pin_order_for(pin_ids, chat_id, r["guid"],
+                                  r["group_id"], r["original_group_id"])
+            if order is not None and (canon not in pin_orders or order < pin_orders[canon]):
+                pin_orders[canon] = order
+
+        selected = []
+        seen_ids = set()
         for r in rows:
-            canon = clusters.get(r["chat_identifier"])
-            if canon and canon != r["chat_identifier"]:
+            chat_id = r["chat_identifier"]
+            if chat_id in seen_ids:
+                continue
+            seen_ids.add(chat_id)
+            canon = clusters.get(chat_id)
+            if canon and canon != chat_id:
                 continue                 # an older row of a conversation listed under `canon`
-            pin_order = pin_order_for(pin_ids, r["chat_identifier"], r["guid"],
-                                      r["group_id"], r["original_group_id"])
+            selected.append(r)
+
+        latest = {}
+        for r in selected:
             last = con.execute(
-                f"""SELECT m.text, m.attributedBody, m.is_from_me, h.id AS handle
+                f"""SELECT m.ROWID AS mid, m.text, m.attributedBody, m.is_from_me,
+                            h.id AS handle
                     FROM chat_message_join cmj
                     JOIN {MESSAGE_SRC} m ON m.ROWID = cmj.message_id
                     LEFT JOIN handle h ON h.ROWID = m.handle_id
@@ -890,26 +939,89 @@ def cmd_chats(con, args):
                     ORDER BY m.date DESC LIMIT 1""",
                 (r["cid"],),
             ).fetchone()
+            if last:
+                latest[r["cid"]] = last
+
+        attachments = {}
+        for attachment in _chunked_in(
+            con,
+            """SELECT maj.message_id AS mid, a.transfer_name AS name, a.mime_type AS mime
+                 FROM message_attachment_join maj
+                 JOIN attachment a ON a.ROWID = maj.attachment_id
+                WHERE maj.message_id IN ({marks})
+                  AND COALESCE(a.transfer_name, '') NOT LIKE '%.pluginPayloadAttachment'
+                ORDER BY a.ROWID""",
+            [last["mid"] for last in latest.values()],
+        ):
+            attachments.setdefault(attachment["mid"], {
+                "name": attachment["name"] or "", "mime": attachment["mime"] or "",
+            })
+
+        participants = {}
+        for member in _chunked_in(
+            con,
+            """SELECT chj.chat_id AS cid, h.id AS handle
+                 FROM chat_handle_join chj JOIN handle h ON h.ROWID = chj.handle_id
+                WHERE chj.chat_id IN ({marks}) ORDER BY chj.chat_id, h.ROWID""",
+            [r["cid"] for r in selected if r["style"] == 43],
+        ):
+            if member["handle"]:
+                participants.setdefault(member["cid"], []).append(member["handle"])
+
+        wanted_names = []
+        for r in selected:
+            if r["chat_identifier"] not in pin_orders:
+                continue
+            if r["style"] == 43:
+                wanted_names.extend(participants.get(r["cid"], []))
+            else:
+                wanted_names.append(r["chat_identifier"])
+        contact_names = unified_names(wanted_names)
+
+        out = []
+        for r in selected:
+            chat_id = r["chat_identifier"]
+            last = latest.get(r["cid"])
+            raw_name = r["display_name"] or r["room_name"] or ""
+            explicit_name = raw_name if raw_name != chat_id else ""
+            pin_order = pin_orders.get(chat_id)
+            pin_name = ""
+            if pin_order is not None:
+                if r["style"] == 43:
+                    member_names = [
+                        contact_names.get(handle, {}).get("short") or name_for(handle) or handle
+                        for handle in participants.get(r["cid"], [])
+                    ]
+                    if len(member_names) == 2:
+                        generated_name = " & ".join(member_names)
+                    elif len(member_names) > 2:
+                        generated_name = ", ".join(member_names[:-1]) + " & " + member_names[-1]
+                    else:
+                        generated_name = member_names[0] if member_names else ""
+                    pin_name = explicit_name or generated_name
+                else:
+                    pin_name = contact_names.get(chat_id, {}).get("short") or ""
+
             out.append({
-                "id": r["chat_identifier"],
-                "name": r["display_name"] or r["room_name"],
+                "id": chat_id,
+                "name": explicit_name or None,
                 "service": r["service_name"],
-                "messages": r["n"],
+                "messages": merged_counts.get(chat_id, r["n"]),
                 "last": fmt_ts(r["last_date"]),
                 "last_text": message_text(last) if last else "",
                 "last_from_me": bool(last["is_from_me"]) if last else False,
                 "last_handle": (last["handle"] if last else None) or "",
                 "last_name": (None if args.no_names
                               else _dm_name(last["handle"] if last else None, r["chat_identifier"])),
+                "last_attachment": attachments.get(last["mid"]) if last else None,
                 "pinned": pin_order is not None,
                 "pin_order": pin_order,
+                "pin_name": pin_name or None,
                 # Other chat rows of this same conversation. A client must fold
                 # any thread carrying one of these onto this id.
                 "aliases": [c for c, k in clusters.items()
-                            if k == r["chat_identifier"] and c != r["chat_identifier"]],
+                            if k == chat_id and c != chat_id][:15],
             })
-            if canon:
-                out[-1]["messages"] = merged_counts.get(canon, r["n"])
         print(json.dumps(out, indent=2, ensure_ascii=False))
         return
     for r in rows:
@@ -962,6 +1074,13 @@ def cmd_groups(con, args):
         live.append(r)
     rows = live[: args.n]
     if args.json:
+        participant_lists = [
+            (r["participants"] or "").split(",") if r["participants"] else []
+            for r in rows
+        ]
+        contact_names = unified_names([
+            handle for members in participant_lists for handle in members
+        ]) if not args.no_names else {}
         print(
             json.dumps(
                 [
@@ -969,10 +1088,18 @@ def cmd_groups(con, args):
                         "chat": r["chat_identifier"],
                         "guid": r["guid"],
                         "name": r["display_name"] or "",
-                        "participants": (r["participants"] or "").split(",") if r["participants"] else [],
+                        "participants": participant_lists[index],
+                        "participant_names": {
+                            handle: (
+                                contact_names.get(handle, {}).get("name")
+                                or name_for(handle)
+                                or handle
+                            )
+                            for handle in participant_lists[index]
+                        } if not args.no_names else {},
                         "last": fmt_ts(r["last_date"]) if r["last_date"] else None,
                     }
-                    for r in rows
+                    for index, r in enumerate(rows)
                 ],
                 indent=2,
             )

@@ -25,7 +25,8 @@ for t in imsg imsg-send contacts tcc-check; do
   fi
   install -m 0755 "$tmp/$t" "$dest/$t"
 done
-printf 'claude-on-mac %s (synced %s)\nvendored: imsg imsg-send contacts tcc-check\nsync: scripts/sync-bridge.sh <sha-or-tag>\n' \
+printf 'claude-on-mac %s (synced %s)\nvendored: imsg imsg-send contacts tcc-check\nblip extensions: NONE after sync; reapply pin-order and identity-resolver patches\nsync: scripts/sync-bridge.sh <sha-or-tag>\n' \
   "$rev" "$(date +%F)" > "$here/bridge/BRIDGE-VERSION"
+echo "! Reapply the Blip pin-order and identity-resolver extensions named in bridge/BRIDGE-VERSION before committing." >&2
 echo "✓ bridge/mac synced to claude-on-mac $rev"
 git -C "$here" status --short bridge/

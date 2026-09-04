@@ -51,3 +51,32 @@ a test fixture. Deferred items are listed in ROADMAP.md.
 Still open and honest about it: drafts in `$XDG_RUNTIME_DIR/blip` are swept
 lazily rather than deleted on cancel; cache file names include the Mac
 attachment ROWID.
+
+## Identity resolver boundary (2026-09-02)
+
+Ambiguous Contacts matches remain fail-closed: the bridge returns no guessed
+name. The settings resolver is a separate, explicit path with these limits:
+
+- Linux request stdin: 4 KiB; local `identities.json`: 48 KiB, 64 choices,
+  320 characters per handle, 160 per name; helper output: 48 KiB.
+- Mac scan: 64 Contacts account stores, 64 matching records, eight distinct
+  candidate names; a selected comparison is limited to eight active cards and
+  16 values per field kind; response: 48 KiB; Linux bridge deadline is 15
+  seconds for lookup/open and 35 seconds for Contacts automation.
+- Controls and bidirectional overrides are removed before display; QML checks
+  the bounded helper schema again before retaining it.
+- The handle crosses the process/ssh boundary on stdin, never argv. A choice
+  is revalidated against a fresh Mac candidate set before the owner-only,
+  descriptor-relative atomic config write.
+- **Open card on Mac** accepts only a revalidated opaque per-card token and
+  invokes `/usr/bin/open` with a percent-encoded `addressbook://` persistent id
+  via a fixed argument array. Source UUIDs and record ids stay on the Mac. It
+  never writes Apple’s private SQLite stores.
+- Candidate cards are intersected with the current Contacts object layer, so
+  inactive per-account cache rows are not presented as editable contacts.
+- Candidate and audit responses carry only bounded, sanitized display fields
+  with opaque card tokens; raw source and record identifiers stay on the Mac.
+  The QML layer revalidates the full schema before rendering it as plain text.
+The Bun and Python suites exercise malformed types, oversize sentinels,
+symlinks, FIFOs, equivalent-handle collisions, hostile display fields,
+stdin-not-argv transport, candidate caps, and the fixed open argument shape.

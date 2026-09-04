@@ -19,11 +19,13 @@ import qs.Commons
 FloatingWindow {
   id: win
   property var hostWidget: null
+  property var preferences: null
   // "Blip (3)" while unread exists — selectors match the "Blip" PREFIX.
   title: "Blip" + (hostWidget && hostWidget.unread > 0 ? " (" + hostWidget.unread + ")" : "")
-  // Same fill as Omarchy's other FloatingWindow (dev gallery). A 0.70
-  // alpha assumed Hyprland blur, which Omarchy 4.x ships off.
-  color: Color.background
+  // Opaque unless the user deliberately lowers the portable appearance
+  // preference. Omarchy 4.x does not guarantee window blur.
+  readonly property real backdropAlpha: preferences ? preferences.backgroundOpacity : 0.70
+  color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, backdropAlpha)
   implicitWidth: 1040
   implicitHeight: 720
   minimumSize: Qt.size(720, 480)
@@ -40,6 +42,7 @@ FloatingWindow {
   readonly property string activeLastTs: view.activeLastTs
   function openThread(t) { view.openThread(t) }
   function shareLink(url) { return view.shareLink(url) }
+  function openSettings(page) { view.openSettings(page) }
   function pushReload() { view.pushReload() }
   function navText(event) {
     if (event.key === Qt.Key_Slash) return "/"
@@ -117,8 +120,10 @@ FloatingWindow {
         anchors.fill: parent
         // Inset from the window edge: Hyprland rounds the corners, and text
         // flush to the border got clipped by the radius (Fred).
-        anchors.margins: Style.space(12)
+        anchors.margins: Math.max(1, Math.round(Style.spaceReal(12)
+          * (win.preferences ? win.preferences.density : 1.0)))
         hostWidget: win.hostWidget
+        preferences: win.preferences
         splitView: true
         surfaceOpen: win.visible
         readActive: win.focused

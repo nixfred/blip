@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 /**
  * Blip clipboard paste helper — snapshots the Wayland clipboard ONCE and
- * reports what it held: an image (staged as a draft file) or text.
+ * reports what it held: a file, an image (staged as a draft file), or text.
  *
- *   bun paste.ts   →  {kind:"image", path, url} | {kind:"text", text} | {kind:"none"}
+ *   bun paste.ts   →  {kind:"file", path, url, name} | {kind:"image", path, url}
+ *                    | {kind:"text", text} | {kind:"none"}
  *
  * QML intercepts Ctrl+V and calls this instead of letting TextEdit paste,
  * because the decision (attach vs insert) needs the mime types, and probing
@@ -13,9 +14,9 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { lstatSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const RUNTIME = process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 1000}`;
 export const DRAFT_DIR = join(RUNTIME, "blip");
@@ -29,6 +30,27 @@ export function pickImageType(types: string[]): string {
 
 export function extFor(mime: string): string {
   return { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" }[mime] ?? "img";
+}
+
+/** Preferred local-file clipboard format; GNOME carries copy/cut semantics. */
+export function pickFileType(types: string[]): string {
+  if (types.includes("x-special/gnome-copied-files")) return "x-special/gnome-copied-files";
+  if (types.includes("text/uri-list")) return "text/uri-list";
+  return "";
+}
+
+/** Extract the first safe local file from a Wayland file-copy payload. */
+export function localFileFromPayload(mime: string, payload: string): string {
+  const lines = payload.replace(/\r/g, "").split("\n").map((line) => line.trim()).filter(Boolean);
+  if (mime === "x-special/gnome-copied-files" && /^(copy|cut)$/i.test(lines[0] ?? "")) lines.shift();
+  const uri = lines.find((line) => !line.startsWith("#")) ?? "";
+  if (!uri.startsWith("file://")) return "";
+  try {
+    const path = fileURLToPath(uri);
+    return lstatSync(path).isFile() ? path : "";
+  } catch {
+    return "";
+  }
 }
 
 function gcDrafts(): void {
@@ -47,6 +69,18 @@ export function snapshotClipboard(runner = spawnSync): Record<string, string> {
   const types = runner("wl-paste", ["--list-types"], { encoding: "utf8", timeout: 4000 });
   if (types.status !== 0) return { kind: "none" };
   const offered = (types.stdout as string).trim().split("\n").filter(Boolean);
+
+  // File objects must win over their optional text representation. This is
+  // what makes Copy vCard → paste into another Blip conversation attach the
+  // .vcf instead of inserting its URI or source text into the composer.
+  const fileMime = pickFileType(offered);
+  if (fileMime !== "") {
+    const dump = runner("wl-paste", ["--no-newline", "-t", fileMime], { encoding: "utf8", timeout: 4000 });
+    if (dump.status === 0) {
+      const path = localFileFromPayload(fileMime, dump.stdout as string);
+      if (path !== "") return { kind: "file", path, url: pathToFileURL(path).href, name: basename(path) };
+    }
+  }
 
   const imageMime = pickImageType(offered);
   if (imageMime !== "") {
