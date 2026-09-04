@@ -23,6 +23,9 @@ ColumnLayout {
   property bool namingExpanded: false
   property bool auditActionableOnly: false
   property bool directContactPending: false
+  property bool directWorkspacePending: false
+  property bool directEditorPending: false
+  property bool discardUnsavedConfirm: false
   readonly property bool editorActive: customField.activeFocus
   readonly property bool reviewActive: resolver && resolver.activeHandle !== ""
   readonly property var savedChoices: resolver ? resolver.identities : []
@@ -49,6 +52,34 @@ ColumnLayout {
     interval: 400
     repeat: true
     onTriggered: root.scanDotPhase = (root.scanDotPhase + 1) % 3
+  }
+
+  // A Contacts mutation makes a finished cleanup scan stale. The scan has
+  // its own dedicated process, so the quiet re-run starts IMMEDIATELY after
+  // the mutation; the list page shows the in-flight state and keeps the
+  // previous results visible until the fresh ones land. If a scan is
+  // already running when another mutation lands, the timer retries until
+  // the worker frees up.
+  Timer {
+    id: auditRefreshTimer
+    interval: 1000
+    repeat: true
+    property int attempts: 0
+    onTriggered: {
+      attempts += 1
+      if (attempts > 90 || !root.resolver) { running = false; return }
+      if (root.resolver.auditContacts(root.reviewHandles(), true)) running = false
+    }
+  }
+  Connections {
+    target: root.resolver
+    function onContactsMutated() {
+      if (root.resolver && root.resolver.audit && root.auditableConversations.length > 0) {
+        auditRefreshTimer.attempts = 0
+        auditRefreshTimer.running = true
+        auditRefreshTimer.triggered()
+      }
+    }
   }
 
   // Load the cleanup results as soon as the contacts page opens: with the
@@ -81,6 +112,10 @@ ColumnLayout {
     && activeChoice.source === "contacts"
     && activeChoice.contactToken === selectedCandidate.token
     && activeChoice.name === selectedCandidate.name
+  readonly property bool unsavedContactsError:
+    String(resolver ? resolver.error : "").toLowerCase()
+      .indexOf("contacts has unsaved changes") >= 0
+
   signal focusAreaRequested(real localY)
 
   spacing: space(10)
@@ -252,19 +287,25 @@ ColumnLayout {
     var sources = candidate.sourceCount === 1 ? "1 source" : candidate.sourceCount + " sources"
     return cards + " · " + sources + (candidate.hasPhoto ? " · has photo" : "")
   }
-  function beginReview(handle, directReview) {
+  function beginReview(handle, directEdit) {
     if (!resolver || resolver.loading) return
     directContactPending = false
+    directWorkspacePending = false
+    directEditorPending = false
     var saved = choiceForHandle(handle)
     selectedToken = saved && saved.source === "contacts" ? saved.contactToken : ""
     customField.text = saved && saved.source === "custom" ? saved.name : ""
     namingExpanded = false
     macReviewExpanded = false
     var started = resolver.findCandidates(handle)
-    directContactPending = directReview === true && started
+    directContactPending = directEdit === true && started
+  }
+  function editContact(handle) {
+    beginReview(handle, true)
   }
   function openNamePreference() {
     if (!resolver || resolver.loading) return
+    if (resolver.comparison) resolver.cancelComparison()
     macReviewExpanded = false
     namingExpanded = true
   }
@@ -277,6 +318,10 @@ ColumnLayout {
     }
     namingExpanded = false
     macReviewExpanded = true
+    if (candidate && (!resolver.comparison
+        || resolver.comparison.ownerToken !== candidate.token)) {
+      resolver.compareCards(resolver.activeHandle, candidate.token)
+    }
   }
   function closeReview() {
     if (!resolver || resolver.loading) return
@@ -286,10 +331,14 @@ ColumnLayout {
       namingExpanded = false
       macReviewExpanded = false
       directContactPending = false
+      directWorkspacePending = false
+      directEditorPending = false
     }
   }
   function selectCandidate(candidate) {
     if (!candidate || !resolver || resolver.loading) return
+    if (resolver.repairPreview) resolver.cancelRepair()
+    if (resolver.comparison) resolver.cancelComparison()
     selectedToken = candidate.token
     customField.text = ""
   }
@@ -320,6 +369,8 @@ ColumnLayout {
         root.macReviewExpanded = true
         if (directCandidate) {
           root.selectedToken = directCandidate.token
+          root.directWorkspacePending = true
+          root.directEditorPending = directCandidate.recordCount === 1
           Qt.callLater(root.openContactManagement)
         } else {
           root.selectedToken = ""
@@ -335,6 +386,16 @@ ColumnLayout {
       if (root.selectedToken !== "" && root.candidateForToken(root.selectedToken)) return
       root.selectedToken = root.resolver.candidates.length === 1
         ? root.resolver.candidates[0].token : ""
+    }
+    function onComparisonChanged() {
+      if (!root.directWorkspacePending || !root.resolver.comparison) return
+      root.directWorkspacePending = false
+      if (root.directEditorPending && root.resolver.comparison.cards.length === 1)
+        contactWorkspace.editCard(root.resolver.comparison.cards[0])
+      root.directEditorPending = false
+      Qt.callLater(function() {
+        root.focusAreaRequested(contactWorkspace.mapToItem(root, 0, 0).y)
+      })
     }
   }
 
@@ -858,6 +919,7 @@ ColumnLayout {
       ColumnLayout {
         Layout.fillWidth: true
         visible: root.namingExpanded
+          && (!root.resolver || root.resolver.comparison === null)
         spacing: root.space(10)
 
       RowLayout {
@@ -1078,16 +1140,24 @@ ColumnLayout {
         Layout.fillWidth: true
         visible: root.macReviewExpanded
         spacing: root.space(8)
-        SectionHeading { label: "REVIEW MAC CONTACTS" }
+        SectionHeading { label: "MANAGE MAC CONTACTS" }
         SmallButton {
+          visible: contactWorkspace.editorCard === null
+            && (!root.resolver || root.resolver.mutationPreview === null)
+            && (!root.resolver || root.resolver.repairPreview === null)
+            && (!root.resolver || root.resolver.comparison === null)
           label: "Refresh source cards"
           enabled: root.resolver && !root.resolver.loading
           onClicked: root.resolver.findCandidates(root.resolver.activeHandle)
         }
         SmallButton {
+          visible: !root.resolver || root.resolver.comparison === null
           label: "Back to tasks"
           enabled: root.resolver && !root.resolver.loading
-          onClicked: root.macReviewExpanded = false
+          onClicked: {
+            if (root.resolver.comparison) root.resolver.cancelComparison()
+            root.macReviewExpanded = false
+          }
         }
       }
 
@@ -1095,10 +1165,10 @@ ColumnLayout {
         Layout.fillWidth: true
         visible: root.macReviewExpanded
         text: root.resolver && root.resolver.candidates.length > 1
-          ? root.resolver.candidates.length + " different people are named for this " + root.handleNoun() + " in Contacts. Pick who this conversation belongs to, then review each person's cards or open them in Contacts on the Mac."
+          ? root.resolver.candidates.length + " different people are named for this " + root.handleNoun() + " in Contacts. Pick who this conversation belongs to — from there you can merge the cards or remove the " + root.handleNoun() + " from the wrong one."
           : root.selectedCandidate && root.selectedCandidate.recordCount > 1
-            ? root.selectedCandidate.recordCount + " source cards found. Review them side by side here, or open any card in Contacts on the Mac."
-            : "One source card found. Review it here or open it in Contacts on the Mac."
+            ? root.selectedCandidate.recordCount + " source cards found. Compare, edit, consolidate, delete, or link them from Blip."
+            : "One source card found. You can review, edit, or delete it from Blip."
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
         color: Qt.darker(root.foreground, 1.35)
@@ -1130,6 +1200,8 @@ ColumnLayout {
           required property var modelData
           readonly property bool intended: root.selectedToken === modelData.token
           property bool cardsExpanded: !intended && modelData.recordCount <= 3
+          visible: !(intended && root.resolver && root.resolver.comparison
+            && root.resolver.comparison.ownerToken === modelData.token)
           Layout.fillWidth: true
           implicitHeight: sourceGroup.implicitHeight + root.space(16)
           radius: root.corner(root.space(9))
@@ -1169,10 +1241,30 @@ ColumnLayout {
                 font.bold: true
               }
               SmallButton {
-                visible: !sourceCandidate.intended
-                label: "Review this person…"
+                // Explicit same-person declaration: opens the standard
+                // compare/merge workspace spanning BOTH people's cards.
+                visible: !sourceCandidate.intended && root.selectedCandidate !== null
+                  && root.resolver && root.resolver.contactWrites
+                label: "Merge with " + (root.selectedCandidate ? root.selectedCandidate.name : "") + "…"
                 enabled: root.resolver && !root.resolver.loading
-                onClicked: root.selectCandidate(sourceCandidate.modelData)
+                onClicked: root.resolver.compareCards(
+                  root.resolver.activeHandle, root.selectedToken, sourceCandidate.modelData.token)
+              }
+              SmallButton {
+                label: !sourceCandidate.intended ? "Work on this person…"
+                  : root.resolver && root.resolver.comparison
+                  && root.resolver.comparison.ownerToken === sourceCandidate.modelData.token
+                  ? "Contact workspace open"
+                  : sourceCandidate.modelData.recordCount === 1 ? "Manage contact…"
+                    : "Manage " + sourceCandidate.modelData.recordCount + " cards…"
+                enabled: root.resolver && !root.resolver.loading
+                  && (!sourceCandidate.intended || !root.resolver.comparison
+                    || root.resolver.comparison.ownerToken !== sourceCandidate.modelData.token)
+                onClicked: {
+                  if (sourceCandidate.intended) root.resolver.compareCards(
+                    root.resolver.activeHandle, sourceCandidate.modelData.token)
+                  else root.selectCandidate(sourceCandidate.modelData)
+                }
               }
               SmallButton {
                 label: sourceCandidate.cardsExpanded
@@ -1188,8 +1280,8 @@ ColumnLayout {
               text: sourceCandidate.intended
                 ? "You’re reviewing this person’s cards temporarily — nothing is saved as a Blip name, and every Mac Contacts change asks for its own confirmation."
                 : root.selectedCandidate
-                  ? "A different person sharing this " + root.handleNoun() + "? Review their cards to see where it lives, then fix it in Contacts on the Mac."
-                  : "Opens their cards for a read-only review, with a shortcut to each card in Contacts on the Mac."
+                  ? "A different person? Remove just this " + root.handleNoun() + " from their card. The same person under another name (a married-name change, say)? Merge the cards — you can adjust the surviving name during the review."
+                  : "Opens their cards for review — from there you can edit them, merge duplicates, or remove this " + root.handleNoun() + " from the wrong card."
               textFormat: Text.PlainText
               wrapMode: Text.WordWrap
               color: Qt.darker(root.foreground, 1.4)
@@ -1225,17 +1317,175 @@ ColumnLayout {
                   enabled: root.resolver && !root.resolver.loading
                   onClicked: root.resolver.openOnMac(root.resolver.activeHandle, sourceCard.modelData.token)
                 }
+                SmallButton {
+                  visible: !sourceCandidate.intended && root.selectedCandidate !== null
+                    && root.resolver && root.resolver.contactWrites
+                  danger: true
+                  label: "Remove this " + root.handleNoun() + "…"
+                  enabled: root.resolver && !root.resolver.loading
+                  onClicked: root.resolver.inspectOnMac(
+                    root.resolver.activeHandle, sourceCard.modelData.token, root.selectedToken)
+                }
               }
             }
           }
         }
       }
 
+      ContactCardCompare {
+        id: contactWorkspace
+        Layout.fillWidth: true
+        visible: root.resolver && root.resolver.comparison !== null
+          && root.resolver.comparison.ownerToken === root.selectedToken
+        resolver: root.resolver
+        comparison: root.resolver ? root.resolver.comparison : null
+        foreground: root.foreground
+        urgent: root.urgent
+        accent: root.accent
+        fontFamily: root.fontFamily
+        fontScale: root.fontScale
+        density: root.density
+        cornerScale: root.cornerScale
+      }
+
+      Rectangle {
+        Layout.fillWidth: true
+        visible: root.resolver && root.resolver.repairPreview !== null
+        implicitHeight: repairConfirmation.implicitHeight + root.space(20)
+        radius: root.corner(root.space(9))
+        color: Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.09)
+        border.width: 2
+        border.color: root.urgent
+
+        ColumnLayout {
+          id: repairConfirmation
+          anchors.fill: parent
+          anchors.margins: root.space(10)
+          spacing: root.space(7)
+          Text {
+            Layout.fillWidth: true
+            text: root.resolver && root.resolver.repairPreview
+              ? "Remove " + root.resolver.repairPreview.handle + " from “"
+                + root.resolver.repairPreview.name + "”?"
+              : ""
+            textFormat: Text.PlainText
+            wrapMode: Text.WordWrap
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: root.fontSize(Style.font.bodySmall)
+            font.bold: true
+          }
+          Text {
+            Layout.fillWidth: true
+            text: root.resolver && root.resolver.repairPreview
+              ? "Verified card " + root.resolver.repairPreview.cardNumber + " of "
+                + root.resolver.repairPreview.cardCount + " from "
+                + root.resolver.repairPreview.sourceName + ". This will remove "
+                + root.resolver.repairPreview.fieldCount + " matching "
+                + root.resolver.repairPreview.kind
+                + (root.resolver.repairPreview.fieldCount === 1 ? " field" : " fields")
+                + " from synced Mac Contacts. An undo receipt will be saved on the Mac."
+              : ""
+            textFormat: Text.PlainText
+            wrapMode: Text.WordWrap
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: root.fontSize(Style.font.caption)
+          }
+          Text {
+            Layout.fillWidth: true
+            visible: root.resolver && root.resolver.repairPreview
+              && !root.resolver.repairPreview.writeEnabled
+            text: "The Mac-side contact-writes gate is disabled. Re-run setup with explicit contact-write access."
+            textFormat: Text.PlainText
+            wrapMode: Text.WordWrap
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: root.fontSize(Style.font.caption)
+            font.bold: true
+          }
+          RowLayout {
+            Layout.fillWidth: true
+            spacing: root.space(8)
+            Item { Layout.fillWidth: true }
+            SmallButton {
+              label: "Cancel"
+              enabled: root.resolver && !root.resolver.loading
+              onClicked: root.resolver.cancelRepair()
+            }
+            SmallButton {
+              danger: true
+              primary: true
+              label: "Remove from Mac Contacts"
+              enabled: root.resolver && !root.resolver.loading
+                && root.resolver.repairPreview && root.resolver.repairPreview.writeEnabled
+              onClicked: root.resolver.removeOnMac()
+            }
+          }
+        }
+      }
+
+      Rectangle {
+        Layout.fillWidth: true
+        // The undo offer belongs to the contact it changed — one merge's
+        // receipt must not follow the user into another person's workspace.
+        // The token stays in memory, so returning to that contact within the
+        // session re-offers it (the private Mac receipt outlives both).
+        visible: root.resolver && /^undo:[0-9a-f]{32}$/.test(root.resolver.undoToken)
+          && root.handleKey(root.resolver.undoHandle)
+             === root.handleKey(root.resolver.activeHandle)
+        implicitHeight: undoContents.implicitHeight + root.space(18)
+        radius: root.corner(root.space(9))
+        color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.12)
+        border.width: 1
+        border.color: root.accent
+        RowLayout {
+          id: undoContents
+          anchors.fill: parent
+          anchors.margins: root.space(9)
+          spacing: root.space(8)
+          Text {
+            Layout.fillWidth: true
+            text: root.resolver
+              ? (root.resolver.undoAction === "edit" ? "Edited one source card for “"
+                : root.resolver.undoAction === "delete" ? "Deleted one source card for “"
+                : root.resolver.undoAction === "consolidate"
+                  ? "Consolidated " + root.resolver.undoCardCount + " source cards for “"
+                  : "Removed " + root.resolver.undoHandle + " from “")
+                + root.resolver.undoName
+                + "”. Undo is available here now; its private Mac receipt expires in seven days."
+              : ""
+            textFormat: Text.PlainText
+            wrapMode: Text.WordWrap
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: root.fontSize(Style.font.caption)
+          }
+          SmallButton {
+            primary: true
+            label: "Undo Mac change"
+            enabled: root.resolver && !root.resolver.loading
+            onClicked: root.resolver.undoOnMac()
+          }
+        }
+      }
+
       Text {
         Layout.fillWidth: true
-        visible: root.resolver
+        visible: root.resolver && !root.resolver.contactWrites
+        text: "Contact editing is disabled. Set contact_writes=on locally and enable the separate owner-only gate on the Mac to use it. Viewing and opening cards remain read-only."
+        textFormat: Text.PlainText
+        wrapMode: Text.WordWrap
+        color: Qt.darker(root.foreground, 1.35)
+        font.family: root.fontFamily
+        font.pixelSize: root.fontSize(Style.font.caption)
+      }
+
+      Text {
+        Layout.fillWidth: true
+        visible: contactWorkspace.editorCard === null && root.resolver
           && root.resolver.candidates.length > 0 && root.selectedCandidate !== null
-        text: "Viewing or opening a card makes no change. This review is read-only; edits happen in Contacts on the Mac."
+        text: "Viewing or opening a card makes no change. Editing, deletion, consolidation, and handle removal all require a separate confirmation."
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
         color: Qt.darker(root.foreground, 1.35)
@@ -1262,6 +1512,71 @@ ColumnLayout {
     color: root.resolver && root.resolver.error !== "" ? root.urgent : Qt.darker(root.foreground, 1.4)
     font.family: root.fontFamily
     font.pixelSize: root.fontSize(Style.font.caption)
+  }
+
+  Rectangle {
+    Layout.fillWidth: true
+    implicitHeight: unsavedRecovery.implicitHeight + root.space(20)
+    visible: root.unsavedContactsError
+    radius: root.corner(root.space(8))
+    color: Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.07)
+    border.width: 1
+    border.color: Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.55)
+
+    ColumnLayout {
+      id: unsavedRecovery
+      anchors.fill: parent
+      anchors.margins: root.space(10)
+      spacing: root.space(8)
+
+      Text {
+        Layout.fillWidth: true
+        text: root.discardUnsavedConfirm
+          ? "Discard every pending change currently open in Contacts on the Mac?"
+          : "Contacts is holding an unfinished in-memory edit."
+        textFormat: Text.PlainText
+        wrapMode: Text.WordWrap
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: root.fontSize(Style.font.bodySmall)
+        font.bold: true
+      }
+      Text {
+        Layout.fillWidth: true
+        text: root.discardUnsavedConfirm
+          ? "This closes Contacts without saving. Continue only if the pending edit is the failed Blip attempt; any separate edit you made directly on the Mac would also be discarded."
+          : "Finish or discard a real edit in Contacts on the Mac. If this was left by Blip’s failed save, Blip can close Contacts without saving it after one more confirmation."
+        textFormat: Text.PlainText
+        wrapMode: Text.WordWrap
+        color: Qt.darker(root.foreground, 1.3)
+        font.family: root.fontFamily
+        font.pixelSize: root.fontSize(Style.font.caption)
+      }
+      RowLayout {
+        Layout.fillWidth: true
+        Item { Layout.fillWidth: true }
+        SmallButton {
+          visible: root.discardUnsavedConfirm
+          label: "Cancel"
+          onClicked: root.discardUnsavedConfirm = false
+        }
+        SmallButton {
+          danger: root.discardUnsavedConfirm
+          primary: !root.discardUnsavedConfirm
+          label: root.discardUnsavedConfirm
+            ? "Discard and close Contacts" : "Resolve pending edit…"
+          enabled: root.resolver && !root.resolver.loading
+          onClicked: {
+            if (!root.discardUnsavedConfirm) {
+              root.discardUnsavedConfirm = true
+              return
+            }
+            root.discardUnsavedConfirm = false
+            root.resolver.discardUnsavedContacts()
+          }
+        }
+      }
+    }
   }
 
   Text {

@@ -66,14 +66,21 @@ ordered identifiers needed to reproduce Messages.app's pinned-conversation
 grid. The identity guide returns opaque tokens for individual matching source
 cards. Before presenting them, the Mac bridge verifies that each raw database
 row still exists in the Contacts object layer and drops inactive account-cache
-rows. Candidate lookups return only bounded display names, account labels, match
-counts, and opaque card tokens—raw source and record ids do not leave the
-Mac.
+rows. An explicit comparison can return the selected cards' bounded name,
+organization, phone, email, address, URL, birthday, and notes to Blip for the
+life of the settings view; this detail is not added to Blip's config or cache.
+Only opaque card tokens leave the Mac—raw source and record ids do not.
 
-**Open card on Mac** opens one validated persistent card and makes no edit.
-The contact review is read-only end to end: Blip never writes Contacts through
-any path, and never touches the private AddressBook SQLite files. Messages.app
-keeps your conversation history exactly as it always has.
+**Open card on Mac** opens one validated persistent card and makes no edit. If
+the separately gated write feature is enabled, Blip can ask Contacts.app to
+remove one revalidated phone/email field after a second confirmation, or ask
+Apple's UI to link/merge the exact compared cards after a separate confirmation
+that names the action. Field removal has a private seven-day Mac-local undo
+receipt. Apple's link/merge action may sync upstream and has no Blip undo.
+Consolidation and whole-card deletion use Apple's public Contacts framework
+after the same preview and revalidation. Blip never writes the private
+AddressBook SQLite files. Messages.app keeps your conversation history exactly
+as it always has.
 
 ## Permissions the Mac asks for
 

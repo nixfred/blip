@@ -15,7 +15,7 @@
   <img alt="Omarchy" src="https://img.shields.io/badge/Omarchy-plugin-5fd7ff?style=flat-square">
   <img alt="QuickShell" src="https://img.shields.io/badge/QuickShell-QML-0a84ff?style=flat-square">
   <img alt="bun" src="https://img.shields.io/badge/bun-TypeScript-f9f1e1?style=flat-square">
-  <img alt="tests" src="https://img.shields.io/badge/tests-361%20passing-2ea043?style=flat-square">
+  <img alt="tests" src="https://img.shields.io/badge/tests-385%20passing-2ea043?style=flat-square">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
@@ -337,8 +337,10 @@ wizard pauses here and re-checks when you press Enter)
   Automation grants (each simply asks again next time), because a
   path-identified client like sshd-keygen-wrapper cannot be reset on its own —
   then re-run `blip-setup` and sit at the Mac's screen for the prompt.
-- Optional contact review: allow *Automation → Contacts* so the read-only
-  availability check can run.
+- Optional contact management: allow *Automation → Contacts*. For Apple's
+  separate native link action, also add
+  `/usr/libexec/sshd-keygen-wrapper` under *Privacy & Security →
+  Accessibility*. Contact writes still require both explicit Blip write gates.
 
 `ssh your-mac python3 ~/.blip/bin/blip-check` shows ✅/❌ per grant at any
 time, with the fix for each ❌.
@@ -529,12 +531,12 @@ scan never changes a display name or contact, and Blip deliberately does not
 offer a blind bulk merge. Every upstream edit, deletion, link, or consolidation
 still gets a person-specific preview and confirmation.
 
-**Review Mac Contacts** shows every source card a person has (iCloud, Gmail,
-Exchange, On My Mac), with per-card shortcuts that open the exact record in
-Contacts on the Mac. It selects the matching person only for the current UI
-session and never writes `~/.config/blip/identities.json`. It is read-only:
-the actual cleanup happens in Contacts, with Blip showing where every card
-lives.
+**Manage Mac Contacts** is the normal path for comparing, editing, deleting,
+linking, or consolidating duplicate source cards. It selects the matching
+person only for the current UI session and never writes
+`~/.config/blip/identities.json`. When Contacts returns one person, Blip can
+open that workspace directly; when several people share the handle, the user
+must select the intended person for that session before managing cards.
 
 **Set a Blip display preference** is optional and is not part of contact
 deduplication. Use it only when Blip otherwise shows a number or an unwanted
@@ -718,7 +720,7 @@ The 273,000-message history stays on the Mac where it lives.
 ## Development
 
 ```sh
-bun test                                     # 361 tests, ~150 ms
+bun test                                     # 385 tests, ~200 ms
 bun collector.ts --deep | jq '.unread, (.threads|length)'
 bun thread.ts +15551234567 40 | jq '.bubbles[-1]'
 scripts/demo/blip-shots                      # regenerate docs/img/*.png

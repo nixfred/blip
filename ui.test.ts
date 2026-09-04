@@ -6,6 +6,8 @@ import { parseUiFontSize, scaleFontPx } from "./ui-font";
 const panel = readFileSync(new URL("./BlipView.qml", import.meta.url), "utf8");
 const widget = readFileSync(new URL("./BarWidget.qml", import.meta.url), "utf8");
 const identitySettings = readFileSync(new URL("./IdentitySettings.qml", import.meta.url), "utf8");
+const contactCompare = readFileSync(new URL("./ContactCardCompare.qml", import.meta.url), "utf8");
+const contactEditor = readFileSync(new URL("./ContactCardEditor.qml", import.meta.url), "utf8");
 const settings = readFileSync(new URL("./BlipSettings.qml", import.meta.url), "utf8");
 const identities = readFileSync(new URL("./BlipIdentities.qml", import.meta.url), "utf8");
 const identityHelper = readFileSync(new URL("./identities.ts", import.meta.url), "utf8");
@@ -141,7 +143,7 @@ describe("QML safety invariants", () => {
     expect(identitySettings).toContain("Review contact…");
     expect(identitySettings).toContain("Review anyway…");
     expect(identitySettings).toContain("var started = resolver.findCandidates(handle)");
-    expect(identitySettings).toContain("directContactPending = directReview === true && started");
+    expect(identitySettings).toContain("directContactPending = directEdit === true && started");
     expect(identitySettings).toContain("Hide short-code senders");
     expect(identitySettings).not.toContain(".slice(0, 12)");
     expect(identitySettings).toContain("phone/email conversations to review");
@@ -175,6 +177,10 @@ describe("QML safety invariants", () => {
       .toBeLessThan(identitySettings.indexOf("model: root.unresolved"));
     expect(identitySettings).toContain("Refresh source cards");
     expect(identitySettings).not.toContain("Check Mac Contacts again");
+    expect(identitySettings.indexOf("Refresh source cards"))
+      .toBeLessThan(identitySettings.indexOf("ContactCardCompare {"));
+    expect(identitySettings).toContain("root.resolver.comparison === null");
+    expect(identitySettings).toContain("visible: contactWorkspace.editorCard === null && root.resolver");
     expect(identitySettings).toContain("root.resolver.candidates.length === 1");
     expect(identitySettings).not.toContain("root.selectedChoiceIsSaved\n                  && (!root.resolver.comparison");
     expect(identityHelper).not.toContain("requireSavedRepairOwner");
@@ -185,15 +191,26 @@ describe("QML safety invariants", () => {
     expect(identitySettings).not.toContain("Fix on Mac");
   });
 
+  test("stale unsaved Contacts edits have an explicit two-step recovery", () => {
+    expect(identitySettings).toContain("Contacts is holding an unfinished in-memory edit.");
+    expect(identitySettings).toContain('? "Discard and close Contacts" : "Resolve pending edit…"');
+    expect(identitySettings).toContain("root.resolver.discardUnsavedContacts()");
+    expect(identities).toContain('start("discard-unsaved", {})');
+  });
+
   test("contact cleanup scan is read-only triage, never a bulk merge", () => {
     expect(identitySettings).toContain("FIND CONTACT CLEANUP OPPORTUNITIES");
     expect(identitySettings).toContain("Run a read-only Mac Contacts scan");
+    // every Contacts mutation announces itself, and a finished scan refreshes
+    // quietly without clobbering the mutation's success notice
+    expect(identities).toContain("signal contactsMutated()");
+    expect(identities.split("contactsMutated()").length - 1).toBeGreaterThanOrEqual(5);
     expect(identities).toContain('if (!quietAudit) notice = result.cached === true');
     // a fingerprint cache hit reports freshness instead of a fake re-scan
     expect(identities).toContain("Contacts hasn't changed since the last scan");
     // the contacts page loads cleanup results on open (cheap when cached)
     expect(identitySettings).toContain("function maybeAutoAudit()");
-    expect(identitySettings).toContain("resolver.auditContacts(reviewHandles(), true)");
+    expect(identitySettings).toContain("root.resolver.auditContacts(root.reviewHandles(), true)");
     // the scan runs on its OWN process, kicked immediately after a mutation,
     // so it never contends with navigation or edits; the list page shows the
     // in-flight state while previous results stay visible
@@ -221,9 +238,10 @@ describe("QML safety invariants", () => {
     expect(identityHelper).toContain('operation === "audit"');
   });
 
-  test("settings navigation keeps the contacts review compact", () => {
+  test("settings navigation keeps contact repair compact and separate from appearance", () => {
     expect(settings).toContain('property string page: "contacts"');
     expect(settings).toContain('visible: root.page === "contacts"');
+    expect(settings).toContain('visible: root.page === "appearance"');
     expect(settings).toContain("width: Math.min(parent.width, root.space(1120))");
     expect(identitySettings).toContain('label: "← All conversations"');
     expect(identitySettings).toContain("visible: !root.reviewActive");
@@ -242,6 +260,93 @@ describe("QML safety invariants", () => {
     expect(identities).toContain("pendingReviewHandle = requested");
     expect(identities).toContain('if (!worker.running && root.activeHandle === "") root.load(true)');
     expect(preferences).toContain("if (loaded && serialized === lastSerialized) return true");
+  });
+
+  test("Mac contact writes require preview, confirmation, and expose undo", () => {
+    expect(identitySettings).toContain('label: "Remove this " + root.handleNoun() + "…"');
+    // the undo offer shows only in the workspace of the contact it changed
+    expect(identitySettings).toContain("root.handleKey(root.resolver.undoHandle)");
+    // the conflict flow speaks in outcomes, not implementation terms: picking
+    // a person opens their cards; "session"/identities.json stay out of it
+    expect(identitySettings).toContain('"WORKING ON: "');
+    expect(identitySettings).toContain("Work on this person");
+    expect(identitySettings).toContain("Pick a person below. That only opens their cards for review");
+    expect(identitySettings).not.toContain("Select for this session");
+    expect(identitySettings).not.toContain("SELECTED FOR THIS SESSION");
+    expect(identitySettings).toContain('label: "Remove from Mac Contacts"');
+    expect(identitySettings).toContain("An undo receipt will be saved on the Mac");
+    expect(identitySettings).toContain('label: "Undo Mac change"');
+    expect(identities).toContain("function inspectOnMac(handle, token, ownerToken)");
+    expect(identities).toContain("function removeOnMac()");
+    expect(identities).toContain("function undoOnMac()");
+    expect(identities).toContain("repairPreview.writeEnabled");
+    expect(identities).toContain("validToken(repairPreview.ownerToken)");
+  });
+
+  test("contact comparison is local and linking has a separate upstream confirmation", () => {
+    expect(identitySettings).toContain("Manage " + '" + sourceCandidate.modelData.recordCount');
+    expect(identitySettings).toContain("ContactCardCompare");
+    expect(contactCompare).toContain('title: "Compare source cards"');
+    expect(contactCompare).toContain('title: "Consolidate into one card"');
+    expect(contactCompare).toContain('title: "Or link cards · optional"');
+    expect(contactCompare).not.toContain("step: \"");
+    expect(contactCompare).toContain("Reload cards from Mac");
+    expect(contactCompare).toContain("Back to contact tasks");
+    expect(contactCompare).toContain("DIFFERENCES ONLY");
+    expect(contactCompare).toContain("sharedRowMap");
+    expect(contactCompare).toContain("MERGED PREVIEW");
+    expect(contactCompare).toContain("function displayFieldLabel(fieldType, value)");
+    expect(contactCompare).toContain('detail.toLowerCase() === fieldType.toLowerCase()');
+    expect(contactCompare).toContain("displayFieldLabel(group.name, item.label)");
+    expect(contactCompare).toContain('displayFieldLabel("Address", address.label)');
+    expect(contactCompare).toContain("Prepare link in Contacts…");
+    expect(contactCompare).toContain("CONFIRM AN UPSTREAM CONTACTS CHANGE");
+    expect(contactCompare).toContain("Checking makes no changes");
+    expect(contactCompare).toContain("Edit in Blip…");
+    expect(contactCompare).toContain("cardBox.modelData.sourceName");
+    expect(identitySettings).toContain("sourceCard.modelData.sourceName");
+    expect(contactCompare).toContain("Text.PlainText");
+    expect(contactCompare).not.toContain("Array.isArray(card.phones)");
+    expect(identities).toContain("function compareCards(handle, ownerToken, otherOwnerToken)");
+    expect(identities).toContain("function prepareLink()");
+    expect(identities).toContain("function linkCards()");
+    expect(identities).toContain("linkPreview.ready");
+    expect(identities).toContain("expectedAction: linkPreview.action");
+  });
+
+  test("the contact workspace edits, deletes, and consolidates only after preview", () => {
+    expect(contactCompare).toContain("ContactCardEditor");
+    expect(contactCompare).toContain("Merge into \" + modelData.sourceName");
+    expect(panel).toContain('iconText: "⚙"');
+    expect(panel).toContain('tooltipText: "Settings"\n            bordered: false');
+    expect(panel).toContain('iconText: "＋"');
+    expect(panel).toContain('tooltipText: "New message (n)"\n            bordered: false');
+    expect(contactEditor).toContain("Review changes…");
+    expect(contactEditor).toContain("Delete this source card…");
+    expect(contactEditor).toContain("Review merged contact…");
+    expect(contactEditor).toContain("REVIEW CONSOLIDATION");
+    expect(contactEditor).toContain("This is a read-only preview. Nothing below has been saved to Contacts.");
+    expect(contactEditor).toContain("MERGED CONTACT TO KEEP");
+    expect(contactEditor).toContain("DELETE AFTER MERGE");
+    expect(contactEditor).toContain("FINAL CONFIRMATION");
+    expect(contactEditor).toContain("Back to edit");
+    expect(contactEditor).toContain("Save to Mac Contacts");
+    expect(contactEditor).toContain("Merge and delete source cards");
+    expect(contactEditor).toContain("function cleanLabel(value)");
+    expect(contactEditor).toContain("originalLabel: text(item.label)");
+    expect(contactEditor).toContain('value === cleanLabel(original) ? original : value');
+    expect(contactEditor.indexOf('label: valueList.emptyLabel')).toBeGreaterThan(
+      contactEditor.indexOf('model: parent.model'),
+    );
+    expect(contactEditor.indexOf('label: "Add address"')).toBeGreaterThan(
+      contactEditor.indexOf('model: root.previewOpen ? null : addresses'),
+    );
+    expect(contactEditor).toContain("Text.PlainText");
+    expect(identities).toContain("function prepareCardEdit(card, draft)");
+    expect(identities).toContain("function prepareCardDelete(card)");
+    expect(identities).toContain("function prepareConsolidation(targetCard, draft)");
+    expect(identities).toContain("function applyMutation()");
+    expect(identities).toContain("mutationPreview.planHash");
   });
 
   test("app window routes n, slash, digits, and Esc through catch helpers", () => {

@@ -438,10 +438,18 @@ FocusScope {
     else
       (contextMessageText === "" ? groupContactMenu : groupMessageMenu).popup()
   }
-  function reviewContact(person) {
+  function copyContactVCard(person) {
+    if (!person || !isContactHandle(person.handle)) return
+    if (!settingsView.copyVCard(person.handle)) {
+      showContactToast("Contacts is busy; try again in a moment", true)
+      return
+    }
+    showContactToast("Exporting “" + person.name + "” from Mac Contacts…", false)
+  }
+  function editContact(person) {
     if (!person || !isContactHandle(person.handle)) return
     openSettings("contacts")
-    Qt.callLater(function() { settingsView.reviewContact(person.handle) })
+    Qt.callLater(function() { settingsView.editContact(person.handle) })
   }
   function threadContainsChat(thread, chat) {
     if (!thread) return false
@@ -510,7 +518,7 @@ FocusScope {
     exitSearch()
     exitNew()
     settingsMode = true
-    settingsView.showPage("contacts")
+    settingsView.showPage(String(page || "contacts") === "appearance" ? "appearance" : "contacts")
     Qt.callLater(settingsView.focusDefault)
   }
 
@@ -3042,14 +3050,18 @@ FocusScope {
   // actions. This avoids blank rows and disabled group flyouts in DMs.
   component ContactActionSubmenu: Menu {
     id: actionMenu
-    title: "Review contact"
+    required property bool copyAction
+    title: copyAction ? "Copy vCard" : "Edit contact"
     width: root.space(360)
     Instantiator {
       model: root.contextPeople
       delegate: MenuItem {
         required property var modelData
         text: root.personMenuLabel(modelData)
-        onTriggered: root.reviewContact(modelData)
+        onTriggered: {
+          if (actionMenu.copyAction) root.copyContactVCard(modelData)
+          else root.editContact(modelData)
+        }
       }
       onObjectAdded: function(index, object) { actionMenu.insertItem(index, object) }
       onObjectRemoved: function(index, object) { actionMenu.removeItem(object) }
@@ -3069,8 +3081,12 @@ FocusScope {
     id: directContactMenu
     width: root.space(340)
     MenuItem {
-      text: "Review contact — " + String(root.contextPeople[0] && root.contextPeople[0].name || "contact")
-      onTriggered: root.reviewContact(root.contextPeople[0])
+      text: "Copy vCard — " + String(root.contextPeople[0] && root.contextPeople[0].name || "contact")
+      onTriggered: root.copyContactVCard(root.contextPeople[0])
+    }
+    MenuItem {
+      text: "Edit contact — " + String(root.contextPeople[0] && root.contextPeople[0].name || "contact")
+      onTriggered: root.editContact(root.contextPeople[0])
     }
   }
 
@@ -3083,15 +3099,20 @@ FocusScope {
     }
     MenuSeparator { }
     MenuItem {
-      text: "Review contact — " + String(root.contextPeople[0] && root.contextPeople[0].name || "contact")
-      onTriggered: root.reviewContact(root.contextPeople[0])
+      text: "Copy vCard — " + String(root.contextPeople[0] && root.contextPeople[0].name || "contact")
+      onTriggered: root.copyContactVCard(root.contextPeople[0])
+    }
+    MenuItem {
+      text: "Edit contact — " + String(root.contextPeople[0] && root.contextPeople[0].name || "contact")
+      onTriggered: root.editContact(root.contextPeople[0])
     }
   }
 
   Menu {
     id: groupContactMenu
     width: root.space(300)
-    ContactActionSubmenu { }
+    ContactActionSubmenu { copyAction: true }
+    ContactActionSubmenu { copyAction: false }
   }
 
   Menu {
@@ -3102,7 +3123,8 @@ FocusScope {
       onTriggered: root.copyText(root.contextMessageText)
     }
     MenuSeparator { }
-    ContactActionSubmenu { }
+    ContactActionSubmenu { copyAction: true }
+    ContactActionSubmenu { copyAction: false }
   }
 
   Timer {
@@ -3156,6 +3178,9 @@ FocusScope {
     fontScale: root.fontScale
     density: root.density
     cornerScale: root.cornerScale
+    onVcardFinished: function(message, success) {
+      root.showContactToast(message, !success)
+    }
     onCloseRequested: root.closeSettings()
   }
 

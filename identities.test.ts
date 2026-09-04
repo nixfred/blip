@@ -16,14 +16,20 @@ import { join } from "node:path";
 import { applyIdentityOverrides, applyThreadIdentityOverrides, type Thread } from "./collector";
 import {
   auditContactsOnMac,
+  contactWritesEnabled,
+  contactMutationOnMac,
+  exportContactVCard,
   identityKey,
   identityNameFor,
   MAX_BRIDGE_CONFIG_BYTES,
   MAX_IDENTITIES_BYTES,
   MAX_IDENTITY_REQUEST_BYTES,
   normalizeBridgeCandidates,
+  normalizeContactComparison,
   normalizeContactAudit,
+  normalizeContactDraft,
   normalizeIdentityConfig,
+  normalizeRepairPreview,
   parseIdentities,
   readBoundedIdentityFile,
   readBoundedBridgeConfig,
@@ -146,6 +152,40 @@ describe("bounded identity file", () => {
     expect(lstatSync(join(root, "blip")).mode & 0o777).toBe(0o700);
     writeFileSync(path, "not json");
     expect(safeReadIdentityConfig(path)).toEqual({ schemaVersion: 1, identities: {} });
+  });
+});
+
+describe("contact-write opt-in", () => {
+  test("is disabled by default and accepts only an explicit on value", () => {
+    const { root } = fixture();
+    const path = join(root, "blip", "bridge.conf");
+    writeIdentities(join(root, "blip", "seed.json"), config);
+    writeFileSync(path, "host=mac\ncontact_writes=off\n");
+    expect(contactWritesEnabled(path)).toBe(false);
+    writeFileSync(path, "contact_writes='on'\n");
+    expect(contactWritesEnabled(path)).toBe(true);
+    writeFileSync(path, "contact_writes=on\ncontact_writes=off\n");
+    expect(contactWritesEnabled(path)).toBe(false);
+  });
+
+  test("fails closed for oversized, symlinked, and group-writable config", () => {
+    const first = fixture();
+    const path = join(first.root, "blip", "bridge.conf");
+    writeIdentities(join(first.root, "blip", "seed.json"), config);
+    writeFileSync(path, Buffer.alloc(MAX_BRIDGE_CONFIG_BYTES + 1, 0x20));
+    expect(contactWritesEnabled(path)).toBe(false);
+    expect(() => readBoundedBridgeConfig(path)).toThrow("too large");
+    writeFileSync(path, "contact_writes=on\n");
+    chmodSync(path, 0o622);
+    expect(contactWritesEnabled(path)).toBe(false);
+
+    const second = fixture();
+    const target = join(second.root, "target.conf");
+    const link = join(second.root, "blip", "bridge.conf");
+    writeIdentities(join(second.root, "blip", "seed.json"), config);
+    writeFileSync(target, "contact_writes=on\n");
+    symlinkSync(target, link);
+    expect(contactWritesEnabled(link)).toBe(false);
   });
 });
 
@@ -345,6 +385,252 @@ describe("Mac candidate boundary", () => {
       operation: "open", handle: "+15550100001", token: exactToken,
     });
   });
+
+  test("vCard export stays on stdin and creates a real owner-only .vcf file", () => {
+    let bridgeInput = "";
+    const runtime = fixture().root;
+    const card = Buffer.from(
+      "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Alex Rivera\r\nEND:VCARD\r\n",
+      "utf8",
+    );
+    const runner = ((_command: string, args: string[], options: any) => {
+      expect(args).toEqual(["--json", "resolve"]);
+      bridgeInput = options.input;
+      return { status: 0, signal: null, output: [], pid: 1, stderr: "", error: undefined,
+        stdout: JSON.stringify({ ok: true, name: "Alex Rivera", vcard: card.toString("base64") }) };
+    }) as any;
+    const result = exportContactVCard("+15550100001", runner, runtime);
+    expect(result).toEqual({
+      handle: "+15550100001", name: "Alex Rivera", bytes: card.length,
+      fileName: "Alex Rivera.vcf",
+      fileUri: expect.stringContaining("/Alex%20Rivera.vcf"),
+    });
+    expect(JSON.parse(bridgeInput)).toEqual({
+      operation: "vcard", handle: "+15550100001",
+    });
+    const copiedPath = decodeURIComponent(new URL(result.fileUri).pathname);
+    expect(readFileSync(copiedPath)).toEqual(card);
+    expect(lstatSync(copiedPath).mode & 0o077).toBe(0);
+  });
+
+  test("discard-unsaved sends no contact identifier and validates the result", () => {
+    let bridgeInput = "";
+    const runner = ((_command: string, args: string[], options: any) => {
+      expect(args).toEqual(["--json", "resolve"]);
+      bridgeInput = options.input;
+      return { status: 0, signal: null, output: [], pid: 1, stderr: "", error: undefined,
+        stdout: JSON.stringify({ ok: true, discarded: true }) };
+    }) as any;
+    expect(resolveOnMac("discard-unsaved", undefined, undefined, runner))
+      .toEqual({ discarded: true });
+    expect(JSON.parse(bridgeInput)).toEqual({ operation: "discard-unsaved" });
+  });
+
+  test("validates repair previews and rejects inconsistent metadata", () => {
+    const preview = {
+      handle: "+15550100001", name: "Pat Rivera", kind: "phone",
+      fieldCount: 1, labels: ["mobile"], cardNumber: 1, cardCount: 2,
+      accountNumber: 1, sourceName: "iCloud", writeEnabled: true,
+    };
+    expect(normalizeRepairPreview(preview, "5550100001")).toEqual(preview);
+    expect(() => normalizeRepairPreview({ ...preview, labels: [] }, preview.handle))
+      .toThrow("field-label");
+    expect(() => normalizeRepairPreview({ ...preview, cardNumber: 3 }, preview.handle))
+      .toThrow("inconsistent card");
+    expect(() => normalizeRepairPreview({ ...preview, name: "x".repeat(161) }, preview.handle))
+      .toThrow("too long");
+  });
+
+  test("validates bounded contact-card comparisons", () => {
+    const comparison = {
+      handle: "+15550100001", name: "Alex Rivera", cardCount: 2,
+      sourceCount: 2, writeEnabled: true,
+      cards: [1, 2].map((number) => ({
+        token: cardToken(number === 1 ? "b" : "c"), revision: cardToken(number === 1 ? "d" : "e"), cardNumber: number,
+        accountNumber: number, sourceName: number === 1 ? "iCloud" : "Google",
+        hasPhoto: number === 1,
+        displayName: "Alex Rivera", firstName: "Alex", middleName: "", lastName: "Rivera",
+        nickname: "", organization: "Example", department: "", jobTitle: "",
+        birthday: "--09-02", note: "",
+        phones: [{ label: "mobile", value: "+1 555 010 0001" }],
+        emails: number === 1 ? [{ label: "home", value: "alex@example.com" }] : [],
+        urls: [], addresses: number === 2 ? [{ label: "home", street: "1 Main St",
+          city: "Madison", state: "WI", postalCode: "53703", country: "US",
+          countryCode: "US" }] : [],
+      })),
+    };
+    expect(normalizeContactComparison(comparison, "5550100001")).toEqual(comparison);
+    expect(() => normalizeContactComparison({ ...comparison, cards: [
+      comparison.cards[0], { ...comparison.cards[1], token: comparison.cards[0]!.token },
+    ] }, comparison.handle)).toThrow("duplicate comparison card");
+    expect(() => normalizeContactComparison({ ...comparison, cards: [
+      comparison.cards[0], { ...comparison.cards[1], cardNumber: 3 },
+    ] }, comparison.handle)).toThrow("card numbers");
+    expect(() => normalizeContactComparison({ ...comparison, cards: [
+      { ...comparison.cards[0], phones: Array(17).fill({ label: "x", value: "1" }) },
+      comparison.cards[1],
+    ] }, comparison.handle)).toThrow("phone list");
+    expect(() => normalizeContactComparison({ ...comparison, cards: [
+      { ...comparison.cards[0], note: "x".repeat(1001) }, comparison.cards[1],
+    ] }, comparison.handle)).toThrow("note");
+  });
+
+  test("comparison and link operations stay on stdin and validate Apple actions", () => {
+    const comparison = {
+      handle: "+15550100001", name: "Alex Rivera", cardCount: 2,
+      sourceCount: 2, writeEnabled: true,
+      cards: [1, 2].map((number) => ({
+        token: cardToken(number === 1 ? "b" : "c"), revision: cardToken(number === 1 ? "d" : "e"), cardNumber: number,
+        accountNumber: number, sourceName: number === 1 ? "iCloud" : "Google",
+        hasPhoto: false, displayName: "Alex Rivera",
+        firstName: "Alex", middleName: "", lastName: "Rivera", nickname: "",
+        organization: "", department: "", jobTitle: "", birthday: "", note: "",
+        phones: [], emails: [], urls: [], addresses: [],
+      })),
+    };
+    const captured: Array<{ args: string[]; input: string }> = [];
+    const responses = [
+      { ok: true, ...comparison },
+      { ok: true, handle: comparison.handle, name: comparison.name, cardCount: 2,
+        sourceCount: 2, writeEnabled: true, ready: true, action: "Link Selected Cards" },
+      { ok: true, handle: comparison.handle, name: comparison.name, cardCount: 2,
+        sourceCount: 2, writeEnabled: true, linked: true, action: "Link Selected Cards" },
+    ];
+    const runner = ((_command: string, args: string[], options: any) => {
+      captured.push({ args, input: options.input });
+      return { status: 0, signal: null, output: [], pid: 1,
+        stdout: JSON.stringify(responses.shift()), stderr: "", error: undefined };
+    }) as any;
+    expect(resolveOnMac("compare", comparison.handle, token, runner).comparison?.cardCount).toBe(2);
+    expect(resolveOnMac("link-prepare", comparison.handle, token, runner).linkPreview?.ready).toBe(true);
+    expect(resolveOnMac(
+      "link", comparison.handle, token, runner, undefined, "Link Selected Cards",
+    ).linkResult?.linked).toBe(true);
+    expect(captured.every(({ args }) => args.join(" ").includes("15550100001") === false)).toBe(true);
+    expect(captured.map(({ input }) => JSON.parse(input))).toEqual([
+      { operation: "compare", handle: comparison.handle, ownerToken: token },
+      { operation: "link-prepare", handle: comparison.handle, ownerToken: token },
+      { operation: "link", handle: comparison.handle, ownerToken: token,
+        expectedAction: "Link Selected Cards" },
+    ]);
+    const badRunner = (() => ({ status: 0, signal: null, output: [], pid: 1,
+      stdout: JSON.stringify({ ...responses[0], ok: true, handle: comparison.handle,
+        name: comparison.name, cardCount: 2, sourceCount: 2, writeEnabled: true,
+        ready: true, action: "Delete Cards" }), stderr: "", error: undefined })) as any;
+    expect(() => resolveOnMac("link-prepare", comparison.handle, token, badRunner))
+      .toThrow("invalid link action");
+    expect(() => resolveOnMac(
+      "link", comparison.handle, token, runner, undefined, "Delete Cards",
+    )).toThrow("confirmed Contacts action");
+  });
+
+  test("contact edits are bounded, revision-pinned, previewed, and confirmed", () => {
+    const exactToken = cardToken("b");
+    const revision = cardToken("c");
+    const planHash = cardToken("d");
+    const draft = normalizeContactDraft({
+      firstName: "Alex", middleName: "", lastName: "Rivera", nickname: "Lex",
+      organization: "Example", department: "", jobTitle: "", birthday: "--09-02",
+      note: "", phones: [{ label: "mobile", value: "+1 555 010 0001" }],
+      emails: [], urls: [], addresses: [],
+    });
+    const metadata = {
+      action: "edit", handle: "+15550100001", name: "Alex Rivera", cardNumber: 1,
+      cardCount: 2, accountNumber: 1, sourceName: "iCloud", sourceCardCount: 0,
+      changedFields: ["nickname"], planHash, writeEnabled: true,
+    };
+    const captured: string[] = [];
+    const responses = [
+      { ok: true, preview: metadata },
+      { ok: true, ...metadata, applied: true, undoToken: "undo:" + "f".repeat(32),
+        revision: cardToken("e"), displayName: "Alex Rivera" },
+    ];
+    const runner = ((_command: string, args: string[], options: any) => {
+      expect(args).toEqual(["--json", "resolve"]);
+      captured.push(options.input);
+      return { status: 0, signal: null, output: [], pid: 1,
+        stdout: JSON.stringify(responses.shift()), stderr: "", error: undefined };
+    }) as any;
+    const input = { handle: metadata.handle, ownerToken: token, token: exactToken, revision, card: draft };
+    expect(contactMutationOnMac("edit-prepare", input, runner).preview?.action).toBe("edit");
+    expect(contactMutationOnMac("edit", { ...input, planHash }, runner).result?.applied).toBe(true);
+    expect(JSON.parse(captured[0]!)).toEqual({ operation: "edit-prepare", ...input });
+    expect(JSON.parse(captured[1]!)).toEqual({ operation: "edit", ...input, planHash });
+    expect(() => contactMutationOnMac("edit", { ...input, planHash: "sha256:bad" }, runner))
+      .toThrow("revision");
+  });
+
+  test("cross-name merge threads the second owner token and rejects a duplicate", () => {
+    const token = "sha256:" + "1".repeat(64);
+    const otherToken = "sha256:" + "2".repeat(64);
+    const captured: string[] = [];
+    const comparison = {
+      handle: "+15550100001", name: "Alex Rivera", cardCount: 2,
+      sourceCount: 2, writeEnabled: true,
+      cards: [1, 2].map((number) => ({
+        token: "sha256:" + String(number).repeat(63) + "a",
+        revision: "sha256:" + String(number).repeat(63) + "b", cardNumber: number,
+        accountNumber: number, sourceName: number === 1 ? "iCloud" : "Google",
+        hasPhoto: false, displayName: "Alex Rivera",
+        firstName: "Alex", middleName: "", lastName: "Rivera", nickname: "",
+        organization: "", department: "", jobTitle: "", birthday: "", note: "",
+        phones: [], emails: [], urls: [], addresses: [],
+      })),
+    };
+    const runner = ((_command: string, _args: string[], options: any) => {
+      captured.push(options.input);
+      return { status: 0, signal: null, output: [], pid: 1,
+        stdout: JSON.stringify({ ok: true, ...comparison }), stderr: "", error: undefined };
+    }) as any;
+    resolveOnMac("compare", comparison.handle, token, runner, undefined, undefined, otherToken);
+    expect(JSON.parse(captured[0]!)).toEqual({
+      operation: "compare", handle: comparison.handle, ownerToken: token, otherOwnerToken: otherToken,
+    });
+    expect(() => resolveOnMac(
+      "compare", comparison.handle, token, runner, undefined, undefined, token,
+    )).toThrow("different candidate");
+    const draft = {
+      firstName: "Alex", middleName: "", lastName: "Rivera", nickname: "",
+      organization: "", department: "", jobTitle: "", birthday: "", note: "",
+      phones: [], emails: [], urls: [], addresses: [],
+    };
+    const revisions = comparison.cards.map((card) => ({ token: card.token, revision: card.revision }));
+    expect(() => contactMutationOnMac("merge-prepare", {
+      handle: comparison.handle, ownerToken: token, otherOwnerToken: token,
+      targetToken: comparison.cards[0]!.token, revisions, card: draft,
+    }, runner)).toThrow("different candidate");
+  });
+
+  test("inspect, removal, and undo keep contact data on stdin and validate receipts", () => {
+    const exactToken = cardToken("e");
+    const undoToken = "undo:" + "f".repeat(32);
+    const preview = {
+      handle: "+15550100001", name: "Pat Rivera", kind: "phone",
+      fieldCount: 1, labels: ["mobile"], cardNumber: 1, cardCount: 2,
+      accountNumber: 1, sourceName: "iCloud", writeEnabled: true,
+    };
+    const captured: Array<{ args: string[]; input: string }> = [];
+    const responses = [
+      { ok: true, preview },
+      { ok: true, ...preview, removed: true, undoToken },
+      { ok: true, restored: true, alreadyPresent: false, handle: preview.handle,
+        name: preview.name, action: "field-removal", cardCount: 1, fieldCount: 1 },
+    ];
+    const runner = ((_command: string, args: string[], options: any) => {
+      captured.push({ args, input: options.input });
+      return { status: 0, signal: null, output: [], pid: 1,
+        stdout: JSON.stringify(responses.shift()), stderr: "", error: undefined };
+    }) as any;
+    expect(resolveOnMac("inspect", preview.handle, exactToken, runner, token).preview).toEqual(preview);
+    expect(resolveOnMac("remove", preview.handle, exactToken, runner, token).removal?.undoToken).toBe(undoToken);
+    expect(resolveOnMac("undo", undefined, undoToken, runner).undo?.restored).toBe(true);
+    expect(captured.every(({ args }) => args.join(" ").includes("15550100001") === false)).toBe(true);
+    expect(JSON.parse(captured[0]!.input)).toEqual({
+      operation: "inspect", handle: preview.handle, token: exactToken, ownerToken: token,
+    });
+    expect(JSON.parse(captured[2]!.input)).toEqual({ operation: "undo", undoToken });
+    expect(() => resolveOnMac("undo", undefined, "undo:bad", runner)).toThrow("undo token");
+  });
 });
 
 describe("collector identity application", () => {
@@ -366,6 +652,36 @@ describe("collector identity application", () => {
 });
 
 describe("identity CLI streaming boundary", () => {
+  test("contact comparison does not require or create a display-name preference", () => {
+    const { root } = fixture();
+    const bin = join(root, "bin");
+    const contacts = join(bin, "contacts");
+    const identities = join(root, "missing", "identities.json");
+    const response = JSON.stringify({
+      ok: true, handle: "+15550100001", name: "Alex Rivera",
+      cardCount: 1, sourceCount: 1, writeEnabled: true,
+      cards: [{
+        token: cardToken("b"), revision: cardToken("c"), cardNumber: 1,
+        accountNumber: 1, sourceName: "iCloud", hasPhoto: false,
+        displayName: "Alex Rivera", firstName: "Alex", middleName: "",
+        lastName: "Rivera", nickname: "", organization: "", department: "",
+        jobTitle: "", birthday: "", note: "", phones: [], emails: [], urls: [], addresses: [],
+      }],
+    }) + "\n";
+    mkdirSync(bin);
+    writeFileSync(contacts, `#!/usr/bin/env bun\nprocess.stdout.write(${JSON.stringify(response)})\n`);
+    chmodSync(contacts, 0o700);
+
+    const result = spawnSync("bun", [join(import.meta.dir, "identities.ts"), "compare"], {
+      env: { ...process.env, HOME: root, BLIP_IDENTITIES_PATH: identities },
+      input: JSON.stringify({ handle: "+15550100001", ownerToken: token }),
+      encoding: "utf8",
+    });
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).comparison.name).toBe("Alex Rivera");
+    expect(existsSync(identities)).toBe(false);
+  });
+
   test("exits before an oversized producer closes stdin", async () => {
     const { path } = fixture();
     const child = Bun.spawn(["bun", join(import.meta.dir, "identities.ts"), "custom"], {

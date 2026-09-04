@@ -217,6 +217,29 @@
 - Paste a file copied from a file manager straight into a conversation as
   a draft attachment (GNOME file-object and uri-list clipboard payloads).
 
+### Contact writes (gated)
+
+- **Edit, merge, and clean up Mac contacts from Blip — behind two explicit
+  gates.** Every mutation requires `contact_writes=on` in the owner's Linux
+  config AND a 0600 `~/.blip/contact-writes-enabled` file on the Mac that the
+  forced-command ssh key cannot create. Full-card edits, confirmed deletion,
+  multi-card consolidation into a chosen account, exact field removal, and
+  Apple's own link/merge action — each with a revision-pinned preview, its own
+  confirmation, and (except Apple's link) a private seven-day Mac-local undo
+  receipt.
+- **Side-by-side card compare** returns bounded, sanitized fields with opaque
+  tokens; describes are cross-checked against CNContactStore so a stale
+  Contacts.app view can never seed an editor with field deletions.
+- **Copy a contact as a real `.vcf`** exported by macOS Contacts; the Wayland
+  clipboard owner stays alive so the paste lands as a file.
+- **`install.sh` no longer requires Xcode.** Without `swiftc` it skips the
+  compiled Contacts helper and continues; contact writes, compare, and vCard
+  export simply stay unavailable until the Command Line Tools are installed
+  and the installer is re-run.
+- macOS 15.5 workarounds: three broken Contacts scripting verbs are routed
+  around, and saves reuse unchanged labeled values so one damaged stored row
+  cannot fail whole saves with Cocoa 134092.
+
 ## 2.3.0 — 2026-09-03 — the contributors' release
 
 - **Photos in a message stopped arriving once they were full-size.** Someone
@@ -522,6 +545,38 @@ findings, the clear ones fixed here, the rest on the roadmap.
 **Repo**
 - CI on every push and PR (bun test, Mac tools byte-compile, shellcheck),
   CONTRIBUTING, issue/PR templates, security policy, GitHub Releases.
+- Add explicitly gated Mac Contacts repair from Blip: exact-card preview,
+  second confirmation, supported Contacts.app removal, Mac-local undo receipt,
+  and post-change revalidation. The restricted SSH key remains unable to turn
+  contact writes on by itself.
+- Add an in-Blip active-card comparison with bounded contact details, a
+  de-duplicated combined view, missing-detail hints, exact-card editing handoff,
+  and guarded invocation of Contacts' native link/merge action. Preview and
+  execution are separate, the confirmed action is pinned end-to-end, and Blip
+  never links during discovery or testing.
+- Keep the Settings UI visually stable during five-second configuration checks: silent identity reads no longer toggle visible loading state, and unchanged identity/preference results no longer rebuild QML models or controls.
+
+**Added**
+- File-backed appearance preferences with an in-app QML editor: bubble colors,
+  app-window opacity, font scale, density, sidebar width, avatar size, and
+  corner roundness. `~/.config/blip/preferences.json` is portable, atomically
+  written, owner-only, bounded, and reloaded live after an external restore.
+- Messages.app pinned conversations, sourced read-only from the Mac's pinning
+  plist and rendered in its ordered circular-avatar grid above the regular
+  chronological list.
+- Explicit contact-name resolution for ambiguous phone/email handles. The QML
+  chooser writes a bounded, atomic `~/.config/blip/identities.json` override;
+  a source-fix action opens the validated persistent card in Contacts.app on
+  the Mac without writing Apple’s private AddressBook database.
+
+**Changed**
+- Contact-name repair is now a guided two-stage flow: selecting a candidate is
+  harmless, remembering the Contacts match is explicit, and optional Mac repair lists and
+  opens every exact source card separately. Generic one-click **Use** and
+  **Fix on Mac** controls were removed.
+- Settings now separates Contacts from Appearance with tabs. Contact repair is
+  a list-to-detail flow with Back/Escape navigation, bounded content width, and
+  collapsed Mac/source-card details instead of one enormous settings scroll.
 
 ## 2.0.0 — 2026-08-31
 
