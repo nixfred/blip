@@ -169,6 +169,27 @@ ColumnLayout {
   function cloneList(value) {
     return JSON.parse(JSON.stringify(Array.isArray(value) ? value : []))
   }
+  function addressFields() {
+    return ["street", "city", "state", "postalCode", "country", "countryCode"]
+  }
+  function addressField(item, name) {
+    return String(item && item[name] || "").trim().toLowerCase()
+  }
+  // True when `sparse` adds nothing beyond `full`: every field empty or equal,
+  // case-insensitively. Source cards routinely disagree only by an unset
+  // field — the same Home address with countryCode "us" on one card and unset
+  // on the other — and an exact-match key kept both on the merged card.
+  // Collapsing strict subsets keeps one copy without ever guessing between
+  // genuinely different values. Labels stay out of it, as they always were.
+  function addressSubsumes(full, sparse) {
+    var fields = addressFields()
+    for (var i = 0; i < fields.length; i++) {
+      var have = addressField(full, fields[i])
+      var add = addressField(sparse, fields[i])
+      if (add !== "" && add !== have) return false
+    }
+    return true
+  }
   function uniqueList(cards, property, address) {
     var result = []
     var seen = ({})
@@ -176,10 +197,26 @@ ColumnLayout {
       var values = cards[i] && Array.isArray(cards[i][property]) ? cards[i][property] : []
       for (var j = 0; j < values.length; j++) {
         var item = values[j]
-        var key = address
-          ? [item.street, item.city, item.state, item.postalCode, item.country, item.countryCode]
-            .join("\u0000").toLowerCase()
-          : String(item.value || "").toLowerCase()
+        if (address) {
+          var fields = addressFields()
+          var empty = true
+          for (var f = 0; f < fields.length; f++)
+            if (addressField(item, fields[f]) !== "") { empty = false; break }
+          if (empty) continue
+          var absorbed = false
+          for (var k = 0; k < result.length; k++) {
+            if (addressSubsumes(result[k], item)) { absorbed = true; break }
+            if (addressSubsumes(item, result[k])) {
+              // The newcomer is the more complete record — keep it, in place.
+              result[k] = JSON.parse(JSON.stringify(item))
+              absorbed = true
+              break
+            }
+          }
+          if (!absorbed) result.push(JSON.parse(JSON.stringify(item)))
+          continue
+        }
+        var key = String(item.value || "").toLowerCase()
         if (key === "" || seen[key]) continue
         seen[key] = true
         result.push(JSON.parse(JSON.stringify(item)))

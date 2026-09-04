@@ -529,3 +529,87 @@ test("link preview URLs never ride argv", () => {
   expect(panel).toContain("previewProc.write(previewProc.url)");
   expect(panel).not.toContain("root.previewScript, previewProc.url]");
 });
+
+// The consolidation draft's dedupe logic lives in ContactCardCompare.qml as
+// plain-JS functions; extract and execute them so the collapse rules are
+// tested for behaviour, not just presence. Brace-walking keeps the extraction
+// honest when the functions change shape.
+function extractQmlFunction(source: string, name: string): string {
+  const marker = `  function ${name}(`;
+  const start = source.indexOf(marker);
+  if (start < 0) throw new Error(`function ${name} not found`);
+  let depth = 0;
+  for (let i = source.indexOf("{", start); i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}" && --depth === 0)
+      return source.slice(start, i + 1);
+  }
+  throw new Error(`function ${name} never closes`);
+}
+
+describe("consolidation draft dedupe (executed from QML source)", () => {
+  const uniqueList: (cards: unknown[], property: string, address: boolean) => Record<string, string>[] =
+    new Function(
+      [
+        extractQmlFunction(contactCompare, "addressFields"),
+        extractQmlFunction(contactCompare, "addressField"),
+        extractQmlFunction(contactCompare, "addressSubsumes"),
+        extractQmlFunction(contactCompare, "uniqueList"),
+        "return uniqueList;",
+      ].join("\n"),
+    )();
+
+  const home = {
+    label: "Home", street: "1234 Cherry Ln", city: "Springfield",
+    state: "MN", postalCode: "55555", country: "United States",
+  };
+
+  test("an address differing only by an unset field collapses to the complete copy", () => {
+    // The live case: countryCode "us" on one source card, unset on the other.
+    const kept = uniqueList(
+      [{ addresses: [{ ...home, countryCode: "us" }] }, { addresses: [{ ...home }] }],
+      "addresses", true,
+    );
+    expect(kept.length).toBe(1);
+    expect(kept[0].countryCode).toBe("us");
+  });
+
+  test("the more complete copy wins regardless of card order", () => {
+    const kept = uniqueList(
+      [{ addresses: [{ ...home }] }, { addresses: [{ ...home, countryCode: "us" }] }],
+      "addresses", true,
+    );
+    expect(kept.length).toBe(1);
+    expect(kept[0].countryCode).toBe("us");
+  });
+
+  test("addresses that disagree on a filled field both survive", () => {
+    const kept = uniqueList(
+      [{ addresses: [home] }, { addresses: [{ ...home, city: "Minneapolis" }] }],
+      "addresses", true,
+    );
+    expect(kept.length).toBe(2);
+  });
+
+  test("an all-empty address never reaches the draft", () => {
+    const kept = uniqueList(
+      [{ addresses: [{ label: "Home", street: "", city: "" }] }, { addresses: [home] }],
+      "addresses", true,
+    );
+    expect(kept.length).toBe(1);
+    expect(kept[0].street).toBe("1234 Cherry Ln");
+  });
+
+  test("value-keyed lists keep exact-match semantics", () => {
+    const kept = uniqueList(
+      [
+        { phones: [{ label: "Work", value: "(555) 010-4477" }] },
+        { phones: [{ label: "Work", value: "(555) 010-4477" }, { label: "Mobile", value: "+15550104477" }] },
+      ],
+      "phones", false,
+    );
+    // Exact duplicates collapse; a differently formatted number is not our
+    // call to merge.
+    expect(kept.map((entry) => entry.value)).toEqual(["(555) 010-4477", "+15550104477"]);
+  });
+});
