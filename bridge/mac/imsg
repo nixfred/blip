@@ -1053,11 +1053,17 @@ def _group_cluster_map(con) -> dict:
     return out
 
 
+def _group_photo_chat_ids(con, chat_identifier: str) -> tuple[str, ...]:
+    clusters = _group_cluster_map(con)
+    canon = clusters.get(chat_identifier, chat_identifier)
+    return tuple(sorted({c for c, k in clusters.items() if k == canon} | {chat_identifier, canon}))
+
+
 def _group_photo_path(con, chat_identifier: str) -> str:
     """Newest group photo for a group chat, or "".
 
     Messages stores a group's photo as an attachment whose filename ends in
-    `GroupPhotoImage` — there is no column on the chat row. Two traps, both
+    `GroupPhotoImage` — there is no column on the chat row. Three traps, all
     hit on a real Mac:
 
     * The carrier message's `group_action_type` is NOT a constant. Photos set
@@ -1065,36 +1071,67 @@ def _group_photo_path(con, chat_identifier: str) -> str:
       change, not a semantic one — no group here has any group-action event
       AFTER its photo, so neither value means "removed"). Matching on the
       filename instead of the action type is what makes both work.
+    * The carrier is an announcement (`item_type = 3`), not a normal message.
+      `MESSAGE_SRC` hides those rows so they never become empty unread bubbles, and
+      a JOIN through it therefore finds no photo even when Messages shows one.
     * The photo can live on a SIBLING chat row. A re-keyed group has several
       rows with different chat_identifiers AND different group_ids; Fred's
       "Sportsball!" keeps its photo on the row Messages retired in Feb 2026.
       So the search spans the whole cluster, not the row it was asked about.
+
+    `chat.properties.groupPhotoGuid` is a second index: it names the
+    attachment even when `filename` is NULL on the GroupPhotoImage row.
     """
-    clusters = _group_cluster_map(con)
-    canon = clusters.get(chat_identifier, chat_identifier)
-    ids = sorted({c for c, k in clusters.items() if k == canon} | {chat_identifier, canon})
+    ids = _group_photo_chat_ids(con, chat_identifier)
     placeholders = ",".join("?" for _ in ids)
     row = con.execute(
         f"""SELECT a.filename
             FROM chat c
             JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
-            JOIN {MESSAGE_SRC} m ON m.ROWID = cmj.message_id
+            JOIN message m ON m.ROWID = cmj.message_id
             JOIN message_attachment_join maj ON maj.message_id = m.ROWID
             JOIN attachment a ON a.ROWID = maj.attachment_id
-            WHERE a.filename LIKE '%GroupPhotoImage'
+            WHERE (a.filename LIKE '%GroupPhotoImage'
+                   OR a.transfer_name LIKE '%GroupPhotoImage')
+              AND a.filename IS NOT NULL
               AND c.chat_identifier IN ({placeholders})
             ORDER BY m.date DESC LIMIT 1""",
-        tuple(ids),
+        ids,
     ).fetchone()
-    return os.path.expanduser(row["filename"]) if row and row["filename"] else ""
+    if row and row["filename"]:
+        return os.path.expanduser(row["filename"])
+    for r in con.execute(
+        f"SELECT properties FROM chat WHERE chat_identifier IN ({placeholders}) AND properties IS NOT NULL",
+        ids,
+    ):
+        try:
+            blob = plistlib.loads(r["properties"])
+        except (plistlib.InvalidFileException, ValueError, TypeError, OSError):
+            continue
+        guid = blob.get("groupPhotoGuid") if isinstance(blob, dict) else None
+        if not isinstance(guid, str) or not guid:
+            continue
+        hit = con.execute(
+            "SELECT filename FROM attachment WHERE filename IS NOT NULL AND (guid = ? OR original_guid = ?) LIMIT 1",
+            (guid, guid),
+        ).fetchone()
+        if hit and hit["filename"]:
+            return os.path.expanduser(hit["filename"])
+    return ""
+
+
+GROUP_PHOTO_MAX_DIM = 512  # avatars are drawn ~40–80 px; Linux also caps at 2 MB
 
 
 def _stream_group_photo(con, chat_identifier: str) -> None:
-    """`imsg avatar --chat <id>`: the group's own photo as JPEG/PNG bytes.
+    """`imsg avatar --chat <id>`: the group's own photo as JPEG bytes.
     Same hardening as `attachment`: id shape checked, path confined to the
-    Messages store (commonpath), regular file, size ceiling; HEIC or anything
-    unrecognised goes through sips to JPEG. Exit 1 when the group has none."""
+    Messages store (commonpath), regular file, size ceiling. Always resampled
+    through sips to JPEG at GROUP_PHOTO_MAX_DIM so a multi-megabyte PNG still
+    fits the Linux avatar cache. Exit 1 when the group has none."""
     import stat as stat_mod
+    import subprocess
+    import tempfile
     if not re.fullmatch(r"[0-9a-fA-F]{32}|chat[0-9]{1,20}", chat_identifier):
         sys.exit("error: bad group id")
     raw = _group_photo_path(con, chat_identifier)
@@ -1110,30 +1147,25 @@ def _stream_group_photo(con, chat_identifier: str) -> None:
         sys.exit(1)
     if not stat_mod.S_ISREG(st.st_mode) or st.st_size > ATTACH_MAX_BYTES:
         sys.exit(1)
-    with open(path, "rb") as f:
-        kind = _sniff_image(f.read(16))
-    src, tmp = path, None
-    if kind not in ("jpeg", "png"):
-        import subprocess
-        import tempfile
-        fd_t, tmp = tempfile.mkstemp(suffix=".jpg")
-        os.close(fd_t)
+    fd_t, tmp = tempfile.mkstemp(suffix=".jpg")
+    os.close(fd_t)
+    try:
         try:
-            r = subprocess.run(["sips", "-s", "format", "jpeg", path, "--out", tmp],
-                               capture_output=True, timeout=60)
+            r = subprocess.run(
+                ["sips", "-Z", str(GROUP_PHOTO_MAX_DIM), "-s", "format", "jpeg", path, "--out", tmp],
+                capture_output=True, timeout=60,
+            )
         except subprocess.TimeoutExpired:
-            os.unlink(tmp)
             sys.exit("error: sips conversion timed out")
         if r.returncode != 0:
-            os.unlink(tmp)
             sys.exit(1)
-        src = tmp
-    try:
-        with open(src, "rb") as f:
+        with open(tmp, "rb") as f:
             data = f.read(ATTACH_MAX_BYTES + 1)
     finally:
-        if tmp:
+        try:
             os.unlink(tmp)
+        except OSError:
+            pass
     if not data or len(data) > ATTACH_MAX_BYTES:
         sys.exit(1)
     sys.stdout.buffer.write(data)

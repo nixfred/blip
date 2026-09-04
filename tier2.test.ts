@@ -512,6 +512,19 @@ describe("contact photos", () => {
     unlinkSync(marker);
   });
 
+  test("retry ignores a fresh no-photo marker so a newly set picture is found", () => {
+    let calls = 0;
+    const miss = (() => ({ status: 1, stdout: Buffer.alloc(0), stderr: "" })) as never;
+    const hit = (() => { calls++; return { status: 0, stdout: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]), stderr: "" }; }) as never;
+    const h = `retry-${Date.now()}@example.com`;
+    expect(fetchAvatar(h, miss).ok).toBe(false);
+    expect(fetchAvatar(h, hit).ok).toBe(false);            // marker still fresh
+    expect(calls).toBe(0);
+    expect(fetchAvatar(h, hit, { retry: true }).ok).toBe(true);
+    expect(calls).toBe(1);
+    unlinkSync(`${AVATAR_DIR}/${avatarKey(h)}.jpg`);
+  });
+
   test("a group id asks for the GROUP's photo (--chat), a person for Contacts (--)", () => {
     expect(avatarArgs("ce5a593a78af408282d61461ade89135")).toEqual(["avatar", "--chat", "ce5a593a78af408282d61461ade89135"]);
     expect(avatarArgs("chat123456789")).toEqual(["avatar", "--chat", "chat123456789"]);

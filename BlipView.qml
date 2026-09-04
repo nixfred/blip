@@ -473,10 +473,25 @@ FocusScope {
     avatarQueue.push(handle)
     pumpAvatar()
   }
+  // Letters stick in avatarFiles as "". Opening the panel/window again drops
+  // those and re-asks, so a photo set a minute ago is not stuck until tomorrow.
+  function retryBareAvatars() {
+    var m = Object.assign({}, root.avatarFiles)
+    var keys = []
+    for (var k in m) {
+      if (m[k] === "") { keys.push(k); delete m[k] }
+    }
+    if (keys.length === 0) return
+    root.avatarFiles = m
+    for (var i = 0; i < keys.length; i++) root.requestAvatar(keys[i])
+  }
+  onSurfaceOpenChanged: if (surfaceOpen) root.retryBareAvatars()
   function pumpAvatar() {
     if (avatarProc.running || avatarQueue.length === 0) return
     avatarProc.handle = avatarQueue.shift()
-    avatarProc.command = ["bun", root.avatarScript, avatarProc.handle]
+    // --retry skips the 24h "no photo" marker so a picture set after the
+    // first ask (a new group photo, a Contacts card) shows up this session.
+    avatarProc.command = ["bun", root.avatarScript, "--retry", avatarProc.handle]
     avatarProc.running = true
   }
   Process {

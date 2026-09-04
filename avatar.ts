@@ -10,7 +10,7 @@
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, fsyncSync, lstatSync, mkdirSync, openSync, renameSync, utimesSync, writeSync } from "node:fs";
+import { closeSync, fsyncSync, lstatSync, mkdirSync, openSync, renameSync, unlinkSync, utimesSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isGroupChat } from "./collector";
@@ -47,7 +47,7 @@ export function avatarArgs(id: string): string[] {
   return isGroupChat(id) ? ["avatar", "--chat", id] : ["avatar", "--", id];
 }
 
-export function fetchAvatar(handle: string, runner = spawnSync): AvatarResult {
+export function fetchAvatar(handle: string, runner = spawnSync, opts: { retry?: boolean } = {}): AvatarResult {
   const h = handle.trim();
   if (h === "" || h.length > 320 || /[\s\x00-\x1f]/.test(h)) return { ok: false, url: "", error: "bad handle" };
   mkdirSync(AVATAR_DIR, { recursive: true, mode: 0o700 });
@@ -55,7 +55,10 @@ export function fetchAvatar(handle: string, runner = spawnSync): AvatarResult {
   const file = `${base}.jpg`;
   const none = `${base}.none`;
   if (fresh(file)) return { ok: true, url: pathToFileURL(file).href, error: "" };
-  if (fresh(none, AVATAR_NONE_TTL_MS)) return { ok: false, url: "", error: "no photo" };
+  // `--retry` skips the negative marker: a group/contact photo can appear
+  // minutes after we first asked (someone just set one). The UI uses it on
+  // every ask so a letter is not sticky for a day.
+  if (!opts.retry && fresh(none, AVATAR_NONE_TTL_MS)) return { ok: false, url: "", error: "no photo" };
 
   const res = runner(`${HOME}/bin/imsg`, avatarArgs(h), { timeout: 20000, maxBuffer: AVATAR_MAX_BYTES + (1 << 20) });
   if (res.status === 69 || res.status === 255) return { ok: false, url: "", error: "Mac unreachable" };
@@ -79,12 +82,16 @@ export function fetchAvatar(handle: string, runner = spawnSync): AvatarResult {
   const fd = openSync(tmp, "wx", 0o600);
   try { writeSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
   renameSync(tmp, file);
+  try { unlinkSync(none); } catch { /* no marker, or already gone */ }
   return { ok: true, url: pathToFileURL(file).href, error: "" };
 }
 
 if (import.meta.main) {
+  const argv = process.argv.slice(2);
+  const retry = argv.includes("--retry");
+  const handle = argv.find((a) => a !== "--retry") ?? "";
   try {
-    console.log(JSON.stringify(fetchAvatar(process.argv[2] ?? "")));
+    console.log(JSON.stringify(fetchAvatar(handle, spawnSync, { retry })));
   } catch (e) {
     console.log(JSON.stringify({ ok: false, url: "", error: String(e) }));
   }

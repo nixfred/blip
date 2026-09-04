@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **Group photos show up as photos again.** Messages stores a group's picture
+  on an announcement row (`item_type = 3`). The bridge hides those rows so
+  they never become empty unread bubbles, and the photo lookup joined through
+  that same filter, so every group with a real picture fell back to a letter.
+  The lookup now reads the raw message table (and `groupPhotoGuid` when the
+  attachment's filename is blank), and streams a 512px JPEG so a multi-megabyte
+  PNG still fits the Linux cache. Groups that only have Messages' member
+  collage still show initials — that collage is not a stored image.
+- **A photo you just assigned is not stuck as a letter.** The first ask
+  remembered "no photo" for a day, and the window remembered the letter for
+  the rest of the session, so a group picture or Contacts card set a minute
+  later never appeared. The UI now re-asks (skipping that marker), and
+  reopening the panel retries any letter.
+
 ## 2.3.2 — 2026-09-04
 
 - **A mute list, for the texts nobody opted into.** Political fundraising

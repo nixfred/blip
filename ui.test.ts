@@ -71,6 +71,9 @@ describe("QML safety invariants", () => {
     expect(panel.split(bind).length - 1).toBe(2);   // list row + pinned tile
     expect(panel).not.toContain('if (!root.isGroupId(String(modelData.chat || ""))) root.requestAvatar(avatarHandle)');
     expect(panel).not.toContain('if (handle === "" || isGroupId(handle)) return');
+    expect(panel).toContain('avatarProc.command = ["bun", root.avatarScript, "--retry", avatarProc.handle]');
+    expect(panel).toContain("function retryBareAvatars()");
+    expect(panel).toContain("onSurfaceOpenChanged: if (surfaceOpen) root.retryBareAvatars()");
   });
 
   test("share sheet: right-click a link, URL on stdin, never argv", () => {

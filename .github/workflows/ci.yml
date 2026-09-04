@@ -15,6 +15,8 @@ jobs:
         run: bun test
       - name: Mac tools compile (python3 syntax, no macOS needed)
         run: python3 -m py_compile bridge/mac/imsg bridge/mac/imsg-send bridge/mac/contacts bridge/mac/tcc-check bridge/mac/blip-check bridge/mac/blip-dispatch
+      - name: group-photo lookup (no macOS needed)
+        run: python3 bridge/mac/test_group_photo.py
       - name: shell scripts (bash -n + shellcheck)
         run: |
           bash -n bridge/linux/blip-shim scripts/blip-setup scripts/sync-bridge.sh bridge/mac/install.sh
