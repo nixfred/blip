@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **A mute list, for the texts nobody opted into.** Political fundraising
+  blasts — "the deadline is TONIGHT, rush $25, Reply STOP2END" — arrive from a
+  short code that is different every cycle, so blocking the number is
+  whack-a-mole. `~/.config/blip/mutelist.json` is the allowlist's mirror image
+  in shape (`{ "mute": [...] }` or a bare array, re-read every poll, no
+  restart) and its opposite in effect: a matched conversation is dropped
+  before the unread ledger, the thread list and the toasts are built, so it
+  cannot show, count, or interrupt. Entries match a handle or chat id exactly,
+  or a phrase of two or more characters anywhere in an INBOUND message
+  (`"ActBlue"`, `"WinRed"`, `"Stop2End"`) — the platform's name and the
+  legally required opt-out footer both outlive the rotating number. One match
+  mutes the whole conversation; quoting a muted phrase to a friend never mutes
+  the friend. Nothing is deleted: the messages stay untouched on the Mac.
+
 - **Your own address book decides who someone is.** Contact names were
   resolved by counting sources and taking the most common spelling, so a work
   Exchange account or a synced company directory holding thousands of rows
