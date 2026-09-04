@@ -1,0 +1,24 @@
+Old iMessage notifications can reopen their conversation.
+
+This commit's message describes a README fonts section. It ALSO carries an
+unrelated change to BarWidget.qml and ui.test.ts, swept in by a catch-all
+`git commit` from a concurrent session while that work was still uncommitted
+in the shared working tree. This note exists so the notification work is
+findable, since the subject line will never match a search for it.
+
+WHAT: Blip toasts now carry Omarchy's `omarchy-exec-argv` hint, a persisted
+      argv of ["qs","-p","/usr/share/omarchy/shell","ipc","call",
+      "nixfred.blip","goto","<chat>"].
+WHY:  --action=default lives inside the notify-send process and dies with the
+      toast after 8s, so a row in the notification center was inert. The hint
+      is persisted by the notification service, so an old row still opens the
+      conversation days later.
+HOW:  Leading "+" stripped (qs ipc call reads it as a flag; show() matches the
+      bare digits as an alias); chat id shape-checked and passed as its own
+      argv element, never inside a shell string.
+
+LR-T: notifications, imessage, blip, notification-center, omarchy-exec-argv
+LR-D: blip, omarchy, desktop
+LR-K: persisted-notification-action, click-to-conversation, toast-outlives-sender
+LR-L: law-7, law-9, law-10
+LR-R: see also jankeesvw.notification-center branch vic/click-takes-you-there
