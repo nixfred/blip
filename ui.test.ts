@@ -70,10 +70,15 @@ describe("QML safety invariants", () => {
     expect(panel).toContain("var sentUrl = root.firstUrl(completedText)");
     expect(panel).toContain("function openApp()");
     expect(panel).toContain('hostWidget.showApp()');
-    // the popout gets out of the way, and closes BEFORE the window is shown
-    expect(panel).toContain('hostWidget.close()');
-    expect(panel.indexOf("hostWidget.close()")).toBeLessThan(panel.indexOf("hostWidget.showApp()"));
-    expect(panel).toContain('tooltipText: "Open the app window (SUPER+M)"');
+    // the popout gets out of the way, and closes BEFORE the window is shown —
+    // inside showApp(), so double-click, ⇱ and IPC `app` (SUPER+M) all agree
+    const showApp = widget.slice(widget.indexOf("function showApp()"), widget.indexOf("function anySurfaceOpen"));
+    expect(showApp.indexOf("root.close()")).toBeLessThan(showApp.indexOf("ensureWindow()"));
+    expect(showApp.indexOf("root.close()")).toBeGreaterThan(-1);
+    // The tooltip names the action, not a key: SUPER+M is an optional
+    // binding from the README, and Omarchy's own tooltips name no keys.
+    expect(panel).toContain('tooltipText: "Open the app window"');
+    expect(panel).not.toContain("SUPER+M)");
   });
 
   test("group rows and tiles show the GROUP's photo, never the last speaker's", () => {
@@ -182,6 +187,14 @@ describe("QML safety invariants", () => {
     expect(panel).toContain("newSearchTimer.restart()");
     expect(panel).not.toContain("forceLayout");
     expect(panel.indexOf("onAccepted: root.acceptNewField()")).toBeGreaterThan(-1);
+  });
+
+  test("Omarchy's shell toggle can find the panel", () => {
+    // Bar.findPanelWidget wants open(), close() and `opened` on the widget
+    // item; drop `opened` and every SUPER+CTRL panel hotkey silently skips Blip.
+    expect(widget).toContain("readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false");
+    expect(widget).toContain("function open() {");
+    expect(widget).toContain("function close() {");
   });
 
   test("an old toast can still reopen its conversation (omarchy-exec-argv)", () => {

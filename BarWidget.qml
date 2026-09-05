@@ -75,6 +75,11 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  // Omarchy's panel hotkeys (`omarchy-shell shell toggle nixfred.blip`,
+  // SUPER+CTRL+<n> by bar position) find a bar widget's panel through open(),
+  // close() AND this property — without it the shell logs "summon: no live
+  // bar widget" and does nothing. Same line as Omarchy's clock widget.
+  readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   function open() { if (panelLoader.item) panelLoader.item.open() }
   function close() { if (panelLoader.item) panelLoader.item.close() }
   function toggle() { if (panelLoader.item) panelLoader.item.toggle() }
@@ -167,6 +172,10 @@ BarWidget {
   // the user, and a plain toggle would HIDE it ("SUPER+M doesn't load the
   // app"). Hyprland ≥0.56 dispatch takes Lua; classic focuswindow is rejected.
   function showApp() {
+    // The popout gets out of the way first: the window is the same view,
+    // larger. Here, once, so double-click, the ⇱ button and IPC `app` (a
+    // SUPER+M bind) all agree — `app` used to leave the popout open.
+    root.close()
     ensureWindow()
     if (!windowLoader.item) return
     // Fire-and-forget on purpose: a Process object silently ignores
@@ -195,7 +204,6 @@ BarWidget {
     }
     if (dblClick.running) {
       dblClick.stop()
-      root.close()
       root.showApp()
       return
     }
@@ -673,7 +681,7 @@ BarWidget {
     // one is recorded — so a body with the code put the code on disk (Astra
     // #1). The toast says a code arrived; click copies it from memory.
     var body = (pendingCode.domain !== "" ? "For " + pendingCode.domain + " · " : "")
-             + "Click to copy · Super+Shift+V types it"
+             + "Click to copy"
     fireToasts([{ chat: "", name: "Security code from " + who, text: body, ts: pendingCode.ts, key: "", code: pendingCode.code }])
   }
   // sh reads the code from its environment, hands it to the tool on stdin.
