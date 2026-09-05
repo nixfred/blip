@@ -13,7 +13,9 @@
   or link, `Ctrl+C` copies its text — or the picture itself, with its own
   MIME type, when the bubble is only a picture — and `Ctrl+R` quotes it into
   the compose field as `> …`; iMessage's inline reply is not reachable
-  through the bridge, so the quote is a plain one.
+  through the bridge, so the quote is a plain one. The status line under the
+  compose box keeps its height when empty, so "copied" and "sending…" no
+  longer shove the conversation, and only failures are red.
 - **Bug hunt (Codex, gpt-6-astra), fourteen fixes.** A 2FA code was written
   to Omarchy's on-disk notification history — the daemon persists every
   displayed toast regardless of the `transient` hint — so the toast now says a

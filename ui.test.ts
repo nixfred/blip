@@ -236,6 +236,10 @@ describe("QML safety invariants", () => {
     expect(panel).toContain('var keepInline = root.fetchJobAction === "copy" && !!root.attFiles[id]');
     expect(panel).not.toContain("fetchJobOpen");
     expect(qmlFunction("quoteBubble")).toContain("leaveBubbles()");
+    // the status line never collapses (no layout shift) and only failures are red
+    expect(panel).toContain('text: root.note === "" ? " " : root.note');
+    expect(panel).not.toContain('visible: root.note !== ""');
+    expect(panel).toContain("color: calm ? root.dim : root.urgent");
   });
 
   test("an old toast can still reopen its conversation (omarchy-exec-argv)", () => {

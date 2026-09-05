@@ -2916,12 +2916,16 @@ FocusScope {
           }
         }
 
+        // Always one line tall, empty or not: a note that appears and vanishes
+        // must not shove the compose box and the bubbles around. Only failures
+        // are red; progress and confirmations are dim.
         Text {
           Layout.fillWidth: true
-          visible: root.note !== ""
-          text: root.note
+          text: root.note === "" ? " " : root.note
           textFormat: Text.PlainText
-          color: root.note === "sending…" ? root.dim : root.urgent
+          readonly property bool calm: root.note === "copied" || root.note === "sending…"
+            || root.note === "sent to LocalSend" || root.note.indexOf("attached") === 0
+          color: calm ? root.dim : root.urgent
           font.family: root.fontFamily
           font.pixelSize: root.fontCaption
           wrapMode: Text.WordWrap
