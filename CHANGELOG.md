@@ -3,16 +3,19 @@
 ## Unreleased
 
 - **The keyboard cursor scrolls the list.** j/k and the arrow keys could walk
-  the selection below the visible rows — in the thread list, the search hits and
-  the new-message picker — and the list stayed put. The row that holds the
-  cursor now registers itself, and every cursor move keeps that row inside the
-  viewport: the helper Omarchy's audio and Tailscale panels use, because a
-  multi-section Column has no `positionViewAtIndex`. Rows also answer "am I the
-  cursor?" with one string compare instead of scanning every thread per row per
-  keypress. The app window (SUPER+M) had no list navigation at all — only the
-  bar panel's PanelKeyCatcher did — so Up/Down and Enter now walk the thread
-  list there too, while no editor has focus. The cursor stops at the first and last row
-  instead of wrapping around.
+  the selection below the visible rows — thread list, search hits and the
+  new-message picker alike — while the list stayed put. The cursor row now
+  registers itself and every move keeps it inside the viewport, with the
+  helper Omarchy's audio and Tailscale panels use (a multi-section Column has
+  no `positionViewAtIndex`); rows answer "am I the cursor?" with one string
+  compare instead of scanning every thread per row per keypress. The cursor
+  stops at the first and last row instead of wrapping. Up from the first row
+  scrolls to the top and focuses the search field; Down in an empty search or
+  new-message field returns to the list at its first row; Esc out of a field
+  or a conversation returns to the row you were on. `/` and `n` scroll to the
+  top too — pressed deep in the list they used to focus a field that was out
+  of view. The app window (SUPER+M) had no list navigation at all, so Up/Down
+  and Enter walk the list there as well while no editor has focus.
 - **Bug hunt (Codex, gpt-6-astra), fourteen fixes.** A 2FA code was written
   to Omarchy's on-disk notification history — the daemon persists every
   displayed toast regardless of the `transient` hint — so the toast now says a

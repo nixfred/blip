@@ -366,7 +366,12 @@ FocusScope {
     composeField.text = ""
     clearDraft()   // a queued file must never survive into another thread
     pinToBottom = false
-    Qt.callLater(function() { threadFlick.contentY = 0; root.navigationFocusRequested() })
+    // Top of the list for a mouse user; the cursor row for a keyboard user.
+    Qt.callLater(function() {
+      threadFlick.contentY = 0
+      scrollCursorIntoView()
+      root.navigationFocusRequested()
+    })
   }
 
   function openThread(t) {
@@ -646,6 +651,7 @@ FocusScope {
   function startNew() {
     if (inThread && !splitView) return   // split view: the list pane is right there
     exitSearch()
+    threadFlick.contentY = 0   // the field sits above the rows
     newMode = true
     newResults = []
     newNote = ""
@@ -657,6 +663,14 @@ FocusScope {
     })
   }
 
+  /** Down in an empty search or new-message field: back to the list, cursor
+   *  on the first row — the list is showing its top, so that is where the eye
+   *  is. Esc keeps the old cursor instead. */
+  function listFromTop() {
+    if (newMode) exitNew()
+    else exitSearch()
+    cursor = 0
+  }
   function exitNew() {
     newMode = false
     newResults = []
@@ -666,6 +680,9 @@ FocusScope {
     newField.text = ""
     newField.focus = false
     root.navigationFocusRequested()
+    // The field pushed the list to the top; bring the cursor row back once
+    // the rows have been rebuilt and laid out.
+    Qt.callLater(scrollCursorIntoView)
   }
 
   // Same identity discipline as message search: a stale completion must
@@ -730,6 +747,9 @@ FocusScope {
   }
   function moveNewCursor(dy) {
     if (newResults.length === 0 || dy === 0) return
+    // Up from the first hit brings the field (which already has focus) back
+    // into view, as moveCursor does for the thread list.
+    if (dy < 0 && newCursor <= 0) { threadFlick.contentY = 0; return }
     newCursor = Math.max(0, Math.min(newResults.length - 1, newCursor + dy))
     scrollCursorIntoView()
   }
@@ -751,6 +771,7 @@ FocusScope {
 
   function startSearch() {
     if (inThread && !splitView) return
+    threadFlick.contentY = 0   // the field sits above the rows
     searching = true
     searchResults = []
     searchNote = ""
@@ -769,6 +790,7 @@ FocusScope {
     searchField.text = ""
     searchField.focus = false
     if (!newMode) root.navigationFocusRequested()
+    Qt.callLater(scrollCursorIntoView)   // no-op while the rows are gone
   }
 
   // Instant sidebar preview. search.ts matchConversations ranks the list
@@ -841,6 +863,7 @@ FocusScope {
   }
   function moveSearchCursor(dy) {
     if (searchResults.length === 0 || dy === 0) return
+    if (dy < 0 && searchCursor <= 0) { threadFlick.contentY = 0; return }
     searchCursor = Math.max(0, Math.min(searchResults.length - 1, searchCursor + dy))
     scrollCursorIntoView()
   }
@@ -1339,6 +1362,9 @@ FocusScope {
   // (Omarchy's Dropdown clamps the same way).
   function moveCursor(dy) {
     if (inThread || threads.length === 0 || dy === 0) return
+    // Up from the first row hands focus to the search field above the list,
+    // and Down in an empty field hands it back (Omarchy's SearchableDropdown).
+    if (dy < 0 && cursor <= 0) { startSearch(); return }
     cursor = Math.max(0, Math.min(threads.length - 1, cursor + dy))
     scrollCursorIntoView()
   }
@@ -1609,7 +1635,11 @@ FocusScope {
               onAccepted: root.acceptNewField()
               Keys.onEscapePressed: root.exitNew()
               Keys.onPressed: function(event) {
-                if (event.key === Qt.Key_Down) { root.moveNewCursor(1); event.accepted = true }
+                if (event.key === Qt.Key_Down) {
+                  if (text === "") root.listFromTop()
+                  else root.moveNewCursor(1)
+                  event.accepted = true
+                }
                 else if (event.key === Qt.Key_Up) { root.moveNewCursor(-1); event.accepted = true }
               }
               onVisibleChanged: if (visible) {
@@ -1687,7 +1717,11 @@ FocusScope {
               onActiveFocusChanged: if (activeFocus && !root.searching) root.searching = true
               Keys.onEscapePressed: root.exitSearch()
               Keys.onPressed: function(event) {
-                if (event.key === Qt.Key_Down) { root.moveSearchCursor(1); event.accepted = true }
+                if (event.key === Qt.Key_Down) {
+                  if (text === "") root.listFromTop()
+                  else root.moveSearchCursor(1)
+                  event.accepted = true
+                }
                 else if (event.key === Qt.Key_Up) { root.moveSearchCursor(-1); event.accepted = true }
               }
             }
