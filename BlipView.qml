@@ -248,6 +248,14 @@ FocusScope {
   property bool loading: false
   property string note: ""           // transient status line (send result, errors)
   property int cursor: -1            // keyboard row selection in list view
+  // Chat of the cursor row, so every row answers "am I the cursor?" with one
+  // string compare instead of an O(n) scan of threads per row per keypress.
+  readonly property string cursorChat: cursor >= 0 && cursor < threads.length ? String(threads[cursor].chat) : ""
+  // The row drawing the keyboard cursor right now — a thread row, pinned tile,
+  // search hit or contact hit registers itself when its hasCursor turns true,
+  // so the move functions never translate indexes between the four models.
+  // A destroyed row reads back as null (guarded QObject property).
+  property Item cursorRow: null
   property bool pinToBottom: false   // scroll to the newest bubble once layout settles
   property bool bubbleFocused: false // a bubble's TextEdit has focus (text selection in progress)
   property string threadRunningChat: "" // chat owned by the current threadProc
@@ -258,12 +266,6 @@ FocusScope {
   property string sendText: ""
   property string reloadChat: ""
 
-  function threadIndex(thread) {
-    for (var i = 0; i < root.threads.length; i++) {
-      if (String(root.threads[i].chat) === String(thread.chat)) return i
-    }
-    return -1
-  }
   function avatarInitials(thread) {
     var n = String(thread.name || "")
     if (/^[+0-9]/.test(n) || n === "") return "#"
@@ -729,6 +731,7 @@ FocusScope {
   function moveNewCursor(dy) {
     if (newResults.length === 0 || dy === 0) return
     newCursor = (newCursor + dy + newResults.length) % newResults.length
+    scrollCursorIntoView()
   }
 
   /** Start (or resume) a DM with a picked handle. An existing thread is
@@ -839,6 +842,7 @@ FocusScope {
   function moveSearchCursor(dy) {
     if (searchResults.length === 0 || dy === 0) return
     searchCursor = (searchCursor + dy + searchResults.length) % searchResults.length
+    scrollCursorIntoView()
   }
   function acceptSearchField() {
     var q = searchFieldQuery()
@@ -1333,6 +1337,25 @@ FocusScope {
   function moveCursor(dy) {
     if (inThread || threads.length === 0 || dy === 0) return
     cursor = (cursor + dy + threads.length) % threads.length
+    scrollCursorIntoView()
+  }
+  // Keep the cursor row inside threadFlick's viewport. The list is a
+  // multi-section Column (pinned grid, headers, three Repeaters), so there is
+  // no ListView.positionViewAtIndex — same helper as Omarchy's audio and
+  // tailscale panels. Synchronous: a cursor move does not touch the model, so
+  // the row is already laid out, and the binding that set cursorRow ran
+  // before the caller reached this line.
+  function scrollCursorIntoView() {
+    var row = cursorRow
+    if (!row) return
+    var margin = Style.space(6)
+    var top = row.mapToItem(threadFlick.contentItem, 0, 0).y
+    var bottom = top + row.height
+    var maxY = Math.max(0, threadFlick.contentHeight - threadFlick.height)
+    if (top < threadFlick.contentY + margin)
+      threadFlick.contentY = Math.max(0, top - margin)
+    else if (bottom > threadFlick.contentY + threadFlick.height - margin)
+      threadFlick.contentY = Math.min(maxY, bottom + margin - threadFlick.height)
   }
   function activateCursor() {
     if (!inThread && cursor >= 0) openThread(threads[cursor])
@@ -1360,6 +1383,16 @@ FocusScope {
     if (composeField.activeFocus && (composeField.text.length > 0 || root.draftPath !== ""))
       return false
     return handleTextKey(text) === true
+  }
+  /** Arrow/Enter list navigation for a host without a PanelKeyCatcher (the
+   *  window): true if the key was consumed. A focused editor keeps its arrows
+   *  — the search and new-message fields drive their own cursors. */
+  function catchNavKey(key) {
+    if (editorActive) return false
+    if (key === Qt.Key_Down) { moveCursor(1); return true }
+    if (key === Qt.Key_Up) { moveCursor(-1); return true }
+    if (key === Qt.Key_Return || key === Qt.Key_Enter) { activateCursor(); return true }
+    return false
   }
   function catchEscape() {
     if (newField.activeFocus || newMode) { exitNew(); return true }
@@ -1595,12 +1628,15 @@ FocusScope {
             Repeater {
               model: root.online && root.listShowing && root.newMode ? root.newResults : []
               delegate: Rectangle {
+                id: contactHit
                 required property var modelData
                 required property int index
+                readonly property bool hasCursor: root.newCursor === index
+                onHasCursorChanged: if (hasCursor) root.cursorRow = contactHit
                 Layout.fillWidth: true
                 implicitHeight: contactRow.implicitHeight + Style.space(12)
                 radius: Style.cornerRadius
-                color: contactHover.hovered || root.newCursor === index
+                color: contactHover.hovered || hasCursor
                   ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
                   : "transparent"
                 HoverHandler { id: contactHover }
@@ -1670,14 +1706,17 @@ FocusScope {
               Repeater {
                 model: pinnedGrid.visible ? root.pinnedThreads : []
                 delegate: Rectangle {
+                  id: pinnedTile
                   required property var modelData
+                  // pinned threads sit first in root.threads, so the cursor
+                  // walks these tiles before the rows below
+                  readonly property bool hasCursor: root.cursorChat === String(modelData.chat)
+                  onHasCursorChanged: if (hasCursor) root.cursorRow = pinnedTile
                   Layout.fillWidth: true
                   Layout.preferredWidth: Math.max(1, (pinnedGrid.width - pinnedGrid.columnSpacing * 2) / 3)
                   implicitHeight: pinnedColumn.implicitHeight + Style.space(4)
                   radius: Style.cornerRadius
-                  // j/k walk root.threads, and pinned threads sort FIRST in it —
-                  // without this the cursor was invisible for those presses.
-                  color: pinnedHover.hovered || root.cursor === root.threadIndex(modelData)
+                  color: pinnedHover.hovered || hasCursor
                     ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
                     : "transparent"
 
@@ -1797,12 +1836,15 @@ FocusScope {
             Repeater {
               model: root.online && root.listShowing && root.searchShowing ? root.searchResults : []
               delegate: Rectangle {
+                id: searchHit
                 required property var modelData
                 required property int index
+                readonly property bool hasCursor: root.searchCursor === index
+                onHasCursorChanged: if (hasCursor) root.cursorRow = searchHit
                 Layout.fillWidth: true
                 implicitHeight: hitCol.implicitHeight + Style.space(12)
                 radius: Style.cornerRadius
-                color: hitHover.hovered || root.searchCursor === index
+                color: hitHover.hovered || hasCursor
                   ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
                   : "transparent"
                 HoverHandler { id: hitHover }
@@ -1869,13 +1911,16 @@ FocusScope {
             Repeater {
               model: root.online && root.listShowing && !root.searchShowing && !root.newMode ? root.unpinnedThreads : []
               delegate: Rectangle {
+                id: threadRow
                 required property var modelData
                 required property int index
+                readonly property bool hasCursor: root.cursorChat === String(modelData.chat)
+                onHasCursorChanged: if (hasCursor) root.cursorRow = threadRow
 
                 Layout.fillWidth: true
                 implicitHeight: rowRow.implicitHeight + Style.space(root.splitView ? 20 : 12)
                 radius: Style.cornerRadius
-                color: rowHover.hovered || root.cursor === root.threadIndex(modelData)
+                color: rowHover.hovered || hasCursor
                   ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
                   : "transparent"
 

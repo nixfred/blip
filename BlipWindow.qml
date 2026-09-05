@@ -15,7 +15,8 @@ import qs.Commons
 // (tapbacks, receipts, inline photos, replies, search, composer,
 // attachments). No PanelKeyCatcher here — a normal window keeps normal
 // editor/Tab behavior; Esc unwinds the view (thread → list, search → list)
-// and closes the window only when there is nothing left to unwind.
+// and closes the window only when there is nothing left to unwind. Up/Down
+// and Enter walk the thread list while no editor has focus.
 FloatingWindow {
   id: win
   property var hostWidget: null
@@ -106,6 +107,10 @@ FloatingWindow {
       Keys.priority: Keys.BeforeItem
       Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape && view.catchEscape()) {
+          event.accepted = true
+          return
+        }
+        if (view.catchNavKey(event.key)) {
           event.accepted = true
           return
         }
