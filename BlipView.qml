@@ -730,7 +730,7 @@ FocusScope {
   }
   function moveNewCursor(dy) {
     if (newResults.length === 0 || dy === 0) return
-    newCursor = (newCursor + dy + newResults.length) % newResults.length
+    newCursor = Math.max(0, Math.min(newResults.length - 1, newCursor + dy))
     scrollCursorIntoView()
   }
 
@@ -841,7 +841,7 @@ FocusScope {
   }
   function moveSearchCursor(dy) {
     if (searchResults.length === 0 || dy === 0) return
-    searchCursor = (searchCursor + dy + searchResults.length) % searchResults.length
+    searchCursor = Math.max(0, Math.min(searchResults.length - 1, searchCursor + dy))
     scrollCursorIntoView()
   }
   function acceptSearchField() {
@@ -1333,10 +1333,13 @@ FocusScope {
     }
   }
 
-  // ---- keyboard navigation (the host's PanelKeyCatcher calls these)
+  // ---- keyboard navigation (the host's PanelKeyCatcher calls these).
+  // The cursor stops at the ends rather than wrapping: with 300 threads a
+  // press past the last row landing at the top reads as a jump, not a loop
+  // (Omarchy's Dropdown clamps the same way).
   function moveCursor(dy) {
     if (inThread || threads.length === 0 || dy === 0) return
-    cursor = (cursor + dy + threads.length) % threads.length
+    cursor = Math.max(0, Math.min(threads.length - 1, cursor + dy))
     scrollCursorIntoView()
   }
   // Keep the cursor row inside threadFlick's viewport. The list is a

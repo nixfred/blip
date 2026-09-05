@@ -11,7 +11,8 @@
   cursor?" with one string compare instead of scanning every thread per row per
   keypress. The app window (SUPER+M) had no list navigation at all — only the
   bar panel's PanelKeyCatcher did — so Up/Down and Enter now walk the thread
-  list there too, while no editor has focus.
+  list there too, while no editor has focus. The cursor stops at the first and last row
+  instead of wrapping around.
 - **Bug hunt (Codex, gpt-6-astra), fourteen fixes.** A 2FA code was written
   to Omarchy's on-disk notification history — the daemon persists every
   displayed toast regardless of the `transient` hint — so the toast now says a
