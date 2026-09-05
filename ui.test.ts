@@ -13,6 +13,12 @@ function handleTextKeySource() {
   return panel.slice(start, end);
 }
 
+/** Body of a root-level BlipView function, up to its own closing brace. */
+function qmlFunction(name: string) {
+  const start = panel.indexOf(`function ${name}(`);
+  return panel.slice(start, panel.indexOf("\n  }\n", start));
+}
+
 describe("QML safety invariants", () => {
   test("group sends use the cached AppleScript GUID", () => {
     expect(panel).toContain('["--chat-id", String(root.active.guid)]');
@@ -182,6 +188,34 @@ describe("QML safety invariants", () => {
     expect(panel).toContain("newSearchTimer.restart()");
     expect(panel).not.toContain("forceLayout");
     expect(panel.indexOf("onAccepted: root.acceptNewField()")).toBeGreaterThan(-1);
+  });
+
+  test("keys and wheel scroll the conversation through one stick-aware helper", () => {
+    // Two writers of flick.contentY would drift on the bottom-stick, which
+    // gates the deferred push reload; the wheel handler must go through it.
+    expect(qmlFunction("scrollConversation")).toContain("flick.stick = flick.contentY >= max - 4");
+    expect(panel).toContain("root.scrollConversation(-d)");
+    expect(panel.split("flick.stick = flick.contentY >= max - 4").length - 1).toBe(1);
+    const step = qmlFunction("conversationStep");
+    // paging always; Home/End only when the field is empty (caret otherwise)
+    expect(step.indexOf("Qt.Key_PageDown")).toBeLessThan(step.indexOf("if (!fieldEmpty) return 0"));
+    expect(step.indexOf("if (!fieldEmpty) return 0")).toBeLessThan(step.indexOf("Qt.Key_Home"));
+    expect(panel).toContain("root.conversationStep(event.key, empty)");
+  });
+
+  test("arrows in an empty compose field select bubbles, and the selection clears cleanly", () => {
+    // The selection is a target for actions; it must never outlive the rows
+    // it indexes (a reload renumbers them) and Esc must drop it before leaving.
+    expect(panel).toContain("onBubblesChanged: clearBubbleCursor()");
+    // the band takes the theme's hover-cursor colour/alpha, like Omarchy's own rows
+    expect(panel).toContain("color: Style.hoverFillFor(root.foreground, root.accent)");
+    expect(panel).toContain("onHasCursorChanged: if (hasCursor) root.bubbleCursorItem = bubbleRow");
+    expect(panel).toContain("if (root.bubbleCursor >= 0) root.leaveBubbles(); else root.back()");
+    const move = qmlFunction("moveBubbleCursor");
+    expect(move).toContain("bubbleCursor = n - 1");            // Up from nothing = newest
+    expect(move).toContain("leaveBubbles()");                  // Down past newest = same exit as Esc
+    expect(qmlFunction("leaveBubbles")).toContain("scrollConversation(flick.contentHeight)");
+    expect(panel).toContain("root.moveBubbleCursor(event.key === Qt.Key_Up ? -1 : 1)");
   });
 
   test("an old toast can still reopen its conversation (omarchy-exec-argv)", () => {

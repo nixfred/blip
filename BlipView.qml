@@ -248,6 +248,12 @@ FocusScope {
   property bool loading: false
   property string note: ""           // transient status line (send result, errors)
   property int cursor: -1            // keyboard row selection in list view
+  // The bubble the arrows have selected in a conversation (-1 = none) and the
+  // delegate drawing it — registered by the row itself, like cursorRow. The
+  // selection is a TARGET for actions (copy, open, reply), not a scroll state.
+  property int bubbleCursor: -1
+  property Item bubbleCursorItem: null
+  onBubblesChanged: clearBubbleCursor()   // a reload renumbers the rows
   property bool pinToBottom: false   // scroll to the newest bubble once layout settles
   property bool bubbleFocused: false // a bubble's TextEdit has focus (text selection in progress)
   property string threadRunningChat: "" // chat owned by the current threadProc
@@ -403,6 +409,56 @@ FocusScope {
    *  Keystroke injection (wtype) proved non-deterministic — a virtual
    *  keyboard's events can land on whatever surface Hyprland favors. */
   /** Clear every badge/dot locally. Read state never goes back to iMessage. */
+  /** Move the conversation by dy pixels — the wheel and the keys share this,
+   *  so the bottom-stick (which gates the deferred push reload) behaves the
+   *  same whichever way the reader moves. */
+  function scrollConversation(dy) {
+    var max = Math.max(0, flick.contentHeight - flick.height)
+    flick.contentY = Math.max(0, Math.min(max, flick.contentY + dy))
+    flick.stick = flick.contentY >= max - 4
+  }
+  /** Pixels a key moves the conversation from the compose field, 0 = not a
+   *  scroll key. PageUp/PageDown always page; Home/End only while the field
+   *  is empty — with text typed they keep moving the caret. */
+  function conversationStep(key, fieldEmpty) {
+    if (key === Qt.Key_PageUp) return -flick.height * 0.9
+    if (key === Qt.Key_PageDown) return flick.height * 0.9
+    if (!fieldEmpty) return 0
+    if (key === Qt.Key_Home) return -flick.contentHeight
+    if (key === Qt.Key_End) return flick.contentHeight
+    return 0
+  }
+  /** Up/Down in an empty compose field walk the bubbles, newest first, and
+   *  keep the selected one in view. Down past the newest drops the selection
+   *  and re-sticks to the bottom, so the conversation follows new messages
+   *  again — the reader is back where they started. */
+  function moveBubbleCursor(dy) {
+    var n = bubbles.length
+    if (n === 0) return
+    if (bubbleCursor < 0) {
+      if (dy > 0) return
+      bubbleCursor = n - 1
+    } else if (dy > 0 && bubbleCursor >= n - 1) {
+      leaveBubbles()
+      return
+    } else {
+      bubbleCursor = Math.max(0, bubbleCursor + dy)
+    }
+    var it = bubbleCursorItem   // set synchronously by the row's hasCursor binding
+    if (!it) return
+    var margin = Style.space(6)
+    if (it.y < flick.contentY + margin)
+      scrollConversation(it.y - margin - flick.contentY)
+    else if (it.y + it.height > flick.contentY + flick.height - margin)
+      scrollConversation(it.y + it.height + margin - flick.height - flick.contentY)
+  }
+  function clearBubbleCursor() { bubbleCursor = -1; bubbleCursorItem = null }
+  /** Out of the selection and back where reading started: newest at the
+   *  bottom, stick re-armed. Down past the newest and Esc both land here. */
+  function leaveBubbles() {
+    clearBubbleCursor()
+    scrollConversation(flick.contentHeight)
+  }
   function markAllRead() {
     if (!root.hostWidget || root.unread === 0) return
     root.hostWidget.markAllRead()
@@ -2117,15 +2173,27 @@ FocusScope {
             acceptedButtons: Qt.NoButton
             onWheel: function(wheel) {
               var d = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * 3.0 : wheel.angleDelta.y * 4.5
-              var max = Math.max(0, flick.contentHeight - flick.height)
-              flick.contentY = Math.max(0, Math.min(max, flick.contentY - d))
-              // the wheel bypasses Flickable movement signals — maintain the
-              // bottom-stick here too
-              flick.stick = flick.contentY >= max - 4
+              // the wheel bypasses Flickable movement signals — the helper
+              // maintains the bottom-stick too
+              root.scrollConversation(-d)
               wheel.accepted = true
             }
           }
 
+          // The bubble cursor: one translucent band behind the selected row,
+          // the list rows' fill. A sibling of `content`, not a child of the
+          // layout, so no delegate carries a background of its own; the row's
+          // y/height are in `content` space, which sits at the origin here.
+          Rectangle {
+            visible: root.bubbleCursorItem !== null
+            width: content.width
+            y: root.bubbleCursorItem ? root.bubbleCursorItem.y - Style.space(2) : 0
+            height: root.bubbleCursorItem ? root.bubbleCursorItem.height + Style.space(4) : 0
+            radius: Style.cornerRadius
+            // Omarchy's cursor fill: the theme's hover-cursor colour and alpha
+            // (foreground at 0.08 by default), not a hard-coded copy of them.
+            color: Style.hoverFillFor(root.foreground, root.accent)
+          }
           ColumnLayout {
             id: content
             width: parent.width
@@ -2147,7 +2215,10 @@ FocusScope {
               delegate: ColumnLayout {
                 id: bubbleRow
                 required property var modelData
+                required property int index
                 readonly property bool mine: modelData.from_me === true
+                readonly property bool hasCursor: root.bubbleCursor === index
+                onHasCursorChanged: if (hasCursor) root.bubbleCursorItem = bubbleRow
 
                 Layout.fillWidth: true
                 spacing: Style.space(2)
@@ -2732,7 +2803,9 @@ FocusScope {
                 borderSpec: composeField._composeBorder
                 radius: Style.cornerRadius
               }
-              Keys.onEscapePressed: root.back()
+              // Esc drops a bubble selection first (back to the bottom), then
+              // leaves the thread — the two-step Esc a text selection gets.
+              Keys.onEscapePressed: if (root.bubbleCursor >= 0) root.leaveBubbles(); else root.back()
               // Ctrl+V goes through paste.ts: an image on the clipboard becomes
               // a draft chip; text falls through to a manual insert. One process
               // snapshots types AND data — probing then re-reading races.
@@ -2741,6 +2814,21 @@ FocusScope {
                 if (event.matches(StandardKey.Paste)) {
                   event.accepted = true
                   root.startPaste()
+                  return
+                }
+                // Reading history without the mouse: the compose field is the
+                // thread's focus holder, so the keys live here. An empty field
+                // has no caret for Up/Down to move; they select bubbles instead.
+                var empty = text.length === 0
+                if (empty && (event.key === Qt.Key_Up || event.key === Qt.Key_Down)) {
+                  event.accepted = true
+                  root.moveBubbleCursor(event.key === Qt.Key_Up ? -1 : 1)
+                  return
+                }
+                var dy = root.conversationStep(event.key, empty)
+                if (dy !== 0) {
+                  event.accepted = true
+                  root.scrollConversation(dy)
                   return
                 }
                 if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)

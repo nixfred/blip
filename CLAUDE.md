@@ -220,7 +220,10 @@ what it is handed. Keep it that way.
   without logging: async image growth ABOVE the viewport cancels wheel motion
   (chipRow compensates contentY by its own height delta), and model
   reassignment rebuilds Repeaters and resets scroll (skip identical
-  assignments; restore contentY after a list rebuild).
+  assignments; restore contentY after a list rebuild). Every writer of the
+  conversation's `contentY` — wheel, arrows, paging, Esc — goes through
+  `scrollConversation()`, the one owner of the bottom-stick that gates the
+  deferred push reload.
 - **The app window is RECREATED on show, never re-mapped.** Quickshell does
   not re-map a `FloatingWindow` after `visible` has been false once: the
   property flips true, no client appears (SUPER+M "did nothing", 1.8.3).

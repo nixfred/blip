@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Read history from the keyboard.** In a conversation, `↑`/`↓` with an empty
+  compose field select a bubble — newest first, kept in view, drawn with the
+  list rows' fill — and `↓` past the newest or `Esc` drops the selection and
+  returns to the bottom;
+  `PgUp`/`PgDn` page, `Home`/`End` jump to the ends. The mouse wheel and the
+  keys share one helper, so the bottom-stick that gates the deferred push
+  reload behaves the same either way. With text typed the arrows and Home/End
+  keep moving the caret. The selection is the target for keyboard actions to
+  come (copy, open, reply).
 - **Bug hunt (Codex, gpt-6-astra), fourteen fixes.** A 2FA code was written
   to Omarchy's on-disk notification history — the daemon persists every
   displayed toast regardless of the `transient` hint — so the toast now says a
