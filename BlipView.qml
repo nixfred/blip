@@ -256,6 +256,10 @@ FocusScope {
   // so the move functions never translate indexes between the four models.
   // A destroyed row reads back as null (guarded QObject property).
   property Item cursorRow: null
+  // The cursor is kept while the search field holds focus (Esc and Down
+  // return to it), but a row must not LOOK selected while typing happens
+  // elsewhere — Up from the top and a click in the field both got here.
+  readonly property bool cursorShown: !searchField.activeFocus
   property bool pinToBottom: false   // scroll to the newest bubble once layout settles
   property bool bubbleFocused: false // a bubble's TextEdit has focus (text selection in progress)
   property string threadRunningChat: "" // chat owned by the current threadProc
@@ -1753,7 +1757,7 @@ FocusScope {
                   Layout.preferredWidth: Math.max(1, (pinnedGrid.width - pinnedGrid.columnSpacing * 2) / 3)
                   implicitHeight: pinnedColumn.implicitHeight + Style.space(4)
                   radius: Style.cornerRadius
-                  color: pinnedHover.hovered || hasCursor
+                  color: pinnedHover.hovered || (hasCursor && root.cursorShown)
                     ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
                     : "transparent"
 
@@ -1957,7 +1961,7 @@ FocusScope {
                 Layout.fillWidth: true
                 implicitHeight: rowRow.implicitHeight + Style.space(root.splitView ? 20 : 12)
                 radius: Style.cornerRadius
-                color: rowHover.hovered || hasCursor
+                color: rowHover.hovered || (hasCursor && root.cursorShown)
                   ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
                   : "transparent"
 

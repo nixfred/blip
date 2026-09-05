@@ -211,6 +211,9 @@ describe("QML safety invariants", () => {
     // the move functions never translate indexes between the four models.
     expect(panel).not.toContain("threadIndex(");
     expect(panel.split("root.cursorChat === String(modelData.chat)").length - 1).toBe(2);
+    // the highlight hides while the search field has focus; the cursor itself stays
+    expect(panel).toContain("readonly property bool cursorShown: !searchField.activeFocus");
+    expect(panel.split("(hasCursor && root.cursorShown)").length - 1).toBe(2);
     expect(panel.split("onHasCursorChanged: if (hasCursor) root.cursorRow = ").length - 1).toBe(4);
   });
 
