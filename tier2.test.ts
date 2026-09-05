@@ -219,7 +219,7 @@ describe("clipboard file paste", () => {
   });
 
   test("extracts an existing local file from both supported payloads", () => {
-    const tmp = `${process.env.HOME}/.cache/blip-paste-${process.pid}.vcf`;
+    const tmp = `${process.env.XDG_CACHE_HOME}/blip-paste-${process.pid}.vcf`;
     writeFileSync(tmp, "BEGIN:VCARD\nEND:VCARD\n");
     const uri = new URL(`file://${tmp}`).href;
     try {
@@ -234,7 +234,7 @@ describe("clipboard file paste", () => {
   });
 
   test("snapshot returns a file attachment before attempting text", () => {
-    const tmp = `${process.env.HOME}/.cache/blip-snapshot-${process.pid}.vcf`;
+    const tmp = `${process.env.XDG_CACHE_HOME}/blip-snapshot-${process.pid}.vcf`;
     writeFileSync(tmp, "BEGIN:VCARD\nEND:VCARD\n");
     const calls: string[][] = [];
     const runner = ((_cmd: string, args: string[]) => {
