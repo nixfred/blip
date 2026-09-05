@@ -225,7 +225,16 @@ describe("QML safety invariants", () => {
     const open = qmlFunction("openBubble");
     expect(open).toContain("openAttachment(b.attachments[0])");
     expect(open).toContain("openLink(u)");
-    expect(panel).toContain("root.copyText(String(b.text || \"\"))");
+    expect(panel).toContain("root.copyBubble(b)");
+    const copy = qmlFunction("copyBubble");
+    expect(copy.indexOf("copyText(t)")).toBeLessThan(copy.indexOf("copyAttachment("));  // text wins
+    // the image reaches wl-copy as an argument, never interpolated into the shell script
+    expect(panel).toContain(`'wl-copy --type "$1" < "$2"', "sh", mime, String(d.path || "")`);
+    // HEIC arrives as JPEG (fetch.ts wantsJpeg): the clipboard type must say so
+    expect(panel).toContain('root.fetchJobMime === "image/heic" || root.fetchJobMime === "image/heif" ? "image/jpeg"');
+    // the inline preview stays put while the original is fetched for the clipboard
+    expect(panel).toContain('var keepInline = root.fetchJobAction === "copy" && !!root.attFiles[id]');
+    expect(panel).not.toContain("fetchJobOpen");
     expect(qmlFunction("quoteBubble")).toContain("leaveBubbles()");
   });
 

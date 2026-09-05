@@ -453,6 +453,12 @@ FocusScope {
       scrollConversation(it.y + it.height + margin - flick.height - flick.contentY)
   }
   function clearBubbleCursor() { bubbleCursor = -1; bubbleCursorItem = null }
+  /** Out of the selection and back where reading started: newest at the
+   *  bottom, stick re-armed. Down past the newest and Esc both land here. */
+  function leaveBubbles() {
+    clearBubbleCursor()
+    scrollConversation(flick.contentHeight)
+  }
   function selectedBubble() {
     return bubbleCursor >= 0 && bubbleCursor < bubbles.length ? bubbles[bubbleCursor] : null
   }
@@ -463,6 +469,16 @@ FocusScope {
     var u = b.link && b.link.url ? String(b.link.url) : firstUrl(b.text)
     if (u !== "") openLink(u)
   }
+  /** Ctrl+C on the selected bubble: its text, or — for a bubble that is only
+   *  a picture — the first image attachment, as an image. */
+  function copyBubble(b) {
+    var t = String(b.text || "")
+    if (t !== "") { copyText(t); return }
+    var atts = b.attachments || []
+    for (var i = 0; i < atts.length; i++) {
+      if (isImageMime(atts[i].mime)) { copyAttachment(atts[i]); return }
+    }
+  }
   /** Ctrl+R: quote the selected bubble into the compose field. iMessage's
    *  inline reply is not reachable through the bridge (no message GUID leaves
    *  the Mac and AppleScript has no reply-to), so this is a plain "> quote". */
@@ -470,12 +486,6 @@ FocusScope {
     composeField.text = "> " + String(b.text || "").replace(/\s+/g, " ").slice(0, 200) + "\n"
     composeField.cursorPosition = composeField.length
     leaveBubbles()
-  }
-  /** Out of the selection and back where reading started: newest at the
-   *  bottom, stick re-armed. Down past the newest and Esc both land here. */
-  function leaveBubbles() {
-    clearBubbleCursor()
-    scrollConversation(flick.contentHeight)
   }
   function markAllRead() {
     if (!root.hostWidget || root.unread === 0) return
@@ -623,29 +633,31 @@ FocusScope {
            m === "application/pdf" || m === "text/plain" || m === "text/vcard" || m === "text/calendar"
   }
 
-  function enqueueFetch(att, openWhenDone, auto) {
+  /** action: "" = just cache it, "open" = xdg-open when it lands, "copy" =
+   *  put it on the clipboard when it lands. */
+  function enqueueFetch(att, action, auto) {
     var id = String(att.id || "")
     if (id === "" || fetchingId === id) return
-    if (attFiles[id] !== undefined && !openWhenDone) return
+    if (attFiles[id] !== undefined && !action) return
     for (var i = 0; i < fetchQueue.length; i++) {
       if (fetchQueue[i].id === id) {
-        if (openWhenDone) fetchQueue[i].open = true
+        if (action) fetchQueue[i].action = action
         return
       }
     }
     fetchQueue.push({ id: id, name: String(att.name || "file"),
-                      mime: String(att.mime || ""), open: openWhenDone === true,
+                      mime: String(att.mime || ""), action: action || "",
                       auto: auto === true })
     pumpFetch()
   }
 
-  property bool fetchJobOpen: false
+  property string fetchJobAction: ""
   property string fetchJobMime: ""
   function pumpFetch() {
     if (fetchProc.running || fetchQueue.length === 0) return
     var job = fetchQueue.shift()
     fetchingId = job.id
-    fetchJobOpen = job.open === true
+    fetchJobAction = job.action
     fetchJobMime = job.mime
     // Auto-pulls carry a hard transfer cap: claimed metadata is not the limit.
     fetchProc.command = ["bun", root.fetchScript, job.id, job.name, job.mime, job.auto ? "5242880" : ""]
@@ -670,11 +682,11 @@ FocusScope {
         // iPhone photos were rejected at both ends and simply never appeared.
         var b = atts[j].bytes
         if (isImageMime(atts[j].mime) && typeof b === "number" && b > 0 && b <= root.autoFetchMaxSource)
-          enqueueFetch(atts[j], false, true)
+          enqueueFetch(atts[j], "", true)
       }
       // link-card preview PNGs are small; the auto-fetch transfer cap bounds them
       var l = bubbles[i].link
-      if (l && l.image_id) enqueueFetch({ id: String(l.image_id), name: "preview.png", mime: "image/png", bytes: 0 }, false, true)
+      if (l && l.image_id) enqueueFetch({ id: String(l.image_id), name: "preview.png", mime: "image/png", bytes: 0 }, "", true)
     }
   }
 
@@ -687,7 +699,13 @@ FocusScope {
     if (attFiles[id] === "") {   // failed marker — clear it so a retry runs
       var m = Object.assign({}, attFiles); delete m[id]; attFiles = m
     }
-    enqueueFetch(att, true)
+    enqueueFetch(att, "open")
+  }
+  /** Ctrl+C on an image bubble: fetch-then-clipboard, the same round trip as
+   *  a click, ending in wl-copy with the image's own MIME type. */
+  function copyAttachment(att) {
+    if (String(att.id || "") === "") return
+    enqueueFetch(att, "copy")
   }
 
   // ------------------------------------------------------ compose attachment
@@ -1197,8 +1215,12 @@ FocusScope {
         var id = root.fetchingId
         try {
           var d = JSON.parse(text.trim())
+          // A copy fetches the ORIGINAL for the clipboard; the bubble keeps
+          // the preview it already draws. Swapping its source and metrics
+          // re-decodes and re-lays out the picture under the reader's eyes.
+          var keepInline = root.fetchJobAction === "copy" && !!root.attFiles[id]
           var m = Object.assign({}, root.attFiles)
-          m[id] = d.ok === true ? String(d.url || "") : ""
+          if (!keepInline) m[id] = d.ok === true ? String(d.url || "") : ""
           root.attFiles = m
           var ratio = Number(d.pixelRatio)
           var pixelWidth = Number(d.pixelWidth)
@@ -1206,10 +1228,20 @@ FocusScope {
           if (!isFinite(ratio) || ratio < 1 || ratio > 4) ratio = 1
           if (!isFinite(pixelWidth) || pixelWidth < 1 || pixelWidth > 100000) pixelWidth = 0
           if (!isFinite(pixelHeight) || pixelHeight < 1 || pixelHeight > 100000) pixelHeight = 0
-          var metrics = Object.assign({}, root.attMetrics)
-          metrics[id] = { pixelRatio: ratio, pixelWidth: pixelWidth, pixelHeight: pixelHeight }
-          root.attMetrics = metrics
-          if (d.ok === true && root.fetchJobOpen) {
+          if (!keepInline) {
+            var metrics = Object.assign({}, root.attMetrics)
+            metrics[id] = { pixelRatio: ratio, pixelWidth: pixelWidth, pixelHeight: pixelHeight }
+            root.attMetrics = metrics
+          }
+          if (d.ok === true && root.fetchJobAction === "copy") {
+            // The Mac converts HEIC/HEIF to JPEG on the way (fetch.ts wantsJpeg),
+            // so the clipboard type must say what the bytes are. Path and type
+            // travel as arguments, never interpolated into the script.
+            var mime = root.fetchJobMime === "image/heic" || root.fetchJobMime === "image/heif" ? "image/jpeg" : root.fetchJobMime
+            Quickshell.execDetached(["sh", "-c", 'wl-copy --type "$1" < "$2"', "sh", mime, String(d.path || "")])
+            root.note = "copied"
+            noteTimer.restart()
+          } else if (d.ok === true && root.fetchJobAction === "open") {
             if (root.openableMime(root.fetchJobMime)) {
               Quickshell.execDetached(["xdg-open", String(d.url || "")])
             } else {
@@ -2848,7 +2880,7 @@ FocusScope {
                 var b = empty && root.draftPath === "" ? root.selectedBubble() : null
                 if (b) {
                   if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { event.accepted = true; root.openBubble(b); return }
-                  if (event.matches(StandardKey.Copy)) { event.accepted = true; root.copyText(String(b.text || "")); return }
+                  if (event.matches(StandardKey.Copy)) { event.accepted = true; root.copyBubble(b); return }
                   if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) { event.accepted = true; root.quoteBubble(b); return }
                 }
                 var dy = root.conversationStep(event.key, empty)
