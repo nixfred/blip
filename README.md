@@ -15,7 +15,7 @@
   <img alt="Omarchy" src="https://img.shields.io/badge/Omarchy-plugin-5fd7ff?style=flat-square">
   <img alt="QuickShell" src="https://img.shields.io/badge/QuickShell-QML-0a84ff?style=flat-square">
   <img alt="bun" src="https://img.shields.io/badge/bun-TypeScript-f9f1e1?style=flat-square">
-  <img alt="tests" src="https://img.shields.io/badge/tests-312%20passing-2ea043?style=flat-square">
+  <img alt="tests" src="https://img.shields.io/badge/tests-361%20passing-2ea043?style=flat-square">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
@@ -75,6 +75,8 @@ people who showed up with pull requests. What is in it now:
   bare; for the bare ones Blip fetches the page and builds the card from its
   Open Graph tags. Right-click any link for a share sheet: open, copy, a QR
   code your phone can scan, or send it to another device with LocalSend.
+- **Contact-name resolver** for numbers/emails that appear on multiple cards:
+  choose the right name for Blip, or open the matching source card on the Mac.
 - **Real-time push** — messages land in ~2 s via a watcher on the Mac.
 - **Attachments both ways** — photos inline and upright (EXIF orientation is
   baked in, so they are not sideways in your viewer either), files as chips,
@@ -136,7 +138,9 @@ Linux side. If the Mac is asleep, the widget dims and says so.
 - **iMessage-app cards read as text** — Ask to Buy, Fitness sharing, Find My: the sentence Messages shows for them, instead of a replacement character
 - **photos render inline** — images ≤5MB auto-fetch over SSH (HEIC converted on the Mac); click opens full-size. PDFs/videos are chips — click fetches and opens them
 - **send files** — Ctrl+V an image into the compose box, type `/attach <path>`, or drag-and-drop; a caption rides along
-- select text and Ctrl+C · right-click a bubble to copy it whole · right-click a **link** in a bubble for the share sheet
+- select text and Ctrl+C · right-click a bubble or conversation for **Copy
+  message**, **Copy vCard**, or **Edit contact**; group chats list each person;
+  right-click a **link** in a bubble for the share sheet
 - the share sheet **opens itself** for a link you send, and for one that arrives while Blip is open
 - compose box at the bottom, Enter sends — **DMs and groups**
 
@@ -333,6 +337,8 @@ wizard pauses here and re-checks when you press Enter)
   Automation grants (each simply asks again next time), because a
   path-identified client like sshd-keygen-wrapper cannot be reset on its own —
   then re-run `blip-setup` and sit at the Mac's screen for the prompt.
+- Optional contact review: allow *Automation → Contacts* so the read-only
+  availability check can run.
 
 `ssh your-mac python3 ~/.blip/bin/blip-check` shows ✅/❌ per grant at any
 time, with the fix for each ❌.
@@ -473,6 +479,124 @@ rather than hang:
 ~/bin/imsg chats 1 >/dev/null && echo "gateway reachable"
 ```
 
+## Settings and portable configuration
+
+Choose the gear in Blip's message header to edit appearance live. The editor
+writes a normal JSON file at `~/.config/blip/preferences.json`, so it can be
+copied between machines or tracked by dotfile tooling. A restored file is
+noticed within five seconds, or immediately with **Reload file**. Track the
+real file rather than a symlink: the preference boundary deliberately refuses
+symlinks and non-regular files.
+
+```json
+{
+  "schemaVersion": 1,
+  "outgoingBubbleColor": "theme",
+  "incomingBubbleColor": "theme",
+  "backgroundOpacity": 0.7,
+  "fontScale": 1,
+  "density": 1,
+  "sidebarWidth": 320,
+  "avatarSize": 30,
+  "cornerScale": 1,
+  "hideShortCodeConversations": true,
+  "use12HourConversationTimes": true
+}
+```
+
+Bubble colors accept `"theme"`, `#rrggbb`, or `#rrggbbaa`. The GUI exposes
+every field: app-window opacity, font scale, density, sidebar width, avatar
+size, corner roundness, short-code visibility, and 12/24-hour conversation-list
+times. Writes are atomic and owner-only; malformed,
+oversized, symlinked, or out-of-range files are rejected with an error in the
+settings view instead of being loaded into the long-lived shell.
+
+Settings has separate **Contacts** and **Appearance** tabs, so contact work
+does not share one long scroll with visual preferences. The Contacts tab lists
+direct conversations that are still shown by phone number or email, explains
+why each one is present, and hides short-code/service senders by default with a
+portable toggle to reveal them. Opening one
+replaces the list with a focused detail view; use **All conversations** or
+Escape to return. The detail view then separates two independent tasks.
+
+**Find Contacts cleanup opportunities** runs one read-only scan across the
+phone and email conversations in that queue. It groups the results into no
+matching card, one-card matches, same-name multi-card duplicate candidates,
+and handles attached to conflicting names. The result can filter the full list
+down to Contacts matches and provides direct review buttons for duplicates and
+conflicts. A shared handle or an iCloud/Google pairing is only evidence: the
+scan never changes a display name or contact, and Blip deliberately does not
+offer a blind bulk merge. Every upstream edit, deletion, link, or consolidation
+still gets a person-specific preview and confirmation.
+
+**Review Mac Contacts** shows every source card a person has (iCloud, Gmail,
+Exchange, On My Mac), with per-card shortcuts that open the exact record in
+Contacts on the Mac. It selects the matching person only for the current UI
+session and never writes `~/.config/blip/identities.json`. It is read-only:
+the actual cleanup happens in Contacts, with Blip showing where every card
+lives.
+
+**Set a Blip display preference** is optional and is not part of contact
+deduplication. Use it only when Blip otherwise shows a number or an unwanted
+name. Saving a Contacts name writes an explicit portable display rule to
+`~/.config/blip/identities.json` without editing Contacts. A name typed into the
+custom field is a custom Blip-only rule. Both kinds of preference apply to
+pinned tiles, the thread list, notifications, and sender labels. The file is
+portable and safe to restore alongside `preferences.json`, but it contains
+personal names and handles, so only put it in a private dotfiles repository.
+
+The contact-management workspace lists every
+active matching source card separately, with large duplicate sets collapsed
+again. Raw account databases sometimes retain historical cache rows that the
+Contacts object layer no longer exposes; Blip verifies and omits those rows so
+they cannot be mistaken for editable cards. **Manage N cards…** loads a
+bounded view of each active card's discovered name, organization,
+phone, email, address, URL, birthday, and notes, plus a de-duplicated combined
+view and a short missing-details checklist. Each card carries its bounded
+macOS source label—such as iCloud, Google, or On My Mac—while raw account IDs
+remain on the Mac.
+
+Each source card now has an **Edit in Blip…** workspace for names, organization
+and job fields, birthday, notes, labeled phone numbers, email addresses,
+websites, and postal addresses. Edits and whole-card deletions are first shown
+as a read-only change preview. The Mac bridge then re-resolves the opaque card
+token and requires the card's content revision to be unchanged before it
+saves. The card photo is retained on edit but is not editable in Blip.
+
+For duplicates, choose **Merge into card N…** to build an editable combined
+card. The selected card and its account remain authoritative; its scalar
+choices win, blanks are filled from the other cards, and unique collection
+values are combined. After a destructive confirmation, Blip batches the target
+update and same-account source-card deletions in one save through Apple's
+current Contacts framework. When source cards cross account stores, Blip first
+saves the complete surviving card and then deletes sources in account-scoped
+requests; this avoids Contacts' unsupported cross-store save while keeping the
+merged data safe before any source is removed. This deterministic path does not
+depend on Apple's menu item being enabled.
+
+From that comparison Blip can ask Contacts to select the exact cards and report
+Apple's currently enabled **Link Selected Cards** or **Merge Selected Cards**
+action. Nothing happens until a second confirmation names that exact action.
+The action is pinned through the SSH bridge and refused if it changes before
+the click. It changes Contacts and may sync upstream; unlike the narrow
+phone/email repair below, Blip cannot provide an automatic unlink receipt.
+This handoff needs Automation → Contacts and Accessibility for
+`/usr/libexec/sshd-keygen-wrapper` on the Mac.
+
+For a handle attached to the wrong person, Blip can also inspect the exact
+card, show a destructive confirmation, remove only that verified phone/email
+through Contacts.app, and offer an immediate undo; its private receipt expires
+after seven days. Edits, deletions, consolidations, and narrow field removals
+all require `contact_writes=on` plus the
+separate owner-only Mac gate. Whole-card deletion uses Apple's public Contacts
+framework. Blip never writes the private Contacts SQLite database or deletes a
+possibly shared number without confirmation. Edit undo
+restores the exact card fields if the card has not changed again. Delete and
+consolidation undo can recreate the text fields as new cards, but Contacts does
+not expose a supported way to restore their original synced-account placement,
+links, or photos; the confirmation says this explicitly. A custom Blip-only
+name is available when no source card exists.
+
 ## Keyboard
 
 | where | key | does |
@@ -493,6 +617,7 @@ IPC, for scripts and other plugins:
 
 ```sh
 qs -p /usr/share/omarchy/shell ipc call nixfred.blip status
+qs -p /usr/share/omarchy/shell ipc call nixfred.blip settings
 qs -p /usr/share/omarchy/shell ipc call nixfred.blip goto 15551234567   # bare digits
 qs -p /usr/share/omarchy/shell ipc call nixfred.blip read               # mark all read
 qs -p /usr/share/omarchy/shell ipc call nixfred.blip share https://example.com   # share sheet for a URL
@@ -521,7 +646,7 @@ Everything that sends or reads message content over IPC (`goto`, `compose`,
 `bubbles`, `threads`, `find`, `newchat`, `read`, `typecode`, `copycode`) is **off by default** — any
 local process could otherwise send as you. Turn it on with `automation=on`
 in `~/.config/blip/bridge.conf` (re-read live). `status`, `open`, `close`,
-`toggle`, `window`, `app` are always available.
+`toggle`, `window`, `app`, `settings` are always available.
 
 ## Design notes worth knowing
 
@@ -593,7 +718,7 @@ The 273,000-message history stays on the Mac where it lives.
 ## Development
 
 ```sh
-bun test                                     # 312 tests, ~110 ms
+bun test                                     # 361 tests, ~150 ms
 bun collector.ts --deep | jq '.unread, (.threads|length)'
 bun thread.ts +15551234567 40 | jq '.bubbles[-1]'
 scripts/demo/blip-shots                      # regenerate docs/img/*.png

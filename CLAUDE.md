@@ -6,7 +6,7 @@ treating a Mac as the gateway. Read this before touching anything.
 ## Shape
 
 ```
-(Mac side)    bridge/mac/           VENDORED from claude-on-mac (pin in bridge/BRIDGE-VERSION; refresh with
+(Mac side)    bridge/mac/           VENDORED from claude-on-mac with documented Blip extensions (pin in bridge/BRIDGE-VERSION; refresh with
               imsg imsg-send        scripts/sync-bridge.sh <rev>). Installed to ~/.blip/bin on the Mac by
               contacts tcc-check    bridge/mac/install.sh. Blip is ONE source for release (Fred's rule).
               blip-dispatch         forced-command gate for ~/.ssh/blip_ed25519: only the five tools run.
@@ -17,6 +17,11 @@ treating a Mac as the gateway. Read this before touching anything.
                                     — single-quoted, expands on the MAC). `ssh -n` preflight; exit 69 offline.
                                     Blip only ever calls ~/bin/imsg*. No hostnames in code, ever.
 collector.ts                        poll → {threads, unread, toast}. Pure functions + one spawn.
+preferences.ts                      bounded schema + atomic ~/.config/blip/preferences.json I/O.
+BlipPreferences.qml                 one shared live preference source; QML never parses the writable file.
+identities.ts                       bounded ~/.config/blip/identities.json choices + Mac candidate broker.
+BlipIdentities.qml                  QML helper client; handles travel to the bridge over stdin, never argv.
+BlipSettings.qml                    in-app editor for appearance and ambiguous contact names.
 thread.ts                           one conversation → decorated bubbles. Pure + one spawn.
 fetch.ts                            attachment id → ~/.cache/blip/att (0700/0600, 500MB LRU).
 send-file.ts                        local file + caption → imsg-send --file-stdin --text-stdin-bytes N
@@ -114,7 +119,34 @@ what it is handed. Keep it that way.
 - **The Linux shims' ssh preflight must use `ssh -n`.** A bare
   `ssh <mac> true` connectivity probe EATS STDIN, which silently empties
   `imsg-send --file-stdin` payloads. Fixed 2026-08-31.
-- **`bridge.conf` is data, never `source`d.** The shim parses four keys and
+- **Pins belong to Messages.app.** The ordered pin list lives in
+  `com.apple.messages.pinning.plist`, not `chat.db`. `imsg chats` resolves its
+  bounded pD/pP tokens to canonical chat identifiers and emits pin state and
+  order; Blip must not create a divergent Linux-only favorites list.
+- **Preferences cross a bounded helper.** QML never feeds
+  `~/.config/blip/preferences.json` into `FileView`. `preferences.ts` rejects
+  symlinks/FIFOs/wrong owners/oversized or invalid JSON and writes 0600 via a
+  pinned directory fd + atomic rename. Keep the schema portable and versioned.
+- **Ambiguous contact names are explicit choices, never guesses.**
+  `~/.config/blip/identities.json` is a portable, versioned, owner-only map
+  validated and written by `identities.ts`. Candidate lookups are bounded on
+  both sides of ssh and carry the handle via stdin. A display-name preference
+  is optional and separate from the contact review. Session-only candidate
+  selection must be enough to review a person's cards; reviewing never
+  requires or creates an `identities.json` entry. Saving a display preference
+  remains an explicit, separately labeled action. Mac review uses opaque
+  per-card tokens to open an exact validated `addressbook://` record in
+  Contacts.app. The bridge is READ-ONLY toward the Mac: its resolve verbs are
+  candidates, fingerprint, audit, and open, and the one Automation helper it
+  drives (`contact-repair.js`) answers only which person ids the object layer
+  can address. Blip never edits the private AddressBook SQLite database.
+- **The cleanup scan is fingerprint-cached.** `store_fingerprint()` hashes
+  per-source row counts and newest modification times; `identities.ts` caches
+  the last audit keyed by that fingerprint plus the handle-set fingerprint, so
+  reopening the contacts page answers in ~0.1s instead of re-scanning 19k
+  cards. A fingerprint taken BEFORE the scan means a mid-scan change makes the
+  next freshness check miss — the safe direction.
+- **`bridge.conf` is data, never `source`d.** The shim parses an allowlisted schema and
   validates them; keep it that way (audit #7). `automation=on` is what lets
   `qs ipc … goto/compose/bubbles` work — off, they return a refusal string.
 - **Opening a link = `xdg-open` THEN focus the browser window.** Omarchy runs

@@ -5,6 +5,11 @@ import { parseUiFontSize, scaleFontPx } from "./ui-font";
 // The renderer moved from Panel.qml into BlipView.qml in 1.8.0 (shared with the app window).
 const panel = readFileSync(new URL("./BlipView.qml", import.meta.url), "utf8");
 const widget = readFileSync(new URL("./BarWidget.qml", import.meta.url), "utf8");
+const identitySettings = readFileSync(new URL("./IdentitySettings.qml", import.meta.url), "utf8");
+const settings = readFileSync(new URL("./BlipSettings.qml", import.meta.url), "utf8");
+const identities = readFileSync(new URL("./BlipIdentities.qml", import.meta.url), "utf8");
+const identityHelper = readFileSync(new URL("./identities.ts", import.meta.url), "utf8");
+const preferences = readFileSync(new URL("./BlipPreferences.qml", import.meta.url), "utf8");
 const window = readFileSync(new URL("./BlipWindow.qml", import.meta.url), "utf8");
 
 function handleTextKeySource() {
@@ -124,9 +129,119 @@ describe("QML safety invariants", () => {
     expect(widget).toContain("property var refreshQueue: []");
     expect(widget).not.toContain("property var queued: null");
     const success = panel.indexOf("if (d.ok === true)");
-    const mark = panel.indexOf("markThreadRead(root.threadRunningChat)");
+    const mark = panel.indexOf("markThreadRead(root.threadRunningChat,");
     expect(success).toBeGreaterThan(-1);
     expect(mark).toBeGreaterThan(success);
+  });
+
+  test("contact management and optional Blip display preferences are separate flows", () => {
+    expect(identitySettings).toContain("CHOOSE A CONVERSATION TO REVIEW");
+    expect(identitySettings).toContain("WHY THEY ARE HERE");
+    expect(identitySettings).toContain("Short codes and service senders can simply be left alone.");
+    expect(identitySettings).toContain("Review contact…");
+    expect(identitySettings).toContain("Review anyway…");
+    expect(identitySettings).toContain("var started = resolver.findCandidates(handle)");
+    expect(identitySettings).toContain("directContactPending = directReview === true && started");
+    expect(identitySettings).toContain("Hide short-code senders");
+    expect(identitySettings).not.toContain(".slice(0, 12)");
+    expect(identitySettings).toContain("phone/email conversations to review");
+    expect(identitySettings).toContain("readonly property var auditableConversations: auditableThreads(threads)");
+    expect(identitySettings).toContain("resolver.audit.handleCount === auditableConversations.length");
+    expect(identitySettings).toContain("Named conversations are included");
+    expect(identitySettings).toContain("preferences.hideShortCodeConversations");
+    expect(identitySettings).toContain('preferences.setBoolean("hideShortCodeConversations", value)');
+    expect(settings).toContain("preferences: root.preferences");
+    expect(identitySettings).toContain("What do you want to do? These are separate workflows.");
+    expect(identitySettings).toContain("rowSpacing: root.space(12)");
+    expect(identitySettings).toContain("columnSpacing: root.space(12)");
+    expect(identitySettings).toContain("MANAGE MAC CONTACTS");
+    expect(identitySettings).toContain("This never creates a Blip display-name preference.");
+    expect(identitySettings).toContain("Skip this when you only want to deduplicate Contacts.");
+    // side-by-side workflow cards share the taller card's height, and each
+    // card's action pins to the bottom right through a flexible spacer
+    expect(identitySettings).toContain("Math.max(manageTask.implicitHeight, namingTask.implicitHeight)");
+    expect(identitySettings.split("Item { Layout.fillHeight: true }").length - 1).toBeGreaterThanOrEqual(2);
+    expect(identitySettings).toContain("OPTIONAL BLIP DISPLAY NAME");
+    expect(identitySettings).toContain("Save Contacts name as display preference");
+    expect(identitySettings).toContain("CUSTOM BLIP-ONLY DISPLAY NAME");
+    expect(identitySettings).toContain("it is temporary, never saved, and changes nothing in Contacts.");
+    expect(identitySettings).toContain("Viewing or opening a card makes no change");
+    expect(identitySettings).toContain("CHOOSE A CONVERSATION TO REVIEW");
+    expect(identitySettings.indexOf("WHY THEY ARE HERE"))
+      .toBeLessThan(identitySettings.indexOf("FIND CONTACT CLEANUP OPPORTUNITIES"));
+    expect(identitySettings.indexOf("FIND CONTACT CLEANUP OPPORTUNITIES"))
+      .toBeLessThan(identitySettings.indexOf("CHOOSE A CONVERSATION TO REVIEW"));
+    expect(identitySettings.indexOf("CHOOSE A CONVERSATION TO REVIEW"))
+      .toBeLessThan(identitySettings.indexOf("model: root.unresolved"));
+    expect(identitySettings).toContain("Refresh source cards");
+    expect(identitySettings).not.toContain("Check Mac Contacts again");
+    expect(identitySettings).toContain("root.resolver.candidates.length === 1");
+    expect(identitySettings).not.toContain("root.selectedChoiceIsSaved\n                  && (!root.resolver.comparison");
+    expect(identityHelper).not.toContain("requireSavedRepairOwner");
+    expect(identityHelper).not.toContain("save the correct Contacts name in Blip before repairing");
+    expect(identitySettings).not.toContain("MATCH REMEMBERED BY BLIP");
+    expect(identitySettings).not.toContain("Already saved in Blip\"");
+    expect(identitySettings).not.toContain('label: "Use"');
+    expect(identitySettings).not.toContain("Fix on Mac");
+  });
+
+  test("contact cleanup scan is read-only triage, never a bulk merge", () => {
+    expect(identitySettings).toContain("FIND CONTACT CLEANUP OPPORTUNITIES");
+    expect(identitySettings).toContain("Run a read-only Mac Contacts scan");
+    expect(identities).toContain('if (!quietAudit) notice = result.cached === true');
+    // a fingerprint cache hit reports freshness instead of a fake re-scan
+    expect(identities).toContain("Contacts hasn't changed since the last scan");
+    // the contacts page loads cleanup results on open (cheap when cached)
+    expect(identitySettings).toContain("function maybeAutoAudit()");
+    expect(identitySettings).toContain("resolver.auditContacts(reviewHandles(), true)");
+    // the scan runs on its OWN process, kicked immediately after a mutation,
+    // so it never contends with navigation or edits; the list page shows the
+    // in-flight state while previous results stay visible
+    expect(identities).toContain("id: auditWorker");
+    expect(identities).toContain("property bool auditRunning");
+    expect(identities).toContain("function consumeAudit(text)");
+    // in-flight scans animate a three-dot indicator (width-stable, monospace)
+    expect(identitySettings).toContain('"Scanning" + root.animatedDots');
+    // busy notices ("Consolidating the verified source cards…") animate too
+    expect(identitySettings).toContain('String(root.resolver.notice).replace(/…$/, "") + root.animatedDots');
+    expect(identitySettings).toContain("property int scanDotPhase");
+    // stale results gray out while a re-scan is in flight
+    expect(identitySettings).toContain("readonly property bool staleWhileScanning");
+    // dimming covers the cleanup-opportunities results AND the review list
+    expect(identitySettings.split("root.staleWhileScanning ? 0.45 : 1").length - 1).toBeGreaterThanOrEqual(7);
+    expect(identitySettings).toContain("likely duplicates");
+    expect(identitySettings).toContain("naming conflicts");
+    expect(identitySettings).toContain("Review duplicate…");
+    expect(identitySettings).toContain("Review conflict…");
+    expect(identitySettings).toContain("Focus on ");
+    expect(identitySettings).toContain("Every contact change still opens its own preview and confirmation.");
+    expect(identitySettings).not.toContain("Merge all");
+    expect(identities).toContain("function auditContacts(handles, quiet)");
+    expect(identities).toContain('auditWorker.command = ["bun", helperPath, "audit"]');
+    expect(identityHelper).toContain('operation === "audit"');
+  });
+
+  test("settings navigation keeps the contacts review compact", () => {
+    expect(settings).toContain('property string page: "contacts"');
+    expect(settings).toContain('visible: root.page === "contacts"');
+    expect(settings).toContain("width: Math.min(parent.width, root.space(1120))");
+    expect(identitySettings).toContain('label: "← All conversations"');
+    expect(identitySettings).toContain("visible: !root.reviewActive");
+    expect(identitySettings).toContain("visible: root.macReviewExpanded");
+    expect(identitySettings).toContain("function openContactManagement()");
+    expect(identitySettings).toContain("Manage Contacts…");
+    expect(identitySettings).toContain("sourceCandidate.cardsExpanded ? sourceCandidate.modelData.cards : []");
+    expect(identitySettings).toContain("root.candidateForToken(saved.contactToken)");
+    expect(settings).not.toContain("Saved as portable JSON files");
+    expect(settings).toContain("Layout.alignment: Qt.AlignTop");
+  });
+
+  test("silent settings refreshes preserve stable models and visible state", () => {
+    expect(identities).toContain("loading = quiet !== true");
+    expect(identities).toContain("if (serialized !== identitiesJson)");
+    expect(identities).toContain("pendingReviewHandle = requested");
+    expect(identities).toContain('if (!worker.running && root.activeHandle === "") root.load(true)');
+    expect(preferences).toContain("if (loaded && serialized === lastSerialized) return true");
   });
 
   test("app window routes n, slash, digits, and Esc through catch helpers", () => {
@@ -144,8 +259,8 @@ describe("QML safety invariants", () => {
     expect(fn.indexOf('text === "/"')).toBeLessThan(fn.indexOf("inThread"));
     expect(fn.indexOf('text === "n"')).toBeLessThan(fn.indexOf("inThread"));
     expect(fn.indexOf('text >= "1"')).toBeLessThan(fn.indexOf("inThread"));
-    expect(fn).toContain("if (i < 0 || i >= threads.length) return false");
-    expect(fn).toContain("openThread(threads[i])");
+    expect(fn).toContain("if (i < 0 || i >= navigationThreads.length) return false");
+    expect(fn).toContain("openThread(navigationThreads[i])");
   });
 
   test("1-9 still jumps, with no digit drawn anywhere (Fred, 2.3.1)", () => {
@@ -211,7 +326,7 @@ describe("media renders at its intended scale", () => {
   });
 
   test("tall link artwork keeps its aspect ratio", () => {
-    expect(panel).toContain("Math.min(Style.space(480)");
+    expect(panel).toContain("Math.min(root.space(480)");
     expect(panel).toContain("fillMode: Image.PreserveAspectFit");
   });
 });
@@ -254,9 +369,9 @@ test("the icon's unread dot is always iMessage blue", () => {
 
 // Bubbles are iMessage blue on every theme, white text on them, like Messages.
 // They followed the theme accent until 2.3.3 — red on several Omarchy themes.
-test("outgoing bubbles are always iMessage blue with white text", () => {
+test("default outgoing bubbles stay iMessage blue with white text", () => {
   expect(panel).toContain('readonly property color accent: "#0a84ff"');
-  expect(panel).toContain('readonly property color mineText: "#ffffff"');
+  expect(panel).toContain('readonly property color mineText: outgoingColorSetting === "theme" ? "#ffffff" : contrastText(mineFill)');
   expect(panel).not.toContain("themeHasAccent");
 });
 

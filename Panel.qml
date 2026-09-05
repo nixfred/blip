@@ -23,6 +23,7 @@ Panel {
 
   property var anchorItem: null
   property var hostWidget: null
+  property var preferences: null
   readonly property var barIdentity: hostWidget || root
 
   // ---- proxies: BarWidget and the IPC hooks talk to the panel, the view does the work
@@ -59,14 +60,15 @@ Panel {
     owner: root.barIdentity
     bar: root.bar
     open: root.opened
-    focusTarget: view.inThread ? view.composeEditor : keyCatcher
+    focusTarget: view.settingsMode ? keyCatcher : (view.inThread ? view.composeEditor : keyCatcher)
     // 20% narrower than it was (Fred, 2.3.1). Messages' own sidebar is a
     // narrow column; 440 read like a file browser.
     contentWidth: panel.fittedContentWidth(Style.space(352))
     // The floor keeps the panel usable if a mode flip's relayout ever lags
     // again — search/new modes always have at least a field to show.
     contentHeight: panel.fittedContentHeight(
-      view.inThread ? Style.space(640)
+      view.settingsMode ? Style.space(640)
+        : view.inThread ? Style.space(640)
         : Math.max(view.contentHeightHint,
                    (view.newMode || view.searching) ? Style.space(280) : 0),
       Style.space(640))
@@ -90,6 +92,7 @@ Panel {
         id: view
         anchors.fill: parent
         hostWidget: root.hostWidget
+        preferences: root.preferences
         surfaceOpen: root.opened
         foreground: root.bar ? root.bar.foreground : Color.foreground
         urgent: root.bar ? root.bar.urgent : Color.urgent
