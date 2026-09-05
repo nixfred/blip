@@ -196,11 +196,19 @@ describe("QML safety invariants", () => {
     expect(qmlFunction("scrollConversation")).toContain("flick.stick = flick.contentY >= max - 4");
     expect(panel).toContain("root.scrollConversation(-d)");
     expect(panel.split("flick.stick = flick.contentY >= max - 4").length - 1).toBe(1);
-    const step = qmlFunction("conversationStep");
-    // paging always; Home/End only when the field is empty (caret otherwise)
-    expect(step.indexOf("Qt.Key_PageDown")).toBeLessThan(step.indexOf("if (!fieldEmpty) return 0"));
-    expect(step.indexOf("if (!fieldEmpty) return 0")).toBeLessThan(step.indexOf("Qt.Key_Home"));
-    expect(panel).toContain("root.conversationStep(event.key, empty)");
+    // Home/End select the ends only from an empty field (caret otherwise)
+    expect(panel).toContain("(event.key === Qt.Key_Home && atLineStart) || (event.key === Qt.Key_End && atLineEnd)");
+    expect(panel).toContain("var atLineStart = empty || cursorPosition === 0");
+    expect(panel).toContain("root.bubbleCursor = event.key === Qt.Key_Home ? 0 : root.bubbles.length - 1");
+    expect(panel).not.toContain("conversationStep");
+    // PgUp/PgDn select the edge bubble regardless of text, and page when already there
+    expect(panel).toContain("if (event.modifiers & Qt.ShiftModifier) root.moveBubbleCursor(dir)");
+    expect(panel).toContain("else root.pageBubbles(dir)");
+    const page = qmlFunction("pageBubbles");
+    expect(page.indexOf("if (edge === bubbleCursor && bubbleCursorItem)")).toBeLessThan(page.indexOf("scrollConversation(dy < 0 ?"));
+    // only a WHOLLY visible row counts as the edge, else a sliver of the row above turns paging into single steps
+    expect(qmlFunction("edgeVisibleBubble")).toContain("it.y >= top - 1 : it.y + it.height <= bottom + 1");
+    expect(page).toContain("leaveBubbles()");
   });
 
   test("arrows in an empty compose field select bubbles, and the selection clears cleanly", () => {
@@ -216,6 +224,10 @@ describe("QML safety invariants", () => {
     expect(move).toContain("leaveBubbles()");                  // Down past newest = same exit as Esc
     expect(qmlFunction("leaveBubbles")).toContain("scrollConversation(flick.contentHeight)");
     expect(panel).toContain("root.moveBubbleCursor(event.key === Qt.Key_Up ? -1 : 1)");
+    // the edge rule: Up leaves a draft only from its first line, Down only from
+    // its last and only while a bubble is selected (otherwise the caret keeps it)
+    expect(panel).toContain("var onFirstLine = empty || caret.y < topPadding + caret.height * 0.5");
+    expect(panel).toContain("(event.key === Qt.Key_Down && onLastLine && root.bubbleCursor >= 0)");
   });
 
   test("bubble actions reuse the click handlers and never steal a real send", () => {

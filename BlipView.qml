@@ -417,17 +417,6 @@ FocusScope {
     flick.contentY = Math.max(0, Math.min(max, flick.contentY + dy))
     flick.stick = flick.contentY >= max - 4
   }
-  /** Pixels a key moves the conversation from the compose field, 0 = not a
-   *  scroll key. PageUp/PageDown always page; Home/End only while the field
-   *  is empty — with text typed they keep moving the caret. */
-  function conversationStep(key, fieldEmpty) {
-    if (key === Qt.Key_PageUp) return -flick.height * 0.9
-    if (key === Qt.Key_PageDown) return flick.height * 0.9
-    if (!fieldEmpty) return 0
-    if (key === Qt.Key_Home) return -flick.contentHeight
-    if (key === Qt.Key_End) return flick.contentHeight
-    return 0
-  }
   /** Up/Down in an empty compose field walk the bubbles, newest first, and
    *  keep the selected one in view. Down past the newest drops the selection
    *  and re-sticks to the bottom, so the conversation follows new messages
@@ -444,6 +433,46 @@ FocusScope {
     } else {
       bubbleCursor = Math.max(0, bubbleCursor + dy)
     }
+    revealBubbleCursor()
+  }
+  /** PgUp/PgDn walk the bubbles a screen at a time, and unlike the arrows
+   *  they work with text in the compose field (they move no caret). PgUp
+   *  selects the topmost visible bubble; already there, it pages up first.
+   *  PgDn mirrors it with the bottommost, and past the newest leaves. */
+  function pageBubbles(dy) {
+    if (bubbles.length === 0) return
+    var edge = edgeVisibleBubble(dy)
+    if (edge === bubbleCursor && bubbleCursorItem) {
+      if (dy > 0 && edge === bubbles.length - 1) { leaveBubbles(); return }
+      // Page so the selected row lands at the OPPOSITE edge — a screen with
+      // one row of overlap, the way a pager turns a page.
+      var it = bubbleCursorItem, margin = Style.space(6)
+      scrollConversation(dy < 0 ? it.y + it.height + margin - flick.height - flick.contentY
+                                : it.y - margin - flick.contentY)
+      edge = edgeVisibleBubble(dy)
+    }
+    if (edge < 0) return
+    bubbleCursor = edge
+    revealBubbleCursor()
+  }
+  /** Index of the topmost (dy < 0) or bottommost (dy > 0) bubble that is
+   *  WHOLLY inside the viewport — a sliver of the neighbour above the
+   *  selection must not count, or the next PgUp steps one row instead of
+   *  paging. Falls back to a partly visible row (a picture taller than the
+   *  view); -1 when nothing is laid out yet. */
+  function edgeVisibleBubble(dy) {
+    var top = flick.contentY, bottom = top + flick.height
+    var n = bubbleRepeater.count, partial = -1
+    for (var k = 0; k < n; k++) {
+      var i = dy < 0 ? k : n - 1 - k
+      var it = bubbleRepeater.itemAt(i)
+      if (!it || it.y >= bottom || it.y + it.height <= top) continue
+      if (partial < 0) partial = i
+      if (dy < 0 ? it.y >= top - 1 : it.y + it.height <= bottom + 1) return i
+    }
+    return partial
+  }
+  function revealBubbleCursor() {
     var it = bubbleCursorItem   // set synchronously by the row's hasCursor binding
     if (!it) return
     var margin = Style.space(6)
@@ -2261,6 +2290,7 @@ FocusScope {
             }
 
             Repeater {
+              id: bubbleRepeater
               model: root.inThread ? root.bubbles : []
               delegate: ColumnLayout {
                 id: bubbleRow
@@ -2869,10 +2899,28 @@ FocusScope {
                 // Reading history without the mouse: the compose field is the
                 // thread's focus holder, so the keys live here. An empty field
                 // has no caret for Up/Down to move; they select bubbles instead.
+                // The arrows are the bubbles' when there is no caret line to
+                // move to: Up from the first line of a draft (or an empty
+                // field), Down from the last line while a bubble is selected.
+                // Omarchy's own lists get this for free from single-line
+                // fields; the compose box is multi-line, hence the edge rule.
                 var empty = text.length === 0
-                if (empty && (event.key === Qt.Key_Up || event.key === Qt.Key_Down)) {
+                var caret = cursorRectangle
+                var onFirstLine = empty || caret.y < topPadding + caret.height * 0.5
+                var onLastLine = empty || caret.y + caret.height > topPadding + contentHeight - caret.height * 0.5
+                if ((event.key === Qt.Key_Up && onFirstLine)
+                    || (event.key === Qt.Key_Down && onLastLine && root.bubbleCursor >= 0)) {
                   event.accepted = true
                   root.moveBubbleCursor(event.key === Qt.Key_Up ? -1 : 1)
+                  return
+                }
+                // PgUp/PgDn work with a draft in the field (they move no caret):
+                // a screen at a time, or one bubble at a time with Shift held.
+                if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) {
+                  event.accepted = true
+                  var dir = event.key === Qt.Key_PageUp ? -1 : 1
+                  if (event.modifiers & Qt.ShiftModifier) root.moveBubbleCursor(dir)
+                  else root.pageBubbles(dir)
                   return
                 }
                 // Actions on the selected bubble. Enter is free here: with no
@@ -2883,10 +2931,20 @@ FocusScope {
                   if (event.matches(StandardKey.Copy)) { event.accepted = true; root.copyBubble(b); return }
                   if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) { event.accepted = true; root.quoteBubble(b); return }
                 }
-                var dy = root.conversationStep(event.key, empty)
-                if (dy !== 0) {
+                // Home/End select the oldest / newest bubble from an empty
+                // field, or once the caret already sits at the start / end
+                // of its line — the first press is the caret's, the second
+                // the bubbles' (the arrows' edge rule). Neighbour glyphs on
+                // another line mean a line edge, so wrapped lines count too.
+                var atLineStart = empty || cursorPosition === 0
+                  || positionToRectangle(cursorPosition - 1).y < caret.y - 1
+                var atLineEnd = empty || cursorPosition === length
+                  || positionToRectangle(cursorPosition + 1).y > caret.y + 1
+                if (((event.key === Qt.Key_Home && atLineStart) || (event.key === Qt.Key_End && atLineEnd))
+                    && root.bubbles.length > 0) {
                   event.accepted = true
-                  root.scrollConversation(dy)
+                  root.bubbleCursor = event.key === Qt.Key_Home ? 0 : root.bubbles.length - 1
+                  root.revealBubbleCursor()
                   return
                 }
                 if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)

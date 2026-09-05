@@ -2,14 +2,18 @@
 
 ## Unreleased
 
-- **Read history from the keyboard.** In a conversation, `↑`/`↓` with an empty
-  compose field select a bubble — newest first, kept in view, drawn with the
+- **Read history from the keyboard.** In a conversation, `↑`/`↓` from an empty
+  compose field — or from the first / last line of a draft — select a bubble:
+  newest first, kept in view, drawn with the
   list rows' fill — and `↓` past the newest or `Esc` drops the selection and
-  returns to the bottom;
-  `PgUp`/`PgDn` page, `Home`/`End` jump to the ends. The mouse wheel and the
+  returns to the bottom; `PgUp`/`PgDn` select the topmost or bottommost visible
+  bubble and then move a screen per press, with text in the compose field too
+  (`Shift+PgUp`/`Shift+PgDn` for one bubble at a time);
+  `Home`/`End` select the oldest and newest bubble (from a draft, once the
+  caret sits at its line's edge). The mouse wheel and the
   keys share one helper, so the bottom-stick that gates the deferred push
   reload behaves the same either way. With text typed the arrows and Home/End
-  keep moving the caret. On the selected bubble, `Enter` opens its attachment
+  keep moving the caret inside the draft. On the selected bubble, `Enter` opens its attachment
   or link, `Ctrl+C` copies its text — or the picture itself, with its own
   MIME type, when the bubble is only a picture — and `Ctrl+R` quotes it into
   the compose field as `> …`; iMessage's inline reply is not reachable
