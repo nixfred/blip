@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Read history from the keyboard.** In a conversation, `↑`/`↓` from an empty
+  compose field — or from the first / last line of a draft — select a bubble:
+  newest first, kept in view, drawn with the
+  list rows' fill — and `↓` past the newest or `Esc` drops the selection and
+  returns to the bottom; `PgUp`/`PgDn` select the topmost or bottommost visible
+  bubble and then move a screen per press, with text in the compose field too
+  (`Shift+PgUp`/`Shift+PgDn` for one bubble at a time);
+  `Home`/`End` select the oldest and newest bubble (from a draft, once the
+  caret sits at its line's edge). The mouse wheel and the
+  keys share one helper, so the bottom-stick that gates the deferred push
+  reload behaves the same either way. With text typed the arrows and Home/End
+  keep moving the caret inside the draft. On the selected bubble, `Enter` opens its attachment
+  or link, `Ctrl+C` copies its text — or the picture itself, with its own
+  MIME type, when the bubble is only a picture — and `Ctrl+R` quotes it into
+  the compose field as `> …`; iMessage's inline reply is not reachable
+  through the bridge, so the quote is a plain one. The status line under the
+  compose box keeps its height when empty, so "copied" and "sending…" no
+  longer shove the conversation, and only failures are red.
 - **Bug hunt (Codex, gpt-6-astra), fourteen fixes.** A 2FA code was written
   to Omarchy's on-disk notification history — the daemon persists every
   displayed toast regardless of the `transient` hint — so the toast now says a

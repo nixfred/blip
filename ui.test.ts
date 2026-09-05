@@ -13,6 +13,12 @@ function handleTextKeySource() {
   return panel.slice(start, end);
 }
 
+/** Body of a root-level BlipView function, up to its own closing brace. */
+function qmlFunction(name: string) {
+  const start = panel.indexOf(`function ${name}(`);
+  return panel.slice(start, panel.indexOf("\n  }\n", start));
+}
+
 describe("QML safety invariants", () => {
   test("group sends use the cached AppleScript GUID", () => {
     expect(panel).toContain('["--chat-id", String(root.active.guid)]');
@@ -182,6 +188,70 @@ describe("QML safety invariants", () => {
     expect(panel).toContain("newSearchTimer.restart()");
     expect(panel).not.toContain("forceLayout");
     expect(panel.indexOf("onAccepted: root.acceptNewField()")).toBeGreaterThan(-1);
+  });
+
+  test("keys and wheel scroll the conversation through one stick-aware helper", () => {
+    // Two writers of flick.contentY would drift on the bottom-stick, which
+    // gates the deferred push reload; the wheel handler must go through it.
+    expect(qmlFunction("scrollConversation")).toContain("flick.stick = flick.contentY >= max - 4");
+    expect(panel).toContain("root.scrollConversation(-d)");
+    expect(panel.split("flick.stick = flick.contentY >= max - 4").length - 1).toBe(1);
+    // Home/End select the ends only from an empty field (caret otherwise)
+    expect(panel).toContain("(event.key === Qt.Key_Home && atLineStart) || (event.key === Qt.Key_End && atLineEnd)");
+    expect(panel).toContain("var atLineStart = empty || cursorPosition === 0");
+    expect(panel).toContain("root.bubbleCursor = event.key === Qt.Key_Home ? 0 : root.bubbles.length - 1");
+    expect(panel).not.toContain("conversationStep");
+    // PgUp/PgDn select the edge bubble regardless of text, and page when already there
+    expect(panel).toContain("if (event.modifiers & Qt.ShiftModifier) root.moveBubbleCursor(dir)");
+    expect(panel).toContain("else root.pageBubbles(dir)");
+    const page = qmlFunction("pageBubbles");
+    expect(page.indexOf("if (edge === bubbleCursor && bubbleCursorItem)")).toBeLessThan(page.indexOf("scrollConversation(dy < 0 ?"));
+    // only a WHOLLY visible row counts as the edge, else a sliver of the row above turns paging into single steps
+    expect(qmlFunction("edgeVisibleBubble")).toContain("it.y >= top - 1 : it.y + it.height <= bottom + 1");
+    expect(page).toContain("leaveBubbles()");
+  });
+
+  test("arrows in an empty compose field select bubbles, and the selection clears cleanly", () => {
+    // The selection is a target for actions; it must never outlive the rows
+    // it indexes (a reload renumbers them) and Esc must drop it before leaving.
+    expect(panel).toContain("onBubblesChanged: clearBubbleCursor()");
+    // the band takes the theme's hover-cursor colour/alpha, like Omarchy's own rows
+    expect(panel).toContain("color: Style.hoverFillFor(root.foreground, root.accent)");
+    expect(panel).toContain("onHasCursorChanged: if (hasCursor) root.bubbleCursorItem = bubbleRow");
+    expect(panel).toContain("if (root.bubbleCursor >= 0) root.leaveBubbles(); else root.back()");
+    const move = qmlFunction("moveBubbleCursor");
+    expect(move).toContain("bubbleCursor = n - 1");            // Up from nothing = newest
+    expect(move).toContain("leaveBubbles()");                  // Down past newest = same exit as Esc
+    expect(qmlFunction("leaveBubbles")).toContain("scrollConversation(flick.contentHeight)");
+    expect(panel).toContain("root.moveBubbleCursor(event.key === Qt.Key_Up ? -1 : 1)");
+    // the edge rule: Up leaves a draft only from its first line, Down only from
+    // its last and only while a bubble is selected (otherwise the caret keeps it)
+    expect(panel).toContain("var onFirstLine = empty || caret.y < topPadding + caret.height * 0.5");
+    expect(panel).toContain("(event.key === Qt.Key_Down && onLastLine && root.bubbleCursor >= 0)");
+  });
+
+  test("bubble actions reuse the click handlers and never steal a real send", () => {
+    // Enter/Ctrl+C/Ctrl+R act on the selection only with an empty field and
+    // no queued file — a queued file's Enter is a send, and must stay one.
+    expect(panel).toContain('var b = empty && root.draftPath === "" ? root.selectedBubble() : null');
+    const open = qmlFunction("openBubble");
+    expect(open).toContain("openAttachment(b.attachments[0])");
+    expect(open).toContain("openLink(u)");
+    expect(panel).toContain("root.copyBubble(b)");
+    const copy = qmlFunction("copyBubble");
+    expect(copy.indexOf("copyText(t)")).toBeLessThan(copy.indexOf("copyAttachment("));  // text wins
+    // the image reaches wl-copy as an argument, never interpolated into the shell script
+    expect(panel).toContain(`'wl-copy --type "$1" < "$2"', "sh", mime, String(d.path || "")`);
+    // HEIC arrives as JPEG (fetch.ts wantsJpeg): the clipboard type must say so
+    expect(panel).toContain('root.fetchJobMime === "image/heic" || root.fetchJobMime === "image/heif" ? "image/jpeg"');
+    // the inline preview stays put while the original is fetched for the clipboard
+    expect(panel).toContain('var keepInline = root.fetchJobAction === "copy" && !!root.attFiles[id]');
+    expect(panel).not.toContain("fetchJobOpen");
+    expect(qmlFunction("quoteBubble")).toContain("leaveBubbles()");
+    // the status line never collapses (no layout shift) and only failures are red
+    expect(panel).toContain('text: root.note === "" ? " " : root.note');
+    expect(panel).not.toContain('visible: root.note !== ""');
+    expect(panel).toContain("color: calm ? root.dim : root.urgent");
   });
 
   test("an old toast can still reopen its conversation (omarchy-exec-argv)", () => {

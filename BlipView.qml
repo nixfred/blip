@@ -248,6 +248,12 @@ FocusScope {
   property bool loading: false
   property string note: ""           // transient status line (send result, errors)
   property int cursor: -1            // keyboard row selection in list view
+  // The bubble the arrows have selected in a conversation (-1 = none) and the
+  // delegate drawing it — registered by the row itself, like cursorRow. The
+  // selection is a TARGET for actions (copy, open, reply), not a scroll state.
+  property int bubbleCursor: -1
+  property Item bubbleCursorItem: null
+  onBubblesChanged: clearBubbleCursor()   // a reload renumbers the rows
   property bool pinToBottom: false   // scroll to the newest bubble once layout settles
   property bool bubbleFocused: false // a bubble's TextEdit has focus (text selection in progress)
   property string threadRunningChat: "" // chat owned by the current threadProc
@@ -403,6 +409,113 @@ FocusScope {
    *  Keystroke injection (wtype) proved non-deterministic — a virtual
    *  keyboard's events can land on whatever surface Hyprland favors. */
   /** Clear every badge/dot locally. Read state never goes back to iMessage. */
+  /** Move the conversation by dy pixels — the wheel and the keys share this,
+   *  so the bottom-stick (which gates the deferred push reload) behaves the
+   *  same whichever way the reader moves. */
+  function scrollConversation(dy) {
+    var max = Math.max(0, flick.contentHeight - flick.height)
+    flick.contentY = Math.max(0, Math.min(max, flick.contentY + dy))
+    flick.stick = flick.contentY >= max - 4
+  }
+  /** Up/Down in an empty compose field walk the bubbles, newest first, and
+   *  keep the selected one in view. Down past the newest drops the selection
+   *  and re-sticks to the bottom, so the conversation follows new messages
+   *  again — the reader is back where they started. */
+  function moveBubbleCursor(dy) {
+    var n = bubbles.length
+    if (n === 0) return
+    if (bubbleCursor < 0) {
+      if (dy > 0) return
+      bubbleCursor = n - 1
+    } else if (dy > 0 && bubbleCursor >= n - 1) {
+      leaveBubbles()
+      return
+    } else {
+      bubbleCursor = Math.max(0, bubbleCursor + dy)
+    }
+    revealBubbleCursor()
+  }
+  /** PgUp/PgDn walk the bubbles a screen at a time, and unlike the arrows
+   *  they work with text in the compose field (they move no caret). PgUp
+   *  selects the topmost visible bubble; already there, it pages up first.
+   *  PgDn mirrors it with the bottommost, and past the newest leaves. */
+  function pageBubbles(dy) {
+    if (bubbles.length === 0) return
+    var edge = edgeVisibleBubble(dy)
+    if (edge === bubbleCursor && bubbleCursorItem) {
+      if (dy > 0 && edge === bubbles.length - 1) { leaveBubbles(); return }
+      // Page so the selected row lands at the OPPOSITE edge — a screen with
+      // one row of overlap, the way a pager turns a page.
+      var it = bubbleCursorItem, margin = Style.space(6)
+      scrollConversation(dy < 0 ? it.y + it.height + margin - flick.height - flick.contentY
+                                : it.y - margin - flick.contentY)
+      edge = edgeVisibleBubble(dy)
+    }
+    if (edge < 0) return
+    bubbleCursor = edge
+    revealBubbleCursor()
+  }
+  /** Index of the topmost (dy < 0) or bottommost (dy > 0) bubble that is
+   *  WHOLLY inside the viewport — a sliver of the neighbour above the
+   *  selection must not count, or the next PgUp steps one row instead of
+   *  paging. Falls back to a partly visible row (a picture taller than the
+   *  view); -1 when nothing is laid out yet. */
+  function edgeVisibleBubble(dy) {
+    var top = flick.contentY, bottom = top + flick.height
+    var n = bubbleRepeater.count, partial = -1
+    for (var k = 0; k < n; k++) {
+      var i = dy < 0 ? k : n - 1 - k
+      var it = bubbleRepeater.itemAt(i)
+      if (!it || it.y >= bottom || it.y + it.height <= top) continue
+      if (partial < 0) partial = i
+      if (dy < 0 ? it.y >= top - 1 : it.y + it.height <= bottom + 1) return i
+    }
+    return partial
+  }
+  function revealBubbleCursor() {
+    var it = bubbleCursorItem   // set synchronously by the row's hasCursor binding
+    if (!it) return
+    var margin = Style.space(6)
+    if (it.y < flick.contentY + margin)
+      scrollConversation(it.y - margin - flick.contentY)
+    else if (it.y + it.height > flick.contentY + flick.height - margin)
+      scrollConversation(it.y + it.height + margin - flick.height - flick.contentY)
+  }
+  function clearBubbleCursor() { bubbleCursor = -1; bubbleCursorItem = null }
+  /** Out of the selection and back where reading started: newest at the
+   *  bottom, stick re-armed. Down past the newest and Esc both land here. */
+  function leaveBubbles() {
+    clearBubbleCursor()
+    scrollConversation(flick.contentHeight)
+  }
+  function selectedBubble() {
+    return bubbleCursor >= 0 && bubbleCursor < bubbles.length ? bubbles[bubbleCursor] : null
+  }
+  /** Enter on the selected bubble: its first attachment, else its link card,
+   *  else the first URL in its text — the same handlers a click reaches. */
+  function openBubble(b) {
+    if (b.attachments && b.attachments.length > 0) { openAttachment(b.attachments[0]); return }
+    var u = b.link && b.link.url ? String(b.link.url) : firstUrl(b.text)
+    if (u !== "") openLink(u)
+  }
+  /** Ctrl+C on the selected bubble: its text, or — for a bubble that is only
+   *  a picture — the first image attachment, as an image. */
+  function copyBubble(b) {
+    var t = String(b.text || "")
+    if (t !== "") { copyText(t); return }
+    var atts = b.attachments || []
+    for (var i = 0; i < atts.length; i++) {
+      if (isImageMime(atts[i].mime)) { copyAttachment(atts[i]); return }
+    }
+  }
+  /** Ctrl+R: quote the selected bubble into the compose field. iMessage's
+   *  inline reply is not reachable through the bridge (no message GUID leaves
+   *  the Mac and AppleScript has no reply-to), so this is a plain "> quote". */
+  function quoteBubble(b) {
+    composeField.text = "> " + String(b.text || "").replace(/\s+/g, " ").slice(0, 200) + "\n"
+    composeField.cursorPosition = composeField.length
+    leaveBubbles()
+  }
   function markAllRead() {
     if (!root.hostWidget || root.unread === 0) return
     root.hostWidget.markAllRead()
@@ -549,29 +662,31 @@ FocusScope {
            m === "application/pdf" || m === "text/plain" || m === "text/vcard" || m === "text/calendar"
   }
 
-  function enqueueFetch(att, openWhenDone, auto) {
+  /** action: "" = just cache it, "open" = xdg-open when it lands, "copy" =
+   *  put it on the clipboard when it lands. */
+  function enqueueFetch(att, action, auto) {
     var id = String(att.id || "")
     if (id === "" || fetchingId === id) return
-    if (attFiles[id] !== undefined && !openWhenDone) return
+    if (attFiles[id] !== undefined && !action) return
     for (var i = 0; i < fetchQueue.length; i++) {
       if (fetchQueue[i].id === id) {
-        if (openWhenDone) fetchQueue[i].open = true
+        if (action) fetchQueue[i].action = action
         return
       }
     }
     fetchQueue.push({ id: id, name: String(att.name || "file"),
-                      mime: String(att.mime || ""), open: openWhenDone === true,
+                      mime: String(att.mime || ""), action: action || "",
                       auto: auto === true })
     pumpFetch()
   }
 
-  property bool fetchJobOpen: false
+  property string fetchJobAction: ""
   property string fetchJobMime: ""
   function pumpFetch() {
     if (fetchProc.running || fetchQueue.length === 0) return
     var job = fetchQueue.shift()
     fetchingId = job.id
-    fetchJobOpen = job.open === true
+    fetchJobAction = job.action
     fetchJobMime = job.mime
     // Auto-pulls carry a hard transfer cap: claimed metadata is not the limit.
     fetchProc.command = ["bun", root.fetchScript, job.id, job.name, job.mime, job.auto ? "5242880" : ""]
@@ -596,11 +711,11 @@ FocusScope {
         // iPhone photos were rejected at both ends and simply never appeared.
         var b = atts[j].bytes
         if (isImageMime(atts[j].mime) && typeof b === "number" && b > 0 && b <= root.autoFetchMaxSource)
-          enqueueFetch(atts[j], false, true)
+          enqueueFetch(atts[j], "", true)
       }
       // link-card preview PNGs are small; the auto-fetch transfer cap bounds them
       var l = bubbles[i].link
-      if (l && l.image_id) enqueueFetch({ id: String(l.image_id), name: "preview.png", mime: "image/png", bytes: 0 }, false, true)
+      if (l && l.image_id) enqueueFetch({ id: String(l.image_id), name: "preview.png", mime: "image/png", bytes: 0 }, "", true)
     }
   }
 
@@ -613,7 +728,13 @@ FocusScope {
     if (attFiles[id] === "") {   // failed marker — clear it so a retry runs
       var m = Object.assign({}, attFiles); delete m[id]; attFiles = m
     }
-    enqueueFetch(att, true)
+    enqueueFetch(att, "open")
+  }
+  /** Ctrl+C on an image bubble: fetch-then-clipboard, the same round trip as
+   *  a click, ending in wl-copy with the image's own MIME type. */
+  function copyAttachment(att) {
+    if (String(att.id || "") === "") return
+    enqueueFetch(att, "copy")
   }
 
   // ------------------------------------------------------ compose attachment
@@ -1123,8 +1244,12 @@ FocusScope {
         var id = root.fetchingId
         try {
           var d = JSON.parse(text.trim())
+          // A copy fetches the ORIGINAL for the clipboard; the bubble keeps
+          // the preview it already draws. Swapping its source and metrics
+          // re-decodes and re-lays out the picture under the reader's eyes.
+          var keepInline = root.fetchJobAction === "copy" && !!root.attFiles[id]
           var m = Object.assign({}, root.attFiles)
-          m[id] = d.ok === true ? String(d.url || "") : ""
+          if (!keepInline) m[id] = d.ok === true ? String(d.url || "") : ""
           root.attFiles = m
           var ratio = Number(d.pixelRatio)
           var pixelWidth = Number(d.pixelWidth)
@@ -1132,10 +1257,20 @@ FocusScope {
           if (!isFinite(ratio) || ratio < 1 || ratio > 4) ratio = 1
           if (!isFinite(pixelWidth) || pixelWidth < 1 || pixelWidth > 100000) pixelWidth = 0
           if (!isFinite(pixelHeight) || pixelHeight < 1 || pixelHeight > 100000) pixelHeight = 0
-          var metrics = Object.assign({}, root.attMetrics)
-          metrics[id] = { pixelRatio: ratio, pixelWidth: pixelWidth, pixelHeight: pixelHeight }
-          root.attMetrics = metrics
-          if (d.ok === true && root.fetchJobOpen) {
+          if (!keepInline) {
+            var metrics = Object.assign({}, root.attMetrics)
+            metrics[id] = { pixelRatio: ratio, pixelWidth: pixelWidth, pixelHeight: pixelHeight }
+            root.attMetrics = metrics
+          }
+          if (d.ok === true && root.fetchJobAction === "copy") {
+            // The Mac converts HEIC/HEIF to JPEG on the way (fetch.ts wantsJpeg),
+            // so the clipboard type must say what the bytes are. Path and type
+            // travel as arguments, never interpolated into the script.
+            var mime = root.fetchJobMime === "image/heic" || root.fetchJobMime === "image/heif" ? "image/jpeg" : root.fetchJobMime
+            Quickshell.execDetached(["sh", "-c", 'wl-copy --type "$1" < "$2"', "sh", mime, String(d.path || "")])
+            root.note = "copied"
+            noteTimer.restart()
+          } else if (d.ok === true && root.fetchJobAction === "open") {
             if (root.openableMime(root.fetchJobMime)) {
               Quickshell.execDetached(["xdg-open", String(d.url || "")])
             } else {
@@ -2117,15 +2252,27 @@ FocusScope {
             acceptedButtons: Qt.NoButton
             onWheel: function(wheel) {
               var d = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * 3.0 : wheel.angleDelta.y * 4.5
-              var max = Math.max(0, flick.contentHeight - flick.height)
-              flick.contentY = Math.max(0, Math.min(max, flick.contentY - d))
-              // the wheel bypasses Flickable movement signals — maintain the
-              // bottom-stick here too
-              flick.stick = flick.contentY >= max - 4
+              // the wheel bypasses Flickable movement signals — the helper
+              // maintains the bottom-stick too
+              root.scrollConversation(-d)
               wheel.accepted = true
             }
           }
 
+          // The bubble cursor: one translucent band behind the selected row,
+          // the list rows' fill. A sibling of `content`, not a child of the
+          // layout, so no delegate carries a background of its own; the row's
+          // y/height are in `content` space, which sits at the origin here.
+          Rectangle {
+            visible: root.bubbleCursorItem !== null
+            width: content.width
+            y: root.bubbleCursorItem ? root.bubbleCursorItem.y - Style.space(2) : 0
+            height: root.bubbleCursorItem ? root.bubbleCursorItem.height + Style.space(4) : 0
+            radius: Style.cornerRadius
+            // Omarchy's cursor fill: the theme's hover-cursor colour and alpha
+            // (foreground at 0.08 by default), not a hard-coded copy of them.
+            color: Style.hoverFillFor(root.foreground, root.accent)
+          }
           ColumnLayout {
             id: content
             width: parent.width
@@ -2143,11 +2290,15 @@ FocusScope {
             }
 
             Repeater {
+              id: bubbleRepeater
               model: root.inThread ? root.bubbles : []
               delegate: ColumnLayout {
                 id: bubbleRow
                 required property var modelData
+                required property int index
                 readonly property bool mine: modelData.from_me === true
+                readonly property bool hasCursor: root.bubbleCursor === index
+                onHasCursorChanged: if (hasCursor) root.bubbleCursorItem = bubbleRow
 
                 Layout.fillWidth: true
                 spacing: Style.space(2)
@@ -2732,7 +2883,9 @@ FocusScope {
                 borderSpec: composeField._composeBorder
                 radius: Style.cornerRadius
               }
-              Keys.onEscapePressed: root.back()
+              // Esc drops a bubble selection first (back to the bottom), then
+              // leaves the thread — the two-step Esc a text selection gets.
+              Keys.onEscapePressed: if (root.bubbleCursor >= 0) root.leaveBubbles(); else root.back()
               // Ctrl+V goes through paste.ts: an image on the clipboard becomes
               // a draft chip; text falls through to a manual insert. One process
               // snapshots types AND data — probing then re-reading races.
@@ -2741,6 +2894,57 @@ FocusScope {
                 if (event.matches(StandardKey.Paste)) {
                   event.accepted = true
                   root.startPaste()
+                  return
+                }
+                // Reading history without the mouse: the compose field is the
+                // thread's focus holder, so the keys live here. An empty field
+                // has no caret for Up/Down to move; they select bubbles instead.
+                // The arrows are the bubbles' when there is no caret line to
+                // move to: Up from the first line of a draft (or an empty
+                // field), Down from the last line while a bubble is selected.
+                // Omarchy's own lists get this for free from single-line
+                // fields; the compose box is multi-line, hence the edge rule.
+                var empty = text.length === 0
+                var caret = cursorRectangle
+                var onFirstLine = empty || caret.y < topPadding + caret.height * 0.5
+                var onLastLine = empty || caret.y + caret.height > topPadding + contentHeight - caret.height * 0.5
+                if ((event.key === Qt.Key_Up && onFirstLine)
+                    || (event.key === Qt.Key_Down && onLastLine && root.bubbleCursor >= 0)) {
+                  event.accepted = true
+                  root.moveBubbleCursor(event.key === Qt.Key_Up ? -1 : 1)
+                  return
+                }
+                // PgUp/PgDn work with a draft in the field (they move no caret):
+                // a screen at a time, or one bubble at a time with Shift held.
+                if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) {
+                  event.accepted = true
+                  var dir = event.key === Qt.Key_PageUp ? -1 : 1
+                  if (event.modifiers & Qt.ShiftModifier) root.moveBubbleCursor(dir)
+                  else root.pageBubbles(dir)
+                  return
+                }
+                // Actions on the selected bubble. Enter is free here: with no
+                // text and no queued file, send() would do nothing anyway.
+                var b = empty && root.draftPath === "" ? root.selectedBubble() : null
+                if (b) {
+                  if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { event.accepted = true; root.openBubble(b); return }
+                  if (event.matches(StandardKey.Copy)) { event.accepted = true; root.copyBubble(b); return }
+                  if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) { event.accepted = true; root.quoteBubble(b); return }
+                }
+                // Home/End select the oldest / newest bubble from an empty
+                // field, or once the caret already sits at the start / end
+                // of its line — the first press is the caret's, the second
+                // the bubbles' (the arrows' edge rule). Neighbour glyphs on
+                // another line mean a line edge, so wrapped lines count too.
+                var atLineStart = empty || cursorPosition === 0
+                  || positionToRectangle(cursorPosition - 1).y < caret.y - 1
+                var atLineEnd = empty || cursorPosition === length
+                  || positionToRectangle(cursorPosition + 1).y > caret.y + 1
+                if (((event.key === Qt.Key_Home && atLineStart) || (event.key === Qt.Key_End && atLineEnd))
+                    && root.bubbles.length > 0) {
+                  event.accepted = true
+                  root.bubbleCursor = event.key === Qt.Key_Home ? 0 : root.bubbles.length - 1
+                  root.revealBubbleCursor()
                   return
                 }
                 if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
@@ -2770,12 +2974,16 @@ FocusScope {
           }
         }
 
+        // Always one line tall, empty or not: a note that appears and vanishes
+        // must not shove the compose box and the bubbles around. Only failures
+        // are red; progress and confirmations are dim.
         Text {
           Layout.fillWidth: true
-          visible: root.note !== ""
-          text: root.note
+          text: root.note === "" ? " " : root.note
           textFormat: Text.PlainText
-          color: root.note === "sending…" ? root.dim : root.urgent
+          readonly property bool calm: root.note === "copied" || root.note === "sending…"
+            || root.note === "sent to LocalSend" || root.note.indexOf("attached") === 0
+          color: calm ? root.dim : root.urgent
           font.family: root.fontFamily
           font.pixelSize: root.fontCaption
           wrapMode: Text.WordWrap

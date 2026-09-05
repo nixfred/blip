@@ -486,6 +486,11 @@ rather than hang:
 | thread | `Enter` | send (text, or the queued file with the text as caption) |
 | thread | `Ctrl+V` | paste — an image on the clipboard becomes a queued file, text pastes normally |
 | thread | `/attach <path>` + `Enter` | queue any file on this machine; drag-and-drop works too |
+| thread | `↑` / `↓` | select a bubble, newest first, and keep it in view — from an empty compose field, or from the first / last line of a draft; `↓` past the newest or `Esc` drops the selection and returns to the bottom |
+| thread | `Enter` · `Ctrl+C` · `Ctrl+R` (bubble selected) | open its attachment or link · copy its text, or the picture itself when the bubble is only a picture · quote it into the compose field (`> …`) |
+| thread | `PgUp` / `PgDn` (Fn+`↑`/`↓` on a Mac keyboard) | select the topmost / bottommost visible bubble, then a screen further each press — also with text in the compose field, since they move no caret |
+| thread | `Shift+PgUp` / `Shift+PgDn` | one bubble at a time from anywhere in a draft, without moving the caret first |
+| thread | `Home` / `End` | select the oldest / newest bubble — from an empty compose field, or once the caret already sits at the start / end of its line |
 | thread | `Esc` | back to list (or clear a text selection first) |
 | anywhere | `Esc` | close |
 
