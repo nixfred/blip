@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-contacts: read-only Apple Contacts query tool
+contacts: bounded Apple Contacts query tool
 
 Reads ~/Library/Application Support/AddressBook/Sources/*/AddressBook-v22.abcddb
 (per-account SQLite stores). Each iCloud / CardDAV account gets its own source
@@ -11,6 +11,9 @@ Subcommands:
   find <query> [N], substring search across name/org/phone/email
   lookup <phone-or-email>, resolve to a contact (best-effort match);
                                 exit 0 + name on stdout, exit 1 if no match
+  resolve, bounded JSON identity resolver over stdin. Supports candidate
+                                lookup, opening one matching card, and an
+                                explicitly gated field-only repair with undo
   dump [--json], full dump of every contact
   sources, list configured Contacts sources
 
@@ -28,19 +31,53 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import plistlib
 import re
+import secrets
+import selectors
 import sqlite3
+import stat
+import subprocess
 import sys
+import time
+import urllib.parse
 from glob import glob
 from typing import Iterable
 
 ADDRESSBOOK_DIR = os.path.expanduser(
     "~/Library/Application Support/AddressBook"
 )
+ACCOUNTS_DB = os.path.expanduser("~/Library/Accounts/Accounts4.sqlite")
 APPLE_EPOCH = 978307200  # 2001-01-01 UTC
+MAX_RESOLVE_INPUT_BYTES = 48 * 1024
+MAX_RESOLVE_OUTPUT_BYTES = 48 * 1024
+MAX_RESOLVE_SOURCES = 64
+MAX_MATCH_RECORDS = 64
+MAX_CANDIDATES = 8
+MAX_HANDLE_CHARS = 320
+MAX_NAME_CHARS = 160
+MAX_SOURCE_NAME_CHARS = 120
+MAX_REPAIR_FIELDS = 8
+MAX_AUDIT_HANDLES = 200
+MAX_REPAIR_INPUT_BYTES = 48 * 1024
+MAX_REPAIR_PROCESS_BYTES = 48 * 1024
+MAX_VCARD_BYTES = 2 * 1024 * 1024
+MAX_VCARD_RESPONSE_BYTES = 3 * 1024 * 1024
+MAX_UNDO_BYTES = 48 * 1024
+REPAIR_TIMEOUT_SECONDS = 25
+WRITE_GATE = os.path.expanduser("~/.blip/contact-writes-enabled")
+UNDO_DIR = os.path.expanduser("~/.blip/contact-undo")
+UNDO_FILE = "latest.json"
+UNDO_TTL_SECONDS = 7 * 24 * 60 * 60
+_UNSAFE_TEXT = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+_CONTACT_TOKEN = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_REVISION = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_PLAN_HASH = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_UNDO_TOKEN = re.compile(r"undo:[0-9a-f]{32}\Z")
+_PERSON_UID = re.compile(r"[A-Za-z0-9._:-]{1,200}\Z")
 
 _ACCOUNTS_DB = os.path.expanduser("~/Library/Accounts/Accounts4.sqlite")
 
@@ -92,13 +129,27 @@ def _ab_sources() -> list[str]:
 
 def source_dbs() -> list[str]:
     """All AddressBook-v22.abcddb files (one per source/account), minus
-    Family Sharing child-delegate mirrors (see _child_delegate_sources)."""
+    Family Sharing child-delegate mirrors (see _child_delegate_sources).
+
+    Ordered by contact count, largest account first, so account numbering and
+    the compare/merge card order stay stable across contacts — the biggest
+    store is always card 1 instead of whichever store's folder name happens
+    to sort first. Ties and unreadable stores fall back to path order.
+    """
     paths = _ab_sources()
     # Also include the root db if non-trivial
     root = os.path.join(ADDRESSBOOK_DIR, "AddressBook-v22.abcddb")
     if os.path.exists(root):
         paths.append(root)
-    return paths
+
+    def record_count(path: str) -> int:
+        try:
+            with open_db(path) as con:
+                return int(con.execute("SELECT COUNT(*) FROM ZABCDRECORD").fetchone()[0])
+        except (sqlite3.Error, OSError, TypeError, ValueError):
+            return -1
+
+    return sorted(paths, key=lambda item: (-record_count(item), item))
 
 
 def open_db(path: str) -> sqlite3.Connection:
@@ -106,6 +157,58 @@ def open_db(path: str) -> sqlite3.Connection:
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     return con
+
+
+def source_identifier(path: str) -> str:
+    """Private stable id for one Contacts store; never emitted to Blip."""
+    parent = os.path.dirname(path)
+    if os.path.basename(os.path.dirname(parent)) == "Sources":
+        return os.path.basename(parent)
+    return "__on_my_mac__"
+
+
+def contact_source_names(paths: list[str]) -> dict[str, str]:
+    """Map private Contacts store ids to bounded user-facing account names."""
+    labels = {"__on_my_mac__": "On My Mac"}
+    wanted = {source_identifier(path) for path in paths}
+    if wanted == {"__on_my_mac__"}:
+        return labels
+    try:
+        info = os.lstat(ACCOUNTS_DB)
+        if (not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)
+                or info.st_uid != os.getuid()):
+            return labels
+        with open_db(ACCOUNTS_DB) as con:
+            rows = con.execute(
+                """
+                SELECT a.ZIDENTIFIER AS identifier,
+                       a.ZACCOUNTDESCRIPTION AS description,
+                       a.ZUSERNAME AS username,
+                       p.ZACCOUNTDESCRIPTION AS parent_description,
+                       p.ZUSERNAME AS parent_username,
+                       t.ZACCOUNTTYPEDESCRIPTION AS account_type
+                FROM ZACCOUNT a
+                LEFT JOIN ZACCOUNTTYPE t ON t.Z_PK = a.ZACCOUNTTYPE
+                LEFT JOIN ZACCOUNT p ON p.Z_PK = a.ZPARENTACCOUNT
+                WHERE a.ZACTIVE = 1
+                """
+            ).fetchall()
+    except (OSError, sqlite3.DatabaseError):
+        return labels
+    for row in rows:
+        identifier = clean_text(row["identifier"], 200)
+        if identifier not in wanted:
+            continue
+        label = (
+            clean_text(row["parent_description"], MAX_SOURCE_NAME_CHARS)
+            or clean_text(row["description"], MAX_SOURCE_NAME_CHARS)
+            or clean_text(row["parent_username"], MAX_SOURCE_NAME_CHARS)
+            or clean_text(row["username"], MAX_SOURCE_NAME_CHARS)
+            or clean_text(row["account_type"], MAX_SOURCE_NAME_CHARS)
+        )
+        if label:
+            labels[identifier] = label
+    return labels
 
 
 def normalize_phone(s: str) -> str:
@@ -117,6 +220,1663 @@ def normalize_phone(s: str) -> str:
 
 def normalize_email(s: str) -> str:
     return (s or "").strip().lower()
+
+
+def clean_text(value: object, maximum: int) -> str:
+    """One-line, bounded text safe to retain in the long-lived QML host."""
+    text = _UNSAFE_TEXT.sub(" ", str(value or ""))
+    return re.sub(r"\s+", " ", text).strip()[:maximum]
+
+
+def normalize_resolve_handle(value: object) -> tuple[str, str, bool]:
+    handle = clean_text(value, MAX_HANDLE_CHARS + 1)
+    if not handle or len(handle) > MAX_HANDLE_CHARS:
+        raise ValueError("handle must be between 1 and 320 characters")
+    if "@" in handle:
+        key = normalize_email(handle)
+        if len(key) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+", key):
+            raise ValueError("handle is not a valid email address")
+        return handle, key, True
+    if not re.fullmatch(r"\+?[0-9][0-9 ()./-]{2,39}", handle):
+        raise ValueError("handle is not a valid phone number")
+    key = normalize_phone(handle)
+    if len(key) < 5:
+        raise ValueError("phone handle is too short")
+    return handle, key, False
+
+
+def resolve_token(key: str, name: str) -> str:
+    digest = hashlib.sha256(
+        b"blip-contact-choice-v1\0" + key.encode("utf-8") + b"\0" + name.casefold().encode("utf-8")
+    ).hexdigest()
+    return "sha256:" + digest
+
+
+def card_token(key: str, source: str, uid: str) -> str:
+    """Opaque token for one exact source card; raw source ids never leave the Mac."""
+    digest = hashlib.sha256(
+        b"blip-contact-card-v1\0"
+        + key.encode("utf-8")
+        + b"\0"
+        + source.encode("utf-8")
+        + b"\0"
+        + uid.encode("utf-8")
+    ).hexdigest()
+    return "sha256:" + digest
+
+
+def bounded_source_dbs() -> list[str]:
+    paths = source_dbs()
+    if len(paths) > MAX_RESOLVE_SOURCES:
+        raise RuntimeError("Contacts has too many account stores to resolve safely")
+    accepted = []
+    for path in paths:
+        try:
+            info = os.lstat(path)
+        except OSError:
+            continue
+        if stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode) and info.st_uid == os.getuid():
+            accepted.append(path)
+    return accepted
+
+
+def matching_records(handle: object) -> tuple[str, str, list[dict]]:
+    """Return a small metadata-only set; never load the complete address book."""
+    original, key, email = normalize_resolve_handle(handle)
+    matches: dict[tuple[str, str], dict] = {}
+    matched_fields = 0
+    paths = bounded_source_dbs()
+    source_names = contact_source_names(paths)
+    for path in paths:
+        if matched_fields >= MAX_MATCH_RECORDS:
+            raise RuntimeError("too many matching contact cards; refine them in Contacts")
+        try:
+            with open_db(path) as con:
+                if email:
+                    kind = "email"
+                    rows = con.execute(
+                        """
+                        SELECT r.ZUNIQUEID AS uid, r.ZFIRSTNAME AS first,
+                               r.ZLASTNAME AS last, r.ZNICKNAME AS nick,
+                               r.ZORGANIZATION AS org,
+                               r.ZMODIFICATIONDATE AS modified,
+                               CASE WHEN r.ZTHUMBNAILIMAGEDATA IS NOT NULL
+                                          OR r.ZIMAGEDATA IS NOT NULL THEN 1 ELSE 0 END AS photo,
+                               e.ZADDRESS AS value, e.ZUNIQUEID AS field_uid,
+                               e.ZLABEL AS label
+                        FROM ZABCDEMAILADDRESS e
+                        JOIN ZABCDRECORD r ON r.Z_PK = e.ZOWNER
+                        WHERE lower(e.ZADDRESS) = ?
+                        LIMIT ?
+                        """,
+                        (key, MAX_MATCH_RECORDS + 1),
+                    ).fetchall()
+                else:
+                    kind = "phone"
+                    rows = con.execute(
+                        """
+                        SELECT r.ZUNIQUEID AS uid, r.ZFIRSTNAME AS first,
+                               r.ZLASTNAME AS last, r.ZNICKNAME AS nick,
+                               r.ZORGANIZATION AS org,
+                               r.ZMODIFICATIONDATE AS modified,
+                               CASE WHEN r.ZTHUMBNAILIMAGEDATA IS NOT NULL
+                                          OR r.ZIMAGEDATA IS NOT NULL THEN 1 ELSE 0 END AS photo,
+                               p.ZFULLNUMBER AS value, p.ZUNIQUEID AS field_uid,
+                               p.ZLABEL AS label
+                        FROM ZABCDPHONENUMBER p
+                        JOIN ZABCDRECORD r ON r.Z_PK = p.ZOWNER
+                        WHERE p.ZLASTFOURDIGITS = ?
+                        LIMIT ?
+                        """,
+                        (key[-4:], MAX_MATCH_RECORDS + 1),
+                    ).fetchall()
+        except sqlite3.DatabaseError:
+            continue
+        for row in rows:
+            row_key = normalize_email(row["value"]) if email else normalize_phone(row["value"])
+            if row_key != key:
+                continue
+            matched_fields += 1
+            if matched_fields > MAX_MATCH_RECORDS:
+                raise RuntimeError("too many matching contact fields; refine them in Contacts")
+            name = clean_text(
+                " ".join(filter(None, [row["first"], row["last"]])).strip()
+                or row["org"] or row["nick"] or "",
+                MAX_NAME_CHARS,
+            )
+            uid = clean_text(row["uid"], 200)
+            if not name or not uid:
+                continue
+            source = source_identifier(path)
+            card_key = (source, uid)
+            record = matches.setdefault(card_key, {
+                "name": name,
+                "uid": uid,
+                "source": source,
+                "sourceName": source_names.get(source, "Contacts"),
+                "modified": float(row["modified"] or 0),
+                "photo": row["photo"] == 1,
+                "kind": kind,
+                "fields": [],
+            })
+            field_uid = clean_text(row["field_uid"], 200)
+            field_value = clean_text(row["value"], 320)
+            if field_uid and field_value and len(record["fields"]) < MAX_REPAIR_FIELDS:
+                record["fields"].append({
+                    "id": field_uid,
+                    "value": field_value,
+                    "label": clean_text(row["label"], 80),
+                })
+            elif len(record["fields"]) >= MAX_REPAIR_FIELDS:
+                raise RuntimeError("too many matching fields on one contact card")
+    return original, key, list(matches.values())
+
+
+def contact_candidates(handle: object) -> tuple[str, list[dict], dict[str, list[dict]]]:
+    original, key, records = matching_records(handle)
+    if records:
+        active = active_record_uids(records)
+        records = [record for record in records if record["uid"] in active]
+    by_name: dict[str, list[dict]] = {}
+    display_name: dict[str, str] = {}
+    for record in records:
+        folded = record["name"].casefold()
+        by_name.setdefault(folded, []).append(record)
+        display_name.setdefault(folded, record["name"])
+    if len(by_name) > MAX_CANDIDATES:
+        raise RuntimeError("too many possible names; refine the matching cards in Contacts")
+    candidates = []
+    # matching_records walks the stores in source_dbs() order — largest
+    # account first — so first appearance IS the global account order. Rank
+    # sources by it so account numbering and card order stay stable across
+    # every contact instead of following store UUIDs or photo recency.
+    source_rank: dict[str, int] = {}
+    for record in records:
+        source_rank.setdefault(record["source"], len(source_rank))
+    for folded, named_records in by_name.items():
+        name = display_name[folded]
+        source_numbers = {
+            source: index + 1
+            for index, source in enumerate(sorted(
+                {r["source"] for r in named_records},
+                key=lambda source: (source_rank.get(source, len(source_rank)), source),
+            ))
+        }
+        source_names = {
+            source: next((clean_text(record.get("sourceName"), MAX_SOURCE_NAME_CHARS)
+                          for record in named_records
+                          if record["source"] == source
+                          and clean_text(record.get("sourceName"), MAX_SOURCE_NAME_CHARS)), "")
+            for source in source_numbers
+        }
+        ordered_records = sorted(
+            named_records,
+            key=lambda r: (source_rank.get(r["source"], len(source_rank)),
+                           -int(r["photo"]), -r["modified"], r["uid"]),
+        )
+        # cards and the raw record list are consumed positionally together
+        # (owned_card, compare) — keep them in the SAME order
+        by_name[folded] = ordered_records
+        candidates.append({
+            "token": resolve_token(key, name),
+            "name": name,
+            "recordCount": len(named_records),
+            "sourceCount": len({r["source"] for r in named_records}),
+            "hasPhoto": any(r["photo"] for r in named_records),
+            "cards": [
+                {
+                    "token": card_token(key, record["source"], record["uid"]),
+                    "accountNumber": source_numbers[record["source"]],
+                    "sourceName": source_names[record["source"]]
+                        or f"Contact source {source_numbers[record['source']]}",
+                    "hasPhoto": record["photo"],
+                    "matchCount": max(1, len(record.get("fields", []))),
+                }
+                for record in ordered_records
+            ],
+            "_modified": max(r["modified"] for r in named_records),
+        })
+    candidates.sort(key=lambda c: (-int(c["hasPhoto"]), -c["_modified"], c["name"].casefold()))
+    for candidate in candidates:
+        del candidate["_modified"]
+    return original, candidates, by_name
+
+
+def store_fingerprint() -> str:
+    """Cheap change detector for the whole Contacts dataset: per store, the
+    row count and newest modification stamp. Any add/edit/delete moves it
+    (sync churn may too — a false miss only costs a re-scan). Lets callers
+    reuse cached cleanup-scan results when nothing changed on the Mac."""
+    parts = []
+    for path in bounded_source_dbs():
+        count, newest = -1, -1.0
+        try:
+            with open_db(path) as con:
+                row = con.execute(
+                    "SELECT COUNT(*), COALESCE(MAX(ZMODIFICATIONDATE), 0) FROM ZABCDRECORD"
+                ).fetchone()
+                count, newest = int(row[0]), float(row[1])
+        except (sqlite3.Error, OSError, TypeError, ValueError):
+            pass
+        parts.append([source_identifier(path), count, newest])
+    digest = hashlib.sha256(
+        ("blip-contact-store-v1\0" + json.dumps(parts, sort_keys=True)).encode("utf-8")
+    ).hexdigest()
+    return "sha256:" + digest
+
+
+def audit_contact_handles(value: object) -> dict:
+    """Classify a bounded handle list without changing Contacts or returning unmatched handles."""
+    if not isinstance(value, list) or not value or len(value) > MAX_AUDIT_HANDLES:
+        raise ValueError("contact audit handle list is invalid")
+    seen: set[str] = set()
+    single_cards = []
+    duplicates = []
+    conflicts = []
+    no_match_count = 0
+    for raw_handle in value:
+        original, key, _ = normalize_resolve_handle(raw_handle)
+        if key in seen:
+            raise ValueError("contact audit contains a duplicate handle")
+        seen.add(key)
+        resolved, candidates, _ = contact_candidates(original)
+        entry = {"handle": resolved, "candidates": candidates}
+        if not candidates:
+            no_match_count += 1
+        elif len(candidates) > 1:
+            conflicts.append(entry)
+        elif candidates[0]["recordCount"] > 1:
+            duplicates.append(entry)
+        else:
+            single_cards.append(entry)
+    return {
+        "handleCount": len(value),
+        "noMatchCount": no_match_count,
+        "singleCards": single_cards,
+        "duplicates": duplicates,
+        "conflicts": conflicts,
+    }
+
+
+def read_resolve_request() -> dict:
+    raw = sys.stdin.buffer.read(MAX_RESOLVE_INPUT_BYTES + 1)
+    if len(raw) > MAX_RESOLVE_INPUT_BYTES:
+        raise ValueError("identity request is too large")
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ValueError("identity request must be a JSON object")
+    if not isinstance(value, dict):
+        raise ValueError("identity request must be a JSON object")
+    return value
+
+
+def emit_resolve(value: dict, maximum: int = MAX_RESOLVE_OUTPUT_BYTES) -> None:
+    output = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if len(output.encode("utf-8")) > maximum:
+        raise RuntimeError("identity response exceeded its size contract")
+    print(output)
+
+
+def selected_card(handle: object, token: object) -> tuple[str, str, dict, dict, int, int]:
+    """Freshly resolve one opaque card token to Mac-only record metadata."""
+    token_text = clean_text(token, 80)
+    if not _CONTACT_TOKEN.fullmatch(token_text):
+        raise ValueError("the selected card token is invalid")
+    original, candidates, by_name = contact_candidates(handle)
+    _, key, _ = normalize_resolve_handle(original)
+    for candidate in candidates:
+        records = sorted(
+            by_name[candidate["name"].casefold()],
+            key=lambda record: (-int(record["photo"]), -record["modified"], record["uid"]),
+        )
+        for index, record in enumerate(records):
+            if card_token(key, record["source"], record["uid"]) != token_text:
+                continue
+            return (
+                original, key, candidate, record, index + 1,
+                candidate["cards"][index]["accountNumber"],
+            )
+    raise ValueError("the selected contact card is no longer a candidate")
+
+
+def selected_candidate(handle: object, token: object) -> tuple[str, str, dict, list[dict]]:
+    """Freshly resolve one candidate token and its ordered active cards."""
+    token_text = clean_text(token, 80)
+    if not _CONTACT_TOKEN.fullmatch(token_text):
+        raise ValueError("the selected contact token is invalid")
+    original, candidates, by_name = contact_candidates(handle)
+    _, key, _ = normalize_resolve_handle(original)
+    candidate = next((item for item in candidates if item["token"] == token_text), None)
+    if candidate is None:
+        raise ValueError("the selected contact is no longer a candidate")
+    # contact_candidates already ordered these to match candidate["cards"]
+    # (largest account first); re-sorting here would de-align the two lists
+    # that are consumed positionally together.
+    records = list(by_name[candidate["name"].casefold()])
+    if len(records) != candidate["recordCount"]:
+        raise RuntimeError("Contacts returned inconsistent candidate cards")
+    return original, key, candidate, records
+
+
+def selected_candidate_pair(
+    handle: object, token: object, other_token: object,
+) -> tuple[str, str, dict, list[dict]]:
+    """Explicitly combine TWO named candidates into one merge scope.
+
+    A person can appear under two names on one handle (a married-name change
+    is the common case). Cross-name consolidation is available only when the
+    caller presents BOTH owner tokens — nothing is ever guessed — and the
+    combined cards are renumbered over the union so account numbers stay
+    unique. Everything downstream (revisions, plan hash, undo receipt) works
+    on exact card tokens and is name-agnostic.
+    """
+    other_text = clean_text(other_token, 80)
+    if not _CONTACT_TOKEN.fullmatch(other_text):
+        raise ValueError("the other contact token is invalid")
+    original, key, candidate, records = selected_candidate(handle, token)
+    if candidate["token"] == other_text:
+        raise ValueError("the other person must be a different candidate")
+    _, _, other, other_records = selected_candidate(handle, other_text)
+    paired = []
+    for cand, recs in ((candidate, records), (other, other_records)):
+        for index, record in enumerate(recs):
+            paired.append((record, dict(cand["cards"][index])))
+    # The union follows the same global account order as every other view
+    # (largest store first), not selected-person-first; the stable sort keeps
+    # each person's internal card order within a source.
+    rank = {source_identifier(path): position
+            for position, path in enumerate(bounded_source_dbs())}
+    paired.sort(key=lambda item: rank.get(item[0]["source"], len(rank)))
+    combined_sources: dict[str, int] = {}
+    for record, _ in paired:
+        combined_sources.setdefault(record["source"], len(combined_sources) + 1)
+    cards = []
+    ordered_records = []
+    for record, card in paired:
+        card["accountNumber"] = combined_sources[record["source"]]
+        cards.append(card)
+        ordered_records.append(record)
+    combined = dict(candidate)
+    combined["recordCount"] = len(ordered_records)
+    combined["sourceCount"] = len(combined_sources)
+    combined["cards"] = cards
+    return original, key, combined, ordered_records
+
+
+def selected_candidate_from_unique_handle(
+    handle: object,
+) -> tuple[str, str, dict, list[dict]]:
+    """Resolve only when one person owns the handle; never guess for vCard export."""
+    original, candidates, by_name = contact_candidates(handle)
+    if not candidates:
+        raise ValueError("no Mac contact matches this conversation")
+    if len(candidates) != 1:
+        raise ValueError("more than one person matches this handle; use Edit contact to choose one")
+    _, key, _ = normalize_resolve_handle(original)
+    candidate = candidates[0]
+    records = list(by_name[candidate["name"].casefold()])
+    if len(records) != candidate["recordCount"]:
+        raise RuntimeError("Contacts returned inconsistent candidate cards")
+    return original, key, candidate, records
+
+
+def write_gate_enabled() -> bool:
+    """The restricted SSH key gains write authority only through this Mac-local gate."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(WRITE_GATE, flags)
+    except OSError:
+        return False
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_size > 64:
+            return False
+        if info.st_mode & 0o077:
+            return False
+        data = os.read(fd, 65)
+        return data == b"enabled-v1\n"
+    finally:
+        os.close(fd)
+
+
+def require_write_gate() -> None:
+    if not write_gate_enabled():
+        raise PermissionError(
+            "Mac contact writes are disabled; enable Blip's owner-only contact-writes gate first"
+        )
+
+
+def private_directory(path: str) -> int:
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    info = os.fstat(fd)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        os.close(fd)
+        raise RuntimeError("contact undo directory is unsafe")
+    if info.st_mode & 0o077:
+        os.fchmod(fd, 0o700)
+    return fd
+
+
+def write_undo_receipt(receipt: dict) -> str:
+    token = "undo:" + secrets.token_hex(16)
+    value = {"version": 1, "token": token, "created": int(time.time()), **receipt}
+    data = (json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+    if len(data) > MAX_UNDO_BYTES:
+        raise RuntimeError("contact undo receipt is too large")
+    directory = private_directory(UNDO_DIR)
+    temp = ".latest." + secrets.token_hex(8)
+    fd = -1
+    published = False
+    try:
+        fd = os.open(
+            temp,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=directory,
+        )
+        offset = 0
+        while offset < len(data):
+            offset += os.write(fd, data[offset:])
+        os.fchmod(fd, 0o600)
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        try:
+            target = os.stat(UNDO_FILE, dir_fd=directory, follow_symlinks=False)
+            if not stat.S_ISREG(target.st_mode) or target.st_uid != os.getuid():
+                raise RuntimeError("contact undo receipt target is unsafe")
+        except FileNotFoundError:
+            pass
+        os.replace(temp, UNDO_FILE, src_dir_fd=directory, dst_dir_fd=directory)
+        published = True
+        os.fsync(directory)
+        return token
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if not published:
+            try:
+                os.unlink(temp, dir_fd=directory)
+            except OSError:
+                pass
+        os.close(directory)
+
+
+def read_undo_receipt(token: object) -> dict:
+    token_text = clean_text(token, 40)
+    if not _UNDO_TOKEN.fullmatch(token_text):
+        raise ValueError("undo token is invalid")
+    directory = private_directory(UNDO_DIR)
+    fd = -1
+    try:
+        fd = os.open(
+            UNDO_FILE,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=directory,
+        )
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_size > MAX_UNDO_BYTES:
+            raise RuntimeError("contact undo receipt is unsafe")
+        if info.st_mode & 0o077:
+            raise RuntimeError("contact undo receipt permissions are unsafe")
+        raw = os.read(fd, MAX_UNDO_BYTES + 1)
+        if len(raw) > MAX_UNDO_BYTES:
+            raise RuntimeError("contact undo receipt is too large")
+        try:
+            value = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise RuntimeError("contact undo receipt is invalid")
+        if not isinstance(value, dict) or value.get("version") != 1 or value.get("token") != token_text:
+            raise ValueError("this undo action is no longer available")
+        created = value.get("created")
+        if not isinstance(created, int) or time.time() - created > UNDO_TTL_SECONDS:
+            raise ValueError("this contact undo action has expired")
+        return value
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        os.close(directory)
+
+
+def clear_undo_receipt(token: str) -> None:
+    # Re-read through the pinned descriptor before deleting so an old UI token
+    # cannot remove a newer receipt.
+    read_undo_receipt(token)
+    directory = private_directory(UNDO_DIR)
+    try:
+        os.unlink(UNDO_FILE, dir_fd=directory)
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def run_bounded_process(
+    argv: list[str], payload: bytes, output_limit: int = MAX_REPAIR_PROCESS_BYTES,
+) -> tuple[int, bytes, bytes]:
+    """Drain both pipes incrementally, kill at either cap, and keep a total deadline."""
+    process = subprocess.Popen(
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+    selector = None
+    try:
+        process.stdin.write(payload)
+        process.stdin.close()
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+        selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+        output = {"stdout": bytearray(), "stderr": bytearray()}
+        deadline = time.monotonic() + REPAIR_TIMEOUT_SECONDS
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                process.kill()
+                raise RuntimeError(
+                    "Contacts automation timed out; an Allow prompt may be waiting on the Mac"
+                )
+            for key, _ in selector.select(min(0.25, remaining)):
+                chunk = os.read(key.fd, 4096)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                target = output[key.data]
+                target.extend(chunk)
+                if len(target) > output_limit:
+                    process.kill()
+                    raise RuntimeError("Contacts automation returned too much data")
+        remaining = max(0.0, deadline - time.monotonic())
+        code = process.wait(timeout=remaining)
+        return code, bytes(output["stdout"]), bytes(output["stderr"])
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        if selector is not None:
+            selector.close()
+        if not process.stdin.closed:
+            process.stdin.close()
+        process.stdout.close()
+        process.stderr.close()
+
+
+def run_contact_repair(request: dict) -> dict:
+    script = os.path.join(os.path.dirname(os.path.realpath(__file__)), "contact-repair.js")
+    info = os.lstat(script)
+    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or info.st_uid != os.getuid():
+        raise RuntimeError("Contacts repair helper is unsafe")
+    payload = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(payload) > MAX_REPAIR_INPUT_BYTES:
+        raise RuntimeError("Contacts repair request is too large")
+    code, stdout, stderr = run_bounded_process(
+        ["/usr/bin/osascript", "-l", "JavaScript", script], payload
+    )
+    try:
+        response = json.loads(stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        message = clean_text(stderr.decode("utf-8", "replace"), 180)
+        raise RuntimeError(message or "Contacts automation returned invalid data")
+    if code != 0 or not isinstance(response, dict) or response.get("ok") is not True:
+        raise RuntimeError(clean_text(response.get("error") if isinstance(response, dict) else "", 180)
+                           or "Contacts automation failed")
+    return response
+
+
+class NativeMutationError(RuntimeError):
+    """A contact-delete failure carrying the machine-readable stage, so the
+    caller can pick a recovery path without parsing the human message."""
+
+    def __init__(self, message: str, stage: str = ""):
+        super().__init__(message)
+        self.stage = stage
+
+
+def run_native_contact_mutation(
+    request: dict, output_limit: int = MAX_REPAIR_PROCESS_BYTES,
+) -> dict:
+    helper = os.path.join(os.path.dirname(os.path.realpath(__file__)), "contact-delete")
+    # install.sh skips compiling the helper when swiftc is absent; say so
+    # plainly instead of surfacing a stat traceback.
+    try:
+        info = os.lstat(helper)
+    except FileNotFoundError:
+        raise RuntimeError(
+            "the compiled Contacts helper is not installed — install Xcode "
+            "Command Line Tools on the Mac and re-run bridge/mac/install.sh"
+        ) from None
+    if (not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)
+            or info.st_uid != os.getuid() or info.st_mode & 0o022):
+        raise RuntimeError("Contacts deletion helper is unsafe")
+    payload = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(payload) > MAX_REPAIR_INPUT_BYTES:
+        raise RuntimeError("Contacts deletion request is too large")
+    code, stdout, stderr = run_bounded_process([helper], payload, output_limit=output_limit)
+    try:
+        response = json.loads(stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        message = clean_text(stderr.decode("utf-8", "replace"), 180)
+        raise RuntimeError(message or "Contacts deletion returned invalid data")
+    if code != 0 or not isinstance(response, dict) or response.get("ok") is not True:
+        message = (clean_text(response.get("error") if isinstance(response, dict) else "", 180)
+                   or "Contacts deletion failed")
+        stage = clean_text(response.get("stage") if isinstance(response, dict) else "", 40)
+        raise NativeMutationError(message, stage)
+    return response
+
+
+def run_contact_delete(person_uids: list[str]) -> dict:
+    if (not 1 <= len(person_uids) <= 7 or len(set(person_uids)) != len(person_uids)
+            or any(not _PERSON_UID.fullmatch(uid) for uid in person_uids)):
+        raise RuntimeError("Contacts deletion card list is invalid")
+    response = run_native_contact_mutation({
+        "operation": "delete", "personUids": person_uids,
+    })
+    if response.get("deletedCount") != len(person_uids):
+        raise RuntimeError("Contacts did not confirm every source-card deletion")
+    return response
+
+
+def run_contact_update(target_uid: str, draft: dict) -> dict:
+    if not _PERSON_UID.fullmatch(target_uid):
+        raise RuntimeError("Contacts update card id is invalid")
+    response = run_native_contact_mutation({
+        "operation": "update", "targetUid": target_uid,
+        "card": validated_card_draft(draft),
+    })
+    if response.get("updated") is not True:
+        raise RuntimeError("Contacts did not confirm the card update")
+    return response
+
+
+def run_contact_consolidation(target_uid: str, source_uids: list[str], draft: dict) -> dict:
+    if (not _PERSON_UID.fullmatch(target_uid) or not 1 <= len(source_uids) <= 7
+            or len(set(source_uids)) != len(source_uids) or target_uid in source_uids
+            or any(not _PERSON_UID.fullmatch(uid) for uid in source_uids)):
+        raise RuntimeError("Contacts consolidation card list is invalid")
+    response = run_native_contact_mutation({
+        "operation": "consolidate", "targetUid": target_uid,
+        "sourceUids": source_uids, "card": validated_card_draft(draft),
+    })
+    if response.get("updated") is not True or response.get("deletedCount") != len(source_uids):
+        raise RuntimeError("Contacts did not confirm the card consolidation")
+    return response
+
+
+def merged_contact_draft(details: list[dict]) -> dict:
+    """Build one deterministic export card without mutating any source card."""
+    if not details:
+        raise RuntimeError("Contacts returned no card details")
+    result = card_draft(details[0])
+    scalar_keys = (
+        "firstName", "middleName", "lastName", "nickname", "organization",
+        "department", "jobTitle", "birthday",
+    )
+    for key in scalar_keys:
+        if result[key]:
+            continue
+        result[key] = next((detail[key] for detail in details if detail[key]), "")
+    # Notes are deliberately target-only, matching consolidation semantics.
+    for key in ("phones", "emails", "urls", "addresses"):
+        combined = []
+        seen = set()
+        for detail in details:
+            for item in detail[key]:
+                if key == "addresses":
+                    identity = tuple(str(item.get(field, "")).casefold() for field in (
+                        "street", "city", "state", "postalCode", "country", "countryCode",
+                    ))
+                else:
+                    identity = str(item.get("value", "")).casefold()
+                empty_identity = not any(identity) if isinstance(identity, tuple) else not identity
+                if empty_identity:
+                    continue
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                combined.append(item)
+        result[key] = combined
+    return validated_card_draft(result)
+
+
+def contact_vcard(handle: object) -> dict:
+    original, _, candidate, records = selected_candidate_from_unique_handle(handle)
+    details = describe_records(records)
+    draft = merged_contact_draft(details)
+    response = run_native_contact_mutation({
+        "operation": "vcard", "targetUid": records[0]["uid"], "card": draft,
+    }, MAX_VCARD_RESPONSE_BYTES)
+    encoded = response.get("vcard")
+    name = clean_text(response.get("name") or candidate["name"], MAX_NAME_CHARS)
+    if not isinstance(encoded, str) or not encoded or len(encoded) > MAX_VCARD_RESPONSE_BYTES:
+        raise RuntimeError("Contacts returned an invalid vCard")
+    return {"handle": original, "name": name, "vcard": encoded}
+
+
+def active_record_uids(records: list[dict]) -> set[str]:
+    """Cards addressable through Contacts, excluding inactive account caches."""
+    uids = list(dict.fromkeys(clean_text(record.get("uid"), 200) for record in records))
+    if not uids or len(uids) > MAX_MATCH_RECORDS or any(not uid for uid in uids):
+        raise RuntimeError("Contacts returned an invalid candidate-card list")
+    result = run_contact_repair({"operation": "available", "personUids": uids})
+    available = result.get("available")
+    if not isinstance(available, list) or len(available) > len(uids):
+        raise RuntimeError("Contacts returned an invalid active-card list")
+    accepted = set()
+    permitted = set(uids)
+    for raw in available:
+        uid = clean_text(raw, 200)
+        if not uid or uid not in permitted or uid in accepted:
+            raise RuntimeError("Contacts returned an invalid active-card id")
+        accepted.add(uid)
+    return accepted
+
+
+def optional_contact_text(value: object, label: str, maximum: int) -> str:
+    if not isinstance(value, str) or len(value) > maximum:
+        raise RuntimeError(f"Contacts returned an invalid {label}")
+    return clean_text(value, maximum)
+
+
+def validated_labeled_values(value: object, label: str) -> list[dict]:
+    if not isinstance(value, list) or len(value) > 16:
+        raise RuntimeError(f"Contacts returned an invalid {label} list")
+    result = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise RuntimeError(f"Contacts returned an invalid {label}")
+        item_value = optional_contact_text(item.get("value"), f"{label} value", 320)
+        item_label = optional_contact_text(item.get("label"), f"{label} label", 80)
+        if not item_value:
+            raise RuntimeError(f"Contacts returned an empty {label}")
+        result.append({"label": item_label, "value": item_value})
+    return result
+
+
+def validated_addresses(value: object) -> list[dict]:
+    if not isinstance(value, list) or len(value) > 16:
+        raise RuntimeError("Contacts returned an invalid address list")
+    limits = {
+        "label": 80, "street": 320, "city": 320, "state": 320,
+        "postalCode": 80, "country": 160, "countryCode": 8,
+    }
+    result = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise RuntimeError("Contacts returned an invalid address")
+        address = {
+            key: optional_contact_text(item.get(key), f"address {key}", maximum)
+            for key, maximum in limits.items()
+        }
+        if not any(address[key] for key in limits if key != "label"):
+            raise RuntimeError("Contacts returned an empty address")
+        result.append(address)
+    return result
+
+
+def validated_card_detail(value: object) -> dict:
+    if not isinstance(value, dict):
+        raise RuntimeError("Contacts returned an invalid card detail")
+    scalar_limits = {
+        "displayName": 160, "firstName": 160, "middleName": 160,
+        "lastName": 160, "nickname": 160, "organization": 320,
+        "department": 320, "jobTitle": 320, "birthday": 10, "note": 1000,
+    }
+    detail = {
+        key: optional_contact_text(value.get(key), key, maximum)
+        for key, maximum in scalar_limits.items()
+    }
+    if detail["birthday"] and not re.fullmatch(r"(?:[0-9]{4}-|--)[0-9]{2}-[0-9]{2}", detail["birthday"]):
+        raise RuntimeError("Contacts returned an invalid birthday")
+    detail["phones"] = validated_labeled_values(value.get("phones"), "phone")
+    detail["emails"] = validated_labeled_values(value.get("emails"), "email")
+    detail["urls"] = validated_labeled_values(value.get("urls"), "URL")
+    detail["addresses"] = validated_addresses(value.get("addresses"))
+    return detail
+
+
+def card_draft(detail: dict) -> dict:
+    """The writable subset of a described card; displayName is Contacts-derived."""
+    return {key: value for key, value in detail.items() if key != "displayName"}
+
+
+def validated_card_draft(value: object) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError("contact card draft is invalid")
+    # Reuse the strict detail validator with a derived-only placeholder.
+    draft = card_draft(validated_card_detail({"displayName": "", **value}))
+    if not any(draft[key] for key in ("firstName", "lastName", "nickname", "organization")):
+        raise ValueError("contact card needs a name, nickname, or organization")
+    return draft
+
+
+def card_revision(detail: dict) -> str:
+    payload = json.dumps(detail, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(
+        b"blip-contact-revision-v1\0" + payload.encode("utf-8")
+    ).hexdigest()
+
+
+def require_revision(value: object) -> str:
+    revision = clean_text(value, 80)
+    if not _REVISION.fullmatch(revision):
+        raise ValueError("contact card revision is invalid")
+    return revision
+
+
+def require_plan_hash(value: object) -> str:
+    plan = clean_text(value, 80)
+    if not _PLAN_HASH.fullmatch(plan):
+        raise ValueError("contact mutation plan is invalid")
+    return plan
+
+
+def mutation_plan_hash(action: str, value: dict) -> str:
+    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(
+        b"blip-contact-mutation-v1\0" + action.encode("ascii") + b"\0" + payload.encode("utf-8")
+    ).hexdigest()
+
+
+def native_collection_counts(person_uids: list[str]) -> dict[str, tuple[int, int, int, int]]:
+    """Fresh CNContactStore collection sizes per card — the authority the
+    Contacts.app describe view is checked against."""
+    response = run_native_contact_mutation({"operation": "counts", "personUids": person_uids})
+    raw = response.get("counts")
+    if not isinstance(raw, list) or len(raw) != len(person_uids):
+        raise RuntimeError("Contacts returned invalid card counts")
+    result: dict[str, tuple[int, int, int, int]] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise RuntimeError("Contacts returned invalid card counts")
+        uid = clean_text(entry.get("uid"), 200)
+        sizes = tuple(entry.get(key) for key in ("phones", "emails", "urls", "addresses"))
+        if uid == "" or not all(isinstance(size, int) and 0 <= size <= 64 for size in sizes):
+            raise RuntimeError("Contacts returned invalid card counts")
+        result[uid] = sizes  # type: ignore[assignment]
+    return result
+
+
+def describe_records(records: list[dict]) -> list[dict]:
+    """Describe cards via Contacts.app, cross-checked against CNContactStore.
+
+    The app process is long-lived and its person objects go STALE after
+    external store mutations — right after a merge it can report a card's
+    collections as empty while the scalars still read (seen live 2026-09-03;
+    an editor seeded from that view would draft field deletions). Retry the
+    describe until the app's collection sizes agree with the store, and fail
+    honestly if the view never settles.
+    """
+    if not 1 <= len(records) <= 8:
+        raise ValueError("card details require between one and eight active cards")
+    uids = [record["uid"] for record in records]
+    expected = native_collection_counts(uids)
+    details: list[dict] = []
+    for attempt in range(6):
+        if attempt:
+            time.sleep(0.5)
+        result = run_contact_repair({"operation": "describe", "personUids": uids})
+        raw_cards = result.get("cards")
+        if not isinstance(raw_cards, list) or len(raw_cards) != len(records):
+            raise RuntimeError("Contacts returned an invalid card description")
+        details = [validated_card_detail(raw) for raw in raw_cards]
+        if all(
+            (len(detail["phones"]), len(detail["emails"]),
+             len(detail["urls"]), len(detail["addresses"])) == expected.get(uid)
+            for uid, detail in zip(uids, details)
+        ):
+            return details
+    raise RuntimeError(
+        "Contacts.app is showing stale card data; give it a moment and try again")
+
+
+def same_card_content(left: dict, right: dict) -> bool:
+    """Field-for-field draft equality that ignores collection ORDER.
+
+    The native writer reuses a card's existing rows and appends additions, so
+    a merged card legitimately reads back with the same values in a different
+    sequence than the reviewed draft listed them (seen live 2026-09-03: a
+    two-email merge applied perfectly and still failed the byte-identical
+    check). The reviewed plan's contract is the content, not the sequence.
+    """
+    def canonical(detail: dict) -> dict:
+        result = {key: value for key, value in detail.items() if key != "displayName"}
+        for key in ("phones", "emails", "urls", "addresses"):
+            result[key] = sorted(
+                detail.get(key) or [],
+                key=lambda item: json.dumps(item, sort_keys=True, ensure_ascii=False),
+            )
+        return result
+    return canonical(left) == canonical(right)
+
+
+def settled_card_detail(uid: str, draft: dict) -> dict:
+    """Read a just-saved card back, tolerating Contacts.app's stale view.
+
+    Saves go through CNContactStore, but describe goes through Contacts.app,
+    whose in-memory people refresh asynchronously — an immediate read-back can
+    still show the pre-save card (verified live: a merged card that "failed"
+    verification matched the draft exactly one poll later). Poll briefly for
+    the saved draft; return the last view so the caller's equality check still
+    decides.
+    """
+    detail = None
+    last_error: Exception | None = None
+    for attempt in range(10):
+        if attempt:
+            time.sleep(0.6)
+        try:
+            detail = validated_card_detail(describe_records([{"uid": uid}])[0])
+        except (RuntimeError, ValueError) as error:
+            last_error = error
+            continue
+        if same_card_content(card_draft(detail), draft):
+            return detail
+    if detail is None:
+        raise last_error if last_error is not None else RuntimeError(
+            "Contacts returned no card details")
+    return detail
+
+
+def owned_card(
+    handle: object, owner_token: object, token: object
+) -> tuple[str, str, dict, list[dict], dict, int, int]:
+    """Resolve a card only within the selected person's current active source cards."""
+    original, key, candidate, records = selected_candidate(handle, owner_token)
+    token_text = clean_text(token, 80)
+    if not _CONTACT_TOKEN.fullmatch(token_text):
+        raise ValueError("the selected card token is invalid")
+    for index, record in enumerate(records):
+        if card_token(key, record["source"], record["uid"]) == token_text:
+            return (
+                original, key, candidate, records, record, index + 1,
+                candidate["cards"][index]["accountNumber"],
+            )
+    raise ValueError("the selected card is no longer part of this contact")
+
+
+def changed_card_fields(before: dict, after: dict) -> list[str]:
+    labels = {
+        "firstName": "first name", "middleName": "middle name", "lastName": "last name",
+        "nickname": "nickname", "organization": "organization", "department": "department",
+        "jobTitle": "job title", "birthday": "birthday", "note": "notes",
+        "phones": "phone numbers", "emails": "email addresses", "urls": "websites",
+        "addresses": "postal addresses",
+    }
+    return [labels[key] for key in labels if before.get(key) != after.get(key)]
+
+
+def contact_collections_changed(before: dict, after: dict) -> bool:
+    return any(before.get(key) != after.get(key) for key in (
+        "phones", "emails", "urls", "addresses",
+    ))
+
+
+def mutation_metadata(
+    action: str, original: str, candidate: dict, card_number: int, account_number: int,
+    source_name: str, changed: list[str], plan_hash: str, source_count: int = 0,
+) -> dict:
+    return {
+        "action": action, "handle": original, "name": candidate["name"],
+        "cardNumber": card_number, "cardCount": candidate["recordCount"],
+        "accountNumber": account_number, "sourceName": source_name,
+        "sourceCardCount": source_count,
+        "changedFields": changed, "planHash": plan_hash,
+        "writeEnabled": write_gate_enabled(),
+    }
+
+
+def compare_candidate(handle: object, owner_token: object,
+                      other_owner_token: object = None) -> dict:
+    if other_owner_token:
+        original, key, candidate, records = selected_candidate_pair(
+            handle, owner_token, other_owner_token)
+    else:
+        original, key, candidate, records = selected_candidate(handle, owner_token)
+    if not 1 <= len(records) <= 8:
+        raise ValueError("contact management requires between one and eight active cards")
+    details = describe_records(records)
+    cards = []
+    for index, (record, detail) in enumerate(zip(records, details)):
+        cards.append({
+            "token": card_token(key, record["source"], record["uid"]),
+            "revision": card_revision(detail),
+            "cardNumber": index + 1,
+            "accountNumber": candidate["cards"][index]["accountNumber"],
+            "sourceName": candidate["cards"][index]["sourceName"],
+            "hasPhoto": record["photo"],
+            **detail,
+        })
+    return {
+        "handle": original, "name": candidate["name"], "cardCount": len(cards),
+        "sourceCount": candidate["sourceCount"], "writeEnabled": write_gate_enabled(),
+        "cards": cards,
+    }
+
+
+def prepare_card_edit(
+    handle: object, owner_token: object, token: object, revision: object, draft_value: object
+) -> tuple[dict, dict]:
+    original, _, candidate, _, record, number, account = owned_card(handle, owner_token, token)
+    before = describe_records([record])[0]
+    expected = require_revision(revision)
+    if card_revision(before) != expected:
+        raise ValueError("this card changed on the Mac; refresh before saving")
+    draft = validated_card_draft(draft_value)
+    changed = changed_card_fields(card_draft(before), draft)
+    if not changed:
+        raise ValueError("this draft does not change the contact card")
+    public_plan = {
+        "token": clean_text(token, 80), "revision": expected, "card": draft,
+    }
+    plan_hash = mutation_plan_hash("edit", public_plan)
+    preview = mutation_metadata(
+        "edit", original, candidate, number, account,
+        candidate["cards"][number - 1]["sourceName"], changed, plan_hash,
+    )
+    private = {
+        "personUid": record["uid"], "before": before, "after": draft,
+        "handle": original, "name": candidate["name"], "cardToken": clean_text(token, 80),
+        "planHash": plan_hash,
+    }
+    return preview, private
+
+
+def apply_card_edit(
+    handle: object, owner_token: object, token: object, revision: object,
+    draft_value: object, expected_plan: object,
+) -> dict:
+    require_write_gate()
+    preview, private = prepare_card_edit(handle, owner_token, token, revision, draft_value)
+    if preview["planHash"] != require_plan_hash(expected_plan):
+        raise ValueError("the contact edit changed; preview it again before saving")
+    native_update = contact_collections_changed(private["before"], private["after"])
+    if native_update and private["before"]["note"] != private["after"]["note"]:
+        raise ValueError(
+            "save contact notes separately from phone, email, website, or address changes"
+        )
+    undo_token = write_undo_receipt({"action": "edit", **private})
+    if native_update:
+        run_contact_update(private["personUid"], private["after"])
+        after = settled_card_detail(private["personUid"], private["after"])
+    else:
+        result = run_contact_repair({
+            "operation": "edit", "personUid": private["personUid"],
+            "expectedCard": private["before"], "card": private["after"],
+        })
+        if result.get("edited") is not True:
+            raise RuntimeError("Contacts did not confirm the card edit")
+        after = validated_card_detail(result.get("card"))
+    if not same_card_content(card_draft(after), private["after"]):
+        raise RuntimeError("Contacts changed the contact card while saving it")
+    return {
+        **preview, "applied": True, "undoToken": undo_token,
+        "revision": card_revision(after), "displayName": after["displayName"],
+    }
+
+
+def prepare_card_delete(
+    handle: object, owner_token: object, token: object, revision: object
+) -> tuple[dict, dict]:
+    original, _, candidate, _, record, number, account = owned_card(handle, owner_token, token)
+    before = describe_records([record])[0]
+    expected = require_revision(revision)
+    if card_revision(before) != expected:
+        raise ValueError("this card changed on the Mac; refresh before deleting")
+    public_plan = {"token": clean_text(token, 80), "revision": expected}
+    plan_hash = mutation_plan_hash("delete", public_plan)
+    preview = mutation_metadata(
+        "delete", original, candidate, number, account,
+        candidate["cards"][number - 1]["sourceName"], ["entire source card"], plan_hash,
+    )
+    private = {
+        "personUid": record["uid"], "before": before, "handle": original,
+        "name": candidate["name"], "cardToken": clean_text(token, 80), "planHash": plan_hash,
+    }
+    return preview, private
+
+
+def apply_card_delete(
+    handle: object, owner_token: object, token: object, revision: object, expected_plan: object
+) -> dict:
+    require_write_gate()
+    preview, private = prepare_card_delete(handle, owner_token, token, revision)
+    if preview["planHash"] != require_plan_hash(expected_plan):
+        raise ValueError("the contact deletion changed; preview it again")
+    result = run_contact_repair({
+        "operation": "delete", "personUid": private["personUid"],
+        "expectedCard": private["before"],
+    })
+    if result.get("readyToDelete") is not True:
+        raise RuntimeError("Contacts did not confirm the deletion preflight")
+    undo_token = write_undo_receipt({"action": "delete", **private})
+    run_contact_delete([private["personUid"]])
+    return {**preview, "applied": True, "undoToken": undo_token}
+
+
+def prepare_consolidation(
+    handle: object, owner_token: object, target_token: object,
+    revisions_value: object, draft_value: object, other_owner_token: object = None,
+) -> tuple[dict, dict]:
+    if other_owner_token:
+        original, key, candidate, records = selected_candidate_pair(
+            handle, owner_token, other_owner_token)
+    else:
+        original, key, candidate, records = selected_candidate(handle, owner_token)
+    if not 2 <= len(records) <= 8:
+        raise ValueError("consolidation requires between two and eight active cards")
+    if not isinstance(revisions_value, list) or len(revisions_value) != len(records):
+        raise ValueError("contact card revision list is invalid")
+    supplied = {}
+    for item in revisions_value:
+        if not isinstance(item, dict):
+            raise ValueError("contact card revision is invalid")
+        token = clean_text(item.get("token"), 80)
+        revision = require_revision(item.get("revision"))
+        if not _CONTACT_TOKEN.fullmatch(token) or token in supplied:
+            raise ValueError("contact card revision is invalid")
+        supplied[token] = revision
+    details = describe_records(records)
+    entries = []
+    for index, (record, detail) in enumerate(zip(records, details)):
+        token = card_token(key, record["source"], record["uid"])
+        if supplied.get(token) != card_revision(detail):
+            raise ValueError("a source card changed on the Mac; refresh before merging")
+        entries.append({"token": token, "record": record, "detail": detail, "index": index})
+    target_text = clean_text(target_token, 80)
+    target = next((entry for entry in entries if entry["token"] == target_text), None)
+    if target is None:
+        raise ValueError("the merge target is no longer part of this contact")
+    draft = validated_card_draft(draft_value)
+    changed = changed_card_fields(card_draft(target["detail"]), draft)
+    if not changed:
+        changed = ["source-card consolidation"]
+    public_plan = {
+        "targetToken": target_text,
+        "revisions": [{"token": entry["token"], "revision": supplied[entry["token"]]}
+                      for entry in entries],
+        "card": draft,
+    }
+    plan_hash = mutation_plan_hash("consolidate", public_plan)
+    preview = mutation_metadata(
+        "consolidate", original, candidate, target["index"] + 1,
+        candidate["cards"][target["index"]]["accountNumber"],
+        candidate["cards"][target["index"]]["sourceName"], changed, plan_hash,
+        len(entries) - 1,
+    )
+    sources = [entry for entry in entries if entry is not target]
+    private = {
+        "targetUid": target["record"]["uid"], "targetBefore": target["detail"],
+        "targetAfter": draft, "sources": [
+            {"personUid": entry["record"]["uid"], "card": entry["detail"]} for entry in sources
+        ],
+        "handle": original, "name": candidate["name"], "planHash": plan_hash,
+    }
+    return preview, private
+
+
+def recover_consolidation_via_contacts_app(private: dict, error: NativeMutationError) -> None:
+    """Finish an approved consolidation through Contacts.app when the native
+    store path faults.
+
+    CNContactStore fails with Cocoa 134092 ("Unhandled error occurred during
+    faulting") on cards holding a damaged stored row — persistently, for any
+    real write — while Contacts.app's own write path still succeeds (verified
+    live 2026-09-03 on two real synced cards). The plan being recovered is the
+    exact reviewed one: the survivor draft is revalidated against the card's
+    current state, and only the already-confirmed source uids are removed.
+    """
+    if error.stage not in ("update contact", "update survivor",
+                           "save same-account merge", "delete sources"):
+        raise error
+    if error.stage != "delete sources":
+        current = validated_card_detail(
+            describe_records([{"uid": private["targetUid"]}])[0])
+        if card_draft(current) != private["targetAfter"]:
+            edited = run_contact_repair({
+                "operation": "edit", "personUid": private["targetUid"],
+                "expectedCard": current, "card": private["targetAfter"],
+            })
+            if edited.get("edited") is not True:
+                raise error
+    remaining = [source["personUid"] for source in private["sources"]]
+    try:
+        run_contact_delete(remaining)
+        return
+    except RuntimeError:
+        pass
+    removed = run_contact_repair({
+        "operation": "delete-fallback", "personUids": remaining,
+    })
+    if removed.get("deletedCount") != len(remaining):
+        raise error
+
+
+def apply_consolidation(
+    handle: object, owner_token: object, target_token: object, revisions: object,
+    draft: object, expected_plan: object, other_owner_token: object = None,
+) -> dict:
+    require_write_gate()
+    preview, private = prepare_consolidation(
+        handle, owner_token, target_token, revisions, draft, other_owner_token,
+    )
+    if preview["planHash"] != require_plan_hash(expected_plan):
+        raise ValueError("the merge plan changed; preview it again")
+    if private["targetBefore"]["note"] != private["targetAfter"]["note"]:
+        raise ValueError(
+            "contact notes cannot be changed during consolidation; keep the target note, "
+            "then edit it after the merge"
+        )
+    result = run_contact_repair({
+        "operation": "consolidate", "targetUid": private["targetUid"],
+        "sourceUids": [source["personUid"] for source in private["sources"]],
+        "expectedCards": [private["targetBefore"]]
+            + [source["card"] for source in private["sources"]],
+        "card": private["targetAfter"],
+    })
+    if (result.get("readyToConsolidate") is not True
+            or result.get("sourceCount") != len(private["sources"])):
+        raise RuntimeError("Contacts did not confirm the consolidation preflight")
+    undo_token = write_undo_receipt({"action": "consolidate", **private})
+    # The native helper saves and verifies the survivor before deleting source
+    # cards. For cross-account merges it issues one deletion request per source
+    # container, avoiding the CNSaveRequest cross-store failure.
+    try:
+        run_contact_consolidation(
+            private["targetUid"],
+            [source["personUid"] for source in private["sources"]],
+            private["targetAfter"],
+        )
+    except NativeMutationError as error:
+        recover_consolidation_via_contacts_app(private, error)
+    updated_card = settled_card_detail(private["targetUid"], private["targetAfter"])
+    if not same_card_content(card_draft(updated_card), private["targetAfter"]):
+        raise RuntimeError("Contacts changed the merged card while saving it")
+    after = updated_card
+    return {
+        **preview, "applied": True, "undoToken": undo_token,
+        "revision": card_revision(after), "displayName": after["displayName"],
+    }
+
+
+def run_contact_link(operation: str, records: list[dict], expected_action: object = "") -> dict:
+    if operation not in ("prepare", "link"):
+        raise ValueError("invalid contact link operation")
+    allowed = ("Link Selected Cards", "Merge Selected Cards", "Merge and Link Selected Cards")
+    expected = clean_text(expected_action, 80)
+    if operation == "link" and expected not in allowed:
+        raise ValueError("the confirmed Contacts action is invalid")
+    if operation == "prepare" and expected:
+        raise ValueError("a link preview cannot include an expected action")
+    if not 2 <= len(records) <= 8:
+        raise ValueError("linking requires between two and eight active cards")
+    uids = [clean_text(record.get("uid"), 200) for record in records]
+    if any(not _PERSON_UID.fullmatch(uid) for uid in uids) or len(set(uids)) != len(uids):
+        raise RuntimeError("Contacts returned an unsafe card identifier")
+    script = os.path.join(os.path.dirname(os.path.realpath(__file__)), "contact-link.applescript")
+    info = os.lstat(script)
+    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or info.st_uid != os.getuid():
+        raise RuntimeError("Contacts link helper is unsafe")
+    argv = ["/usr/bin/osascript", script, operation]
+    if operation == "link":
+        argv.append(expected)
+    code, stdout, stderr = run_bounded_process([*argv, *uids], b"")
+    try:
+        result = json.loads(stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        message = clean_text(stderr.decode("utf-8", "replace"), 180)
+        raise RuntimeError(message or "Contacts link helper returned invalid data")
+    if code != 0 or not isinstance(result, dict) or result.get("ok") is not True:
+        raise RuntimeError(clean_text(result.get("error") if isinstance(result, dict) else "", 180)
+                           or "Contacts could not prepare these cards")
+    return result
+
+
+def link_candidate(
+    handle: object, owner_token: object, apply: bool, expected_action: object = ""
+) -> dict:
+    if apply:
+        require_write_gate()
+    original, _, candidate, records = selected_candidate(handle, owner_token)
+    result = run_contact_link(
+        "link" if apply else "prepare", records, expected_action if apply else ""
+    )
+    action = clean_text(result.get("action"), 80)
+    allowed = ("Link Selected Cards", "Merge Selected Cards", "Merge and Link Selected Cards")
+    if action not in allowed:
+        raise RuntimeError("Contacts returned an invalid link action")
+    if apply and action != clean_text(expected_action, 80):
+        raise RuntimeError("Contacts link action changed; review the cards again")
+    if apply and result.get("linked") is not True:
+        raise RuntimeError("Contacts did not confirm the link action")
+    if not apply and not isinstance(result.get("ready"), bool):
+        raise RuntimeError("Contacts returned an invalid link preview")
+    return {
+        "handle": original, "name": candidate["name"], "cardCount": len(records),
+        "sourceCount": candidate["sourceCount"], "writeEnabled": write_gate_enabled(),
+        "action": action,
+        **({"linked": True} if apply else {"ready": result["ready"]}),
+    }
+
+
+def validated_repair_fields(value: object, kind: str, key: str) -> list[dict]:
+    if not isinstance(value, list) or not 1 <= len(value) <= MAX_REPAIR_FIELDS:
+        raise RuntimeError("Contacts returned an invalid matching-field list")
+    fields = []
+    seen = set()
+    for raw in value:
+        if not isinstance(raw, dict):
+            raise RuntimeError("Contacts returned an invalid matching field")
+        field_id = clean_text(raw.get("id"), 200)
+        field_value = clean_text(raw.get("value"), 320)
+        label = clean_text(raw.get("label"), 80)
+        if not field_id or field_id in seen or not field_value:
+            raise RuntimeError("Contacts returned an invalid matching field")
+        normalized = normalize_email(field_value) if kind == "email" else normalize_phone(field_value)
+        if normalized != key:
+            raise RuntimeError("Contacts returned a different field value")
+        seen.add(field_id)
+        fields.append({"id": field_id, "value": field_value, "label": label})
+    return fields
+
+
+def inspect_repair(handle: object, token: object, owner_token: object) -> tuple[dict, dict, list[dict]]:
+    original, key, candidate, record, card_number, account_number = selected_card(handle, token)
+    owner_text = clean_text(owner_token, 80)
+    if not _CONTACT_TOKEN.fullmatch(owner_text):
+        raise ValueError("the selected owner token is invalid")
+    _, candidates, _ = contact_candidates(handle)
+    owner = next((option for option in candidates if option["token"] == owner_text), None)
+    if owner is None:
+        raise ValueError("the selected correct contact is no longer a candidate")
+    if owner["token"] == candidate["token"]:
+        raise ValueError("refusing to remove a handle from the selected correct contact")
+    kind = record.get("kind")
+    if kind not in ("phone", "email"):
+        raise RuntimeError("the selected card has no repairable field")
+    result = run_contact_repair({
+        "operation": "inspect", "personUid": record["uid"], "kind": kind, "key": key,
+    })
+    fields = validated_repair_fields(result.get("fields"), kind, key)
+    preview = {
+        "handle": original,
+        "name": candidate["name"],
+        "kind": kind,
+        "fieldCount": len(fields),
+        "labels": [field["label"] for field in fields],
+        "cardNumber": card_number,
+        "cardCount": candidate["recordCount"],
+        "accountNumber": account_number,
+        "sourceName": candidate["cards"][card_number - 1]["sourceName"],
+        "writeEnabled": write_gate_enabled(),
+    }
+    private = {
+        "personUid": record["uid"], "key": key, "kind": kind, "fields": fields,
+        "name": candidate["name"], "handle": original, "source": record["source"],
+        "cardToken": card_token(key, record["source"], record["uid"]),
+    }
+    return preview, private, fields
+
+
+def remove_from_contact(handle: object, token: object, owner_token: object) -> dict:
+    require_write_gate()
+    preview, private, fields = inspect_repair(handle, token, owner_token)
+    if not preview["writeEnabled"]:
+        raise PermissionError("Mac contact writes are disabled")
+    undo_token = write_undo_receipt(private)
+    result = run_contact_repair({
+        "operation": "remove",
+        "personUid": private["personUid"],
+        "kind": private["kind"],
+        "key": private["key"],
+        "fields": fields,
+    })
+    if result.get("removed") is not True or result.get("fieldCount") != len(fields):
+        raise RuntimeError("Contacts did not confirm the removal")
+    return {**preview, "removed": True, "undoToken": undo_token}
+
+
+def undo_contact_removal(token: object) -> dict:
+    require_write_gate()
+    receipt = read_undo_receipt(token)
+    action = clean_text(receipt.get("action"), 40)
+    if action == "edit":
+        before = validated_card_detail(receipt.get("before"))
+        after_draft = validated_card_draft(receipt.get("after"))
+        # The saved response's display name is derived from the applied draft.
+        current = describe_records([{"uid": clean_text(receipt.get("personUid"), 200)}])[0]
+        if card_draft(current) != after_draft:
+            raise ValueError("this card changed after the Blip edit; undo was not applied")
+        result = run_contact_repair({
+            "operation": "edit", "personUid": clean_text(receipt.get("personUid"), 200),
+            "expectedCard": current, "card": card_draft(before),
+        })
+        if result.get("edited") is not True:
+            raise RuntimeError("Contacts did not confirm the edit undo")
+        clear_undo_receipt(receipt["token"])
+        return {
+            "restored": True, "alreadyPresent": False, "action": "edit",
+            "handle": clean_text(receipt.get("handle"), MAX_HANDLE_CHARS),
+            "name": clean_text(receipt.get("name"), MAX_NAME_CHARS), "cardCount": 1,
+            "fieldCount": max(1, len(changed_card_fields(after_draft, card_draft(before)))),
+        }
+    if action == "delete":
+        before = validated_card_detail(receipt.get("before"))
+        result = run_contact_repair({"operation": "restore", "card": card_draft(before)})
+        if result.get("restored") is not True:
+            raise RuntimeError("Contacts did not confirm the deleted-card restore")
+        clear_undo_receipt(receipt["token"])
+        return {
+            "restored": True, "alreadyPresent": False, "action": "delete",
+            "handle": clean_text(receipt.get("handle"), MAX_HANDLE_CHARS),
+            "name": clean_text(receipt.get("name"), MAX_NAME_CHARS), "cardCount": 1,
+            "fieldCount": 1,
+        }
+    if action == "consolidate":
+        target_before = validated_card_detail(receipt.get("targetBefore"))
+        target_after = validated_card_draft(receipt.get("targetAfter"))
+        raw_sources = receipt.get("sources")
+        if not isinstance(raw_sources, list) or not 1 <= len(raw_sources) < 8:
+            raise RuntimeError("contact merge undo receipt is invalid")
+        restore_cards = []
+        for source in raw_sources:
+            if not isinstance(source, dict):
+                raise RuntimeError("contact merge undo receipt is invalid")
+            restore_cards.append(card_draft(validated_card_detail(source.get("card"))))
+        current = describe_records([{"uid": clean_text(receipt.get("targetUid"), 200)}])[0]
+        if card_draft(current) != target_after:
+            raise ValueError("the merged card changed after consolidation; undo was not applied")
+        result = run_contact_repair({
+            "operation": "undo-consolidate",
+            "targetUid": clean_text(receipt.get("targetUid"), 200),
+            "expectedCard": current, "card": card_draft(target_before),
+            "restoreCards": restore_cards,
+        })
+        if result.get("restored") is not True or result.get("sourceCount") != len(restore_cards):
+            raise RuntimeError("Contacts did not confirm the merge undo")
+        clear_undo_receipt(receipt["token"])
+        return {
+            "restored": True, "alreadyPresent": False, "action": "consolidate",
+            "handle": clean_text(receipt.get("handle"), MAX_HANDLE_CHARS),
+            "name": clean_text(receipt.get("name"), MAX_NAME_CHARS),
+            "cardCount": len(restore_cards) + 1, "fieldCount": 1,
+        }
+    kind = receipt.get("kind")
+    key = clean_text(receipt.get("key"), 320)
+    fields = validated_repair_fields(receipt.get("fields"), kind, key)
+    result = run_contact_repair({
+        "operation": "undo",
+        "personUid": clean_text(receipt.get("personUid"), 200),
+        "kind": kind,
+        "key": key,
+        "fields": fields,
+    })
+    if result.get("restored") is not True:
+        raise RuntimeError("Contacts did not confirm the restore")
+    field_count = result.get("fieldCount")
+    if not isinstance(field_count, int) or not 1 <= field_count <= MAX_REPAIR_FIELDS:
+        raise RuntimeError("Contacts returned an invalid restored-field count")
+    clear_undo_receipt(receipt["token"])
+    return {
+        "restored": True,
+        "alreadyPresent": result.get("alreadyPresent") is True,
+        "action": "field-removal",
+        "handle": clean_text(receipt.get("handle"), MAX_HANDLE_CHARS),
+        "name": clean_text(receipt.get("name"), MAX_NAME_CHARS),
+        "cardCount": 1,
+        "fieldCount": field_count,
+    }
+
+
+def _cmd_resolve(args):
+    request = read_resolve_request()
+    operation = request.get("operation")
+    if operation == "discard-unsaved":
+        require_write_gate()
+        result = run_contact_repair({"operation": "discard-unsaved"})
+        discarded = result.get("discarded")
+        if not isinstance(discarded, bool):
+            raise RuntimeError("Contacts returned an invalid unsaved-change result")
+        emit_resolve({"ok": True, "discarded": discarded})
+        return
+    if operation == "vcard":
+        result = contact_vcard(request.get("handle"))
+        emit_resolve({"ok": True, **result}, MAX_VCARD_RESPONSE_BYTES)
+        return
+    if operation == "candidates":
+        original, candidates, _ = contact_candidates(request.get("handle"))
+        emit_resolve({
+            "ok": True,
+            "handle": original,
+            "ambiguous": len(candidates) > 1,
+            "candidates": candidates,
+        })
+        return
+    if operation == "fingerprint":
+        emit_resolve({"ok": True, "fingerprint": store_fingerprint()})
+        return
+    if operation == "audit":
+        # fingerprint taken BEFORE the scan: a change landing mid-scan makes
+        # the next freshness check miss, which is the safe direction
+        fingerprint = store_fingerprint()
+        emit_resolve({"ok": True, "fingerprint": fingerprint,
+                      **audit_contact_handles(request.get("handles"))})
+        return
+    if operation == "open":
+        _, _, selected, selected_record, selected_card_number, selected_account_number = selected_card(
+            request.get("handle"), request.get("token")
+        )
+        url = "addressbook://" + urllib.parse.quote(selected_record["uid"], safe="")
+        result = subprocess.run(
+            ["/usr/bin/open", url], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            raise RuntimeError("Contacts.app could not open the selected card")
+        emit_resolve({
+            "ok": True,
+            "opened": True,
+            "name": selected["name"],
+            "cardNumber": selected_card_number,
+            "cardCount": selected["recordCount"],
+            "accountNumber": selected_account_number,
+            "sourceName": selected["cards"][selected_card_number - 1]["sourceName"],
+        })
+        return
+    if operation == "compare":
+        result = compare_candidate(request.get("handle"), request.get("ownerToken"),
+                                   request.get("otherOwnerToken"))
+        emit_resolve({"ok": True, **result})
+        return
+    if operation == "edit-prepare":
+        preview, _ = prepare_card_edit(
+            request.get("handle"), request.get("ownerToken"), request.get("token"),
+            request.get("revision"), request.get("card"),
+        )
+        emit_resolve({"ok": True, "preview": preview})
+        return
+    if operation == "edit":
+        result = apply_card_edit(
+            request.get("handle"), request.get("ownerToken"), request.get("token"),
+            request.get("revision"), request.get("card"), request.get("planHash"),
+        )
+        emit_resolve({"ok": True, **result})
+        return
+    if operation == "delete-prepare":
+        preview, _ = prepare_card_delete(
+            request.get("handle"), request.get("ownerToken"), request.get("token"),
+            request.get("revision"),
+        )
+        emit_resolve({"ok": True, "preview": preview})
+        return
+    if operation == "delete":
+        result = apply_card_delete(
+            request.get("handle"), request.get("ownerToken"), request.get("token"),
+            request.get("revision"), request.get("planHash"),
+        )
+        emit_resolve({"ok": True, **result})
+        return
+    if operation == "merge-prepare":
+        preview, _ = prepare_consolidation(
+            request.get("handle"), request.get("ownerToken"), request.get("targetToken"),
+            request.get("revisions"), request.get("card"), request.get("otherOwnerToken"),
+        )
+        emit_resolve({"ok": True, "preview": preview})
+        return
+    if operation == "merge":
+        result = apply_consolidation(
+            request.get("handle"), request.get("ownerToken"), request.get("targetToken"),
+            request.get("revisions"), request.get("card"), request.get("planHash"),
+            request.get("otherOwnerToken"),
+        )
+        emit_resolve({"ok": True, **result})
+        return
+    if operation == "link-prepare":
+        result = link_candidate(request.get("handle"), request.get("ownerToken"), False)
+        emit_resolve({"ok": True, **result})
+        return
+    if operation == "link":
+        result = link_candidate(
+            request.get("handle"), request.get("ownerToken"), True,
+            request.get("expectedAction"),
+        )
+        emit_resolve({"ok": True, **result})
+        return
+    if operation == "inspect":
+        preview, _, _ = inspect_repair(
+            request.get("handle"), request.get("token"), request.get("ownerToken")
+        )
+        emit_resolve({"ok": True, "preview": preview})
+        return
+    if operation == "remove":
+        result = remove_from_contact(
+            request.get("handle"), request.get("token"), request.get("ownerToken")
+        )
+        emit_resolve({"ok": True, **result})
+        return
+    if operation == "undo":
+        result = undo_contact_removal(request.get("undoToken"))
+        emit_resolve({"ok": True, **result})
+        return
+    raise ValueError(
+        "operation must be discard-unsaved, vcard, candidates, audit, open, compare, edit-prepare, edit, delete-prepare, "
+        "delete, merge-prepare, merge, link-prepare, link, inspect, remove, or undo"
+    )
+
+
+def cmd_resolve(args):
+    try:
+        _cmd_resolve(args)
+    except Exception as error:
+        message = clean_text(str(error), 180) or "contact identity operation failed"
+        try:
+            emit_resolve({"ok": False, "error": message})
+        finally:
+            raise SystemExit(1)
 
 
 def fetch_contacts(con: sqlite3.Connection) -> list[dict]:
@@ -290,24 +2050,27 @@ def cmd_dump(args):
 
 def cmd_sources(args):
     paths = source_dbs()
+    labels = contact_source_names(paths)
     if args.json:
         rows = []
         for p in paths:
+            source_name = labels.get(source_identifier(p), "Contacts")
             try:
                 with open_db(p) as con:
                     n = con.execute("SELECT COUNT(*) FROM ZABCDRECORD").fetchone()[0]
-                rows.append({"path": p, "records": n, "size": os.path.getsize(p)})
+                rows.append({"name": source_name, "records": n, "size": os.path.getsize(p)})
             except sqlite3.DatabaseError:
-                rows.append({"path": p, "error": "open failed"})
+                rows.append({"name": source_name, "error": "open failed"})
         print(json.dumps(rows, indent=2))
         return
     for p in paths:
+        source_name = labels.get(source_identifier(p), "Contacts")
         try:
             with open_db(p) as con:
                 n = con.execute("SELECT COUNT(*) FROM ZABCDRECORD").fetchone()[0]
-            print(f"{n:>6} records  {os.path.getsize(p):>12} bytes  {p}")
+            print(f"{n:>6} records  {os.path.getsize(p):>12} bytes  {source_name}")
         except sqlite3.DatabaseError as e:
-            print(f"  ERROR ({e})  {p}")
+            print(f"  ERROR ({e})  {source_name}")
 
 
 def main() -> None:
@@ -322,6 +2085,7 @@ def main() -> None:
     s = sub.add_parser("list");    s.add_argument("n", nargs="?", type=int, default=50); s.set_defaults(func=cmd_list)
     s = sub.add_parser("find");    s.add_argument("query"); s.add_argument("n", nargs="?", type=int, default=20); s.set_defaults(func=cmd_find)
     s = sub.add_parser("lookup");  s.add_argument("handle"); s.set_defaults(func=cmd_lookup)
+    s = sub.add_parser("resolve");  s.set_defaults(func=cmd_resolve)
     s = sub.add_parser("dump");    s.set_defaults(func=cmd_dump)
     s = sub.add_parser("sources"); s.set_defaults(func=cmd_sources)
 

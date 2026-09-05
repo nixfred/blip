@@ -51,3 +51,53 @@ a test fixture. Deferred items are listed in ROADMAP.md.
 Still open and honest about it: drafts in `$XDG_RUNTIME_DIR/blip` are swept
 lazily rather than deleted on cancel; cache file names include the Mac
 attachment ROWID.
+
+## Identity resolver boundary (2026-09-02)
+
+Ambiguous Contacts matches remain fail-closed: the bridge returns no guessed
+name. The settings resolver is a separate, explicit path with these limits:
+
+- Linux request stdin: 4 KiB; local `identities.json`: 48 KiB, 64 choices,
+  320 characters per handle, 160 per name; helper output: 48 KiB.
+- Mac scan: 64 Contacts account stores, 64 matching records, eight distinct
+  candidate names; a selected comparison is limited to eight active cards and
+  16 values per field kind; response: 48 KiB; Linux bridge deadline is 15
+  seconds for lookup/open and 35 seconds for Contacts automation.
+- Controls and bidirectional overrides are removed before display; QML checks
+  the bounded helper schema again before retaining it.
+- The handle crosses the process/ssh boundary on stdin, never argv. A choice
+  is revalidated against a fresh Mac candidate set before the owner-only,
+  descriptor-relative atomic config write.
+- **Open card on Mac** accepts only a revalidated opaque per-card token and
+  invokes `/usr/bin/open` with a percent-encoded `addressbook://` persistent id
+  via a fixed argument array. Source UUIDs and record ids stay on the Mac. It
+  never writes Apple’s private SQLite stores.
+- Candidate cards are intersected with the current Contacts object layer, so
+  inactive per-account cache rows are not presented as editable contacts.
+- Card comparison is read-only and returns only bounded, sanitized fields with
+  opaque card tokens; raw source and record identifiers stay on the Mac. The
+  QML layer revalidates the full schema before rendering it as plain text.
+- Optional automatic repair is fail-closed behind two independent opt-ins:
+  `contact_writes=on` in the owner-controlled Linux config and a 0600 regular
+  `~/.blip/contact-writes-enabled` gate on the Mac that the forced-command key
+  cannot create. The bridge revalidates the opaque card token, Contacts.app
+  verifies the exact matching field set, refuses unrelated unsaved changes,
+  and only then removes through its supported scripting API. One private,
+  seven-day Mac-local receipt supports an immediate exact-field undo.
+- Consolidation and whole-card deletion receive only the revalidated private
+  card identifiers and bounded draft over stdin, then use Apple's public
+  `CNSaveRequest` API. Same-account changes share one request; cross-account
+  consolidation saves the complete survivor first and deletes sources in
+  container-scoped requests because Contacts rejects cross-store transactions.
+  The compiled helper fetches non-unified source records, rejects oversized or
+  malformed input, returns no identifiers, and is not exposed by the dedicated
+  SSH forced-command allowlist.
+- Native link/merge uses Contacts' exact current selection and one allowlisted,
+  enabled menu action through Accessibility. Preview and execution are separate;
+  execution pins the action text the user confirmed and aborts if it changes.
+  Contacts refuses unrelated unsaved changes. Linking may sync upstream and has
+  no Blip undo receipt, so Blip never runs it during discovery or preview.
+
+The Bun and Python suites exercise malformed types, oversize sentinels,
+symlinks, FIFOs, equivalent-handle collisions, hostile display fields,
+stdin-not-argv transport, candidate caps, and the fixed open argument shape.

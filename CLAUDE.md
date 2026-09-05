@@ -6,7 +6,7 @@ treating a Mac as the gateway. Read this before touching anything.
 ## Shape
 
 ```
-(Mac side)    bridge/mac/           VENDORED from claude-on-mac (pin in bridge/BRIDGE-VERSION; refresh with
+(Mac side)    bridge/mac/           VENDORED from claude-on-mac with documented Blip extensions (pin in bridge/BRIDGE-VERSION; refresh with
               imsg imsg-send        scripts/sync-bridge.sh <rev>). Installed to ~/.blip/bin on the Mac by
               contacts tcc-check    bridge/mac/install.sh. Blip is ONE source for release (Fred's rule).
               blip-dispatch         forced-command gate for ~/.ssh/blip_ed25519: only the five tools run.
@@ -17,6 +17,11 @@ treating a Mac as the gateway. Read this before touching anything.
                                     — single-quoted, expands on the MAC). `ssh -n` preflight; exit 69 offline.
                                     Blip only ever calls ~/bin/imsg*. No hostnames in code, ever.
 collector.ts                        poll → {threads, unread, toast}. Pure functions + one spawn.
+preferences.ts                      bounded schema + atomic ~/.config/blip/preferences.json I/O.
+BlipPreferences.qml                 one shared live preference source; QML never parses the writable file.
+identities.ts                       bounded ~/.config/blip/identities.json choices + Mac candidate broker.
+BlipIdentities.qml                  QML helper client; handles travel to the bridge over stdin, never argv.
+BlipSettings.qml                    in-app editor for appearance and ambiguous contact names.
 thread.ts                           one conversation → decorated bubbles. Pure + one spawn.
 fetch.ts                            attachment id → ~/.cache/blip/att (0700/0600, 500MB LRU).
 send-file.ts                        local file + caption → imsg-send --file-stdin --text-stdin-bytes N
@@ -114,7 +119,69 @@ what it is handed. Keep it that way.
 - **The Linux shims' ssh preflight must use `ssh -n`.** A bare
   `ssh <mac> true` connectivity probe EATS STDIN, which silently empties
   `imsg-send --file-stdin` payloads. Fixed 2026-08-31.
-- **`bridge.conf` is data, never `source`d.** The shim parses four keys and
+- **Pins belong to Messages.app.** The ordered pin list lives in
+  `com.apple.messages.pinning.plist`, not `chat.db`. `imsg chats` resolves its
+  bounded pD/pP tokens to canonical chat identifiers and emits pin state and
+  order; Blip must not create a divergent Linux-only favorites list.
+- **Preferences cross a bounded helper.** QML never feeds
+  `~/.config/blip/preferences.json` into `FileView`. `preferences.ts` rejects
+  symlinks/FIFOs/wrong owners/oversized or invalid JSON and writes 0600 via a
+  pinned directory fd + atomic rename. Keep the schema portable and versioned.
+- **Ambiguous contact names are explicit choices, never guesses.**
+  `~/.config/blip/identities.json` is a portable, versioned, owner-only map
+  validated and written by `identities.ts`. Candidate lookups are bounded on
+  both sides of ssh and carry the handle via stdin. A display-name preference
+  is optional and separate from contact management. Session-only candidate
+  selection must be enough to compare, edit, delete, consolidate, link, or
+  repair cards; those operations must never require or create an
+  `identities.json` entry. Saving a display preference remains an explicit,
+  separately labeled action. Mac review uses
+  opaque per-card tokens to open an exact validated `addressbook://` record in
+  Contacts.app. Card comparison returns bounded selected-card fields and opaque
+  content revisions with raw ids retained on the Mac. Full-card edits,
+  deletions, and consolidations require a hashed preview, revalidate every
+  exact revision at apply time, and write a private bounded undo receipt before
+  Contacts.app saves. Edits preserve the target photo; deletion and
+  consolidation receipts cannot guarantee restored account placement, links,
+  or photos, so the destructive confirmation must keep saying so. Gated narrow
+  repair can remove an exact revalidated
+  phone/email with confirmation and an undo receipt. Cross-NAME
+  consolidation exists but only with BOTH owner tokens presented explicitly
+  (the user declared the two names the same person); it is merge-only —
+  per-card edit/delete/link keep single-person authority — and the union
+  renumbers account numbers so they stay unique. Gated linking uses only
+  Contacts' allowlisted enabled menu action, pins the previewed action through
+  execution, and requires another confirmation. Blip never edits the private
+  AddressBook SQLite database.
+- **Contacts saves are async to every read path.** A CNContactStore commit is
+  not instantly visible to Contacts.app's JXA view (`describe`) or the
+  abcddb, so read-your-write verification must settle-poll
+  (`settled_card_detail`); comparing a fresh save against an immediate
+  read-back falsely reports "Contacts changed the card". Saves can also throw
+  transient Cocoa 134092 while contactsd rebuilds its graph or refreshes
+  CardDAV accounts — and Blip's own consolidation preflight launches
+  Contacts.app, which triggers those refreshes — so every mutating stage in
+  contact-delete.swift retries on a fresh store session. Google CardDAV also
+  REWRITES person UIDs shortly after a card is created or synced; never cache
+  a Gmail-container uid across user think-time without revalidating.
+- **Never rebuild a card's labeled-value collections wholesale.** Replacing a
+  value Contacts already has forces contactsd to fault the old row out, and
+  ONE damaged stored row then fails the whole save with Cocoa 134092 —
+  persistently ("Unhandled error occurred during faulting"). apply() reuses
+  the contact's own CNLabeledValue objects for unchanged label+value pairs
+  and leaves an equal birthday untouched (synced birthdays carry
+  calendar/timezone the drafts' bare components lack). Beware the label
+  round-trip: Contacts.app's scripting layer reports UNLABELED values under
+  default kind names ("Email", "Phone"), which must normalize back to nil —
+  matching on the literal name both misses the source row and mints a custom
+  label. When the native path faults anyway, Contacts.app's own write path
+  still works — the pipeline recovers the reviewed plan through setCard and a
+  guarded delete-fallback (native stays primary). Two scripting regressions
+  on macOS 15.5: the add-to-person Apple event fails with "No error. (0)" —
+  push onto the person's collection specifiers instead — and removals can
+  fail with "Message not understood", so add-only edits must never take the
+  remove-all path.
+- **`bridge.conf` is data, never `source`d.** The shim parses an allowlisted schema and
   validates them; keep it that way (audit #7). `automation=on` is what lets
   `qs ipc … goto/compose/bubbles` work — off, they return a refusal string.
 - **Opening a link = `xdg-open` THEN focus the browser window.** Omarchy runs
