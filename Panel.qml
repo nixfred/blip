@@ -61,7 +61,9 @@ Panel {
     owner: root.barIdentity
     bar: root.bar
     open: root.opened
-    focusTarget: view.inThread ? view.composeEditor : keyCatcher
+    // List mode parks focus INSIDE the view: PanelKeyCatcher still takes its
+    // keys first (Keys.BeforeItem), and PgUp/PgDn/Home/End fall through to it.
+    focusTarget: view.inThread ? view.composeEditor : view.navigationKeys
     // 20% narrower than it was (Fred, 2.3.1). Messages' own sidebar is a
     // narrow column; 440 read like a file browser.
     contentWidth: panel.fittedContentWidth(Style.space(352))
@@ -96,7 +98,7 @@ Panel {
         foreground: root.bar ? root.bar.foreground : Color.foreground
         urgent: root.bar ? root.bar.urgent : Color.urgent
         themeFont: root.bar ? root.bar.fontFamily : Style.font.family
-        onNavigationFocusRequested: keyCatcher.forceActiveFocus()
+        onNavigationFocusRequested: view.navigationKeys.forceActiveFocus()
       }
     }
   }

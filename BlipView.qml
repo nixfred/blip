@@ -595,7 +595,8 @@ FocusScope {
    *  PgDn mirrors it with the bottommost, and past the newest leaves. */
   function pageBubbles(dy) {
     if (bubbles.length === 0) return
-    var edge = edgeVisibleBubble(dy)
+    var items = repeaterItems(bubbleRepeater)
+    var edge = edgeVisible(flick, items, dy)
     if (edge === bubbleCursor && bubbleCursorItem) {
       if (dy > 0 && edge === bubbles.length - 1) { leaveBubbles(); return }
       // Page so the selected row lands at the OPPOSITE edge — a screen with
@@ -603,28 +604,11 @@ FocusScope {
       var it = bubbleCursorItem, margin = Style.space(6)
       scrollConversation(dy < 0 ? it.y + it.height + margin - flick.height - flick.contentY
                                 : it.y - margin - flick.contentY)
-      edge = edgeVisibleBubble(dy)
+      edge = edgeVisible(flick, items, dy)
     }
     if (edge < 0) return
     bubbleCursor = edge
     revealBubbleCursor()
-  }
-  /** Index of the topmost (dy < 0) or bottommost (dy > 0) bubble that is
-   *  WHOLLY inside the viewport — a sliver of the neighbour above the
-   *  selection must not count, or the next PgUp steps one row instead of
-   *  paging. Falls back to a partly visible row (a picture taller than the
-   *  view); -1 when nothing is laid out yet. */
-  function edgeVisibleBubble(dy) {
-    var top = flick.contentY, bottom = top + flick.height
-    var n = bubbleRepeater.count, partial = -1
-    for (var k = 0; k < n; k++) {
-      var i = dy < 0 ? k : n - 1 - k
-      var it = bubbleRepeater.itemAt(i)
-      if (!it || it.y >= bottom || it.y + it.height <= top) continue
-      if (partial < 0) partial = i
-      if (dy < 0 ? it.y >= top - 1 : it.y + it.height <= bottom + 1) return i
-    }
-    return partial
   }
   function revealBubbleCursor() {
     var it = bubbleCursorItem   // set synchronously by the row's hasCursor binding
@@ -1758,6 +1742,11 @@ FocusScope {
     // and Down in an empty field hands it back (Omarchy's SearchableDropdown).
     if (dy < 0 && cursor <= 0) { startSearch(); return }
     cursor = Math.max(0, Math.min(threads.length - 1, cursor + dy))
+    cursorMoved()
+  }
+  /** Every way the thread cursor moves ends here: keep the row in view and,
+   *  in split view, arm the preview — arrows, paging and Home/End alike. */
+  function cursorMoved() {
     scrollCursorIntoView()
     if (splitView) peekTimer.restart()
   }
@@ -1781,6 +1770,79 @@ FocusScope {
   }
   function activateCursor() {
     if (listShowing && cursor >= 0) openThread(threads[cursor])
+  }
+  // ---- paging: PgUp/PgDn select the row at the edge of the viewport, and
+  // page a screen (one row of overlap) when the cursor is already there;
+  // Home/End take the first/last row. Omarchy's menu, clipboard and emoji
+  // lists bind the same four keys. Whichever of the three lists is showing
+  // — new-message hits, search hits, threads — is the one that moves.
+  function repeaterItems(rep) {
+    var out = []
+    for (var i = 0; i < rep.count; i++) out.push(rep.itemAt(i))
+    return out
+  }
+  /** Index into `items` of the topmost (dy < 0) or bottommost (dy > 0) row
+   *  wholly inside `fl`'s viewport; a partly visible row is the fallback
+   *  (a row taller than the view); -1 when nothing is laid out. Wholly, not
+   *  partly: a sliver of the neighbour above the cursor must not count, or
+   *  the next PgUp steps one row instead of paging. */
+  function edgeVisible(fl, items, dy) {
+    var top = fl.contentY, bottom = top + fl.height, partial = -1
+    for (var k = 0; k < items.length; k++) {
+      var i = dy < 0 ? k : items.length - 1 - k
+      var it = items[i]
+      if (!it) continue
+      var y = it.mapToItem(fl.contentItem, 0, 0).y
+      if (y >= bottom || y + it.height <= top) continue
+      if (partial < 0) partial = i
+      if (dy < 0 ? y >= top - 1 : y + it.height <= bottom + 1) return i
+    }
+    return partial
+  }
+  /** The row PgUp/PgDn lands on: the edge row, or — when the cursor already
+   *  sits there — the edge row after paging so the cursor row lands at the
+   *  opposite edge. null when the list has nothing laid out. */
+  function pageTo(fl, items, currentItem, dy) {
+    var edge = edgeVisible(fl, items, dy)
+    if (edge >= 0 && items[edge] === currentItem) {
+      var y = currentItem.mapToItem(fl.contentItem, 0, 0).y, m = Style.space(6)
+      var max = Math.max(0, fl.contentHeight - fl.height)
+      fl.contentY = Math.max(0, Math.min(max, dy < 0 ? y + currentItem.height + m - fl.height : y - m))
+      edge = edgeVisible(fl, items, dy)
+    }
+    return edge >= 0 ? items[edge] : null
+  }
+  function indexOfChat(chat) {
+    for (var i = 0; i < threads.length; i++) if (String(threads[i].chat) === String(chat)) return i
+    return -1
+  }
+  // Which of the three lists the paging keys drive, answered once per press:
+  // its rows, its length, how a landed row maps back to a cursor index
+  // (search/new rows carry their model index; a thread row is found by chat,
+  // since the thread list is two Repeaters), and how its cursor is set.
+  function activeList() {
+    if (newMode) return { items: repeaterItems(newRepeater), count: newResults.length,
+      indexOf: function(it) { return it.index }, set: function(i) { newCursor = i; scrollCursorIntoView() } }
+    if (searchShowing) return { items: repeaterItems(searchRepeater), count: searchResults.length,
+      indexOf: function(it) { return it.index }, set: function(i) { searchCursor = i; scrollCursorIntoView() } }
+    return { items: repeaterItems(pinnedRepeater).concat(repeaterItems(unpinnedRepeater)), count: threads.length,
+      indexOf: function(it) { return indexOfChat(it.modelData.chat) }, set: function(i) { cursor = i; cursorMoved() } }
+  }
+  function pageActive(dy) {
+    var l = activeList(), it = pageTo(threadFlick, l.items, cursorRow, dy)
+    if (it) l.set(l.indexOf(it))
+  }
+  function jumpActive(toEnd) {
+    var l = activeList()
+    if (l.count > 0) l.set(toEnd ? l.count - 1 : 0)
+  }
+  /** PgUp/PgDn/Home/End for whichever list is showing; true if consumed. */
+  function catchPagingKey(key) {
+    if (key === Qt.Key_PageUp) { pageActive(-1); return true }
+    if (key === Qt.Key_PageDown) { pageActive(1); return true }
+    if (key === Qt.Key_Home) { jumpActive(false); return true }
+    if (key === Qt.Key_End) { jumpActive(true); return true }
+    return false
   }
   function handleTextKey(text) {
     if (text === "/") { startSearch(); return true }
@@ -1818,7 +1880,17 @@ FocusScope {
     // Right = into the right pane: focus the compose field of the thread on
     // screen (which commits a peek). Left in an EMPTY compose field comes back.
     if (key === Qt.Key_Right && inThread) { composeField.forceActiveFocus(); return true }
-    return false
+    return listShowing && catchPagingKey(key)
+  }
+  /** List-mode focus holder. The panel's PanelKeyCatcher takes the arrows,
+   *  Enter and letters BEFORE the focused item and lets the rest fall
+   *  through; parking focus here (rather than on the catcher itself) is what
+   *  lets PgUp/PgDn/Home/End reach the list. The window's navCatcher does
+   *  the same job with its own handler. */
+  readonly property alias navigationKeys: navKeys
+  Item {
+    id: navKeys
+    Keys.onPressed: function(event) { if (root.catchNavKey(event.key)) event.accepted = true }
   }
   function catchEscape() {
     if (newField.activeFocus || newMode) { exitNew(); return true }
@@ -2043,6 +2115,7 @@ FocusScope {
                   event.accepted = true
                 }
                 else if (event.key === Qt.Key_Up) { root.moveNewCursor(-1); event.accepted = true }
+                else if (root.catchPagingKey(event.key)) event.accepted = true
               }
               onVisibleChanged: if (visible) {
                 forceActiveFocus()
@@ -2061,6 +2134,7 @@ FocusScope {
             }
 
             Repeater {
+              id: newRepeater
               model: root.online && root.listShowing && root.newMode ? root.newResults : []
               delegate: Rectangle {
                 id: contactHit
@@ -2125,6 +2199,7 @@ FocusScope {
                   event.accepted = true
                 }
                 else if (event.key === Qt.Key_Up) { root.moveSearchCursor(-1); event.accepted = true }
+                else if (root.catchPagingKey(event.key)) event.accepted = true
               }
             }
 
@@ -2143,6 +2218,7 @@ FocusScope {
               Layout.bottomMargin: Style.space(8)
 
               Repeater {
+                id: pinnedRepeater
                 model: pinnedGrid.visible ? root.pinnedThreads : []
                 delegate: Rectangle {
                   id: pinnedTile
@@ -2279,6 +2355,7 @@ FocusScope {
             }
 
             Repeater {
+              id: searchRepeater
               model: root.online && root.listShowing && root.searchShowing ? root.searchResults : []
               delegate: Rectangle {
                 id: searchHit
@@ -2354,6 +2431,7 @@ FocusScope {
             }
 
             Repeater {
+              id: unpinnedRepeater
               model: root.online && root.listShowing && !root.searchShowing && !root.newMode ? root.unpinnedThreads : []
               delegate: Rectangle {
                 id: threadRow

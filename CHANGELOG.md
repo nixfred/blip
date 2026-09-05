@@ -26,6 +26,13 @@
   where an address can change, the key stays unpinned (`docs/SECURITY.md` shows
   the manual pin). A re-run replaces the key's line, so a changed address is one
   re-run away.
+
+- **The lists page from the keyboard.** `PgUp`/`PgDn` select the row at the
+  edge of the view and then move a screen per press, `Home`/`End` take the
+  first and last row — in the thread list, the search hits and the
+  new-message picker, in the panel and the window. Omarchy's own lists bind
+  the same four keys. In the panel, list-mode focus now sits inside the view
+  so the keys the PanelKeyCatcher does not claim reach it.
 - **The window's sidebar previews on the cursor.** Rest the arrow keys on a row
   for a beat and the right pane shows that thread, the way Messages' sidebar
   does. Focus stays in the list and the thread is *not* marked read; Enter, a

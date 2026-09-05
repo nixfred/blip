@@ -533,6 +533,7 @@ helper; the optional availability check needs Automation → Contacts on the Mac
 | list | `Enter` · `1`–`9` | open thread (the first nine rows show the digit; Super+M jumps from an empty compose) |
 | list (window) | rest on a row | the right pane shows that thread, like Messages' sidebar — without marking it read; `Enter`, a click or typing commits it |
 | window | `→` · `←` | into the compose field · back to the sidebar (from the start of the text, or an empty field) |
+| list | `PgUp` / `PgDn` · `Home` / `End` | select the row at the edge of the view, then a screen further each press · first / last row — in the thread list, the search hits and the new-message picker alike |
 | list | `r` | refresh |
 | list | `a` · *mark all read* link | clear every badge and dot — and tell the Mac, so your iPhone catches up too |
 | list | `/` | search conversations by name as you type, then messages; Enter opens the highlight, Esc backs out |
