@@ -13,6 +13,12 @@ function handleTextKeySource() {
   return panel.slice(start, end);
 }
 
+/** Body of a root-level BlipView function, up to its own closing brace. */
+function qmlFunction(name: string) {
+  const start = panel.indexOf(`function ${name}(`);
+  return panel.slice(start, panel.indexOf("\n  }\n", start));
+}
+
 describe("QML safety invariants", () => {
   test("group sends use the cached AppleScript GUID", () => {
     expect(panel).toContain('["--chat-id", String(root.active.guid)]');
@@ -182,6 +188,55 @@ describe("QML safety invariants", () => {
     expect(panel).toContain("newSearchTimer.restart()");
     expect(panel).not.toContain("forceLayout");
     expect(panel.indexOf("onAccepted: root.acceptNewField()")).toBeGreaterThan(-1);
+  });
+
+  test("every cursor move keeps its row in view and stops at the ends", () => {
+    // The list is a multi-section Column, so there is no ListView to do this;
+    // each move function ends by scrolling its row into the viewport. A modulo
+    // here would bring the wrap-around back.
+    for (const name of ["moveCursor", "moveSearchCursor", "moveNewCursor"]) {
+      const fn = qmlFunction(name);
+      expect(fn).toContain("Math.max(0, Math.min(");
+      expect(fn).not.toContain("%");
+      expect(fn).toContain("scrollCursorIntoView()");
+    }
+    const scroll = qmlFunction("scrollCursorIntoView");
+    expect(scroll).toContain("row.mapToItem(threadFlick.contentItem, 0, 0)");
+    expect(scroll).toContain("Math.min(maxY, bottom + margin - threadFlick.height)");
+  });
+
+  test("rows register themselves as the cursor row instead of scanning threads", () => {
+    // threadIndex() walked every thread per row per keypress; cursorChat is one
+    // string compare, and the row that matches hands itself to cursorRow so
+    // the move functions never translate indexes between the four models.
+    expect(panel).not.toContain("threadIndex(");
+    expect(panel.split("root.cursorChat === String(modelData.chat)").length - 1).toBe(2);
+    expect(panel.split("onHasCursorChanged: if (hasCursor) root.cursorRow = ").length - 1).toBe(4);
+  });
+
+  test("leaving a field or a conversation brings the cursor row back", () => {
+    // startSearch/startNew scroll to the top (the field sits above the rows)
+    // and back() parks a mouse user there; the keyboard cursor is restored
+    // after the rows have been rebuilt, hence the deferral.
+    expect(qmlFunction("startSearch")).toContain("threadFlick.contentY = 0");
+    expect(qmlFunction("startNew")).toContain("threadFlick.contentY = 0");
+    expect(qmlFunction("exitSearch")).toContain("Qt.callLater(scrollCursorIntoView)");
+    expect(qmlFunction("exitNew")).toContain("Qt.callLater(scrollCursorIntoView)");
+    const back = qmlFunction("back");
+    expect(back).toContain("threadFlick.contentY = 0");
+    expect(back.indexOf("threadFlick.contentY = 0")).toBeLessThan(back.indexOf("scrollCursorIntoView()"));
+    // Down in an empty field starts from the first row; Esc keeps the old cursor.
+    expect(panel.split('if (text === "") root.listFromTop()').length - 1).toBe(2);
+    expect(qmlFunction("listFromTop")).toContain("cursor = 0");
+  });
+
+  test("app window walks the list with Up/Down/Enter only while no editor has focus", () => {
+    expect(window).toContain("view.catchNavKey(event.key)");
+    const fn = qmlFunction("catchNavKey");
+    expect(fn.indexOf("if (editorActive) return false")).toBeLessThan(fn.indexOf("Qt.Key_Down"));
+    expect(fn).toContain("moveCursor(1)");
+    expect(fn).toContain("moveCursor(-1)");
+    expect(fn).toContain("activateCursor()");
   });
 
   test("an old toast can still reopen its conversation (omarchy-exec-argv)", () => {
