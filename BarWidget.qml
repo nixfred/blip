@@ -75,6 +75,11 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  // Omarchy's panel hotkeys (`omarchy-shell shell toggle nixfred.blip`,
+  // SUPER+CTRL+<n> by bar position) find a bar widget's panel through open(),
+  // close() AND this property — without it the shell logs "summon: no live
+  // bar widget" and does nothing. Same line as Omarchy's clock widget.
+  readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   function open() { if (panelLoader.item) panelLoader.item.open() }
   function close() { if (panelLoader.item) panelLoader.item.close() }
   function toggle() { if (panelLoader.item) panelLoader.item.toggle() }

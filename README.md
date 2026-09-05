@@ -149,6 +149,13 @@ Linux side. If the Mac is asleep, the widget dims and says so.
   box focused (the Omarchy daemon renders no action buttons, so click IS
   the reply path)
 
+**Hotkey for the panel**
+- `omarchy-shell shell toggle nixfred.blip` opens and closes the panel the way
+  Omarchy's own panels do, so a stock binding in `~/.config/hypr/bindings.lua`
+  is all it takes — `o.bind("SUPER + CTRL + M", "Blip", "omarchy-shell shell toggle nixfred.blip")`.
+  Omarchy's `SUPER+CTRL+<n>` (panel *n* in the bar's right section) reaches
+  it too. On a multi-monitor bar the panel lives on the first screen's copy.
+
 **The app**
 - double-click the bar icon, press `SUPER+M`, or IPC `app` for a
   Messages-style window (IPC `window` is a plain toggle). For the keybind, add
@@ -492,6 +499,7 @@ rather than hang:
 IPC, for scripts and other plugins:
 
 ```sh
+omarchy-shell shell toggle nixfred.blip                                # open/close the panel (Omarchy's standard path)
 qs -p /usr/share/omarchy/shell ipc call nixfred.blip status
 qs -p /usr/share/omarchy/shell ipc call nixfred.blip goto 15551234567   # bare digits
 qs -p /usr/share/omarchy/shell ipc call nixfred.blip read               # mark all read

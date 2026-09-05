@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Omarchy's panel hotkeys reach Blip.** `omarchy-shell shell toggle
+  nixfred.blip` and `SUPER+CTRL+<n>` did nothing — the shell logged "summon:
+  no live bar widget": the bar looks a panel up through `open()`, `close()`
+  and an `opened` property, and the widget had no `opened`. One readonly
+  property, the same line Omarchy's clock and weather widgets carry; the
+  README shows the stock `o.bind` for it.
 - **Bug hunt (Codex, gpt-6-astra), fourteen fixes.** A 2FA code was written
   to Omarchy's on-disk notification history — the daemon persists every
   displayed toast regardless of the `transient` hint — so the toast now says a

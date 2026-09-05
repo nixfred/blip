@@ -184,6 +184,14 @@ describe("QML safety invariants", () => {
     expect(panel.indexOf("onAccepted: root.acceptNewField()")).toBeGreaterThan(-1);
   });
 
+  test("Omarchy's shell toggle can find the panel", () => {
+    // Bar.findPanelWidget wants open(), close() and `opened` on the widget
+    // item; drop `opened` and every SUPER+CTRL panel hotkey silently skips Blip.
+    expect(widget).toContain("readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false");
+    expect(widget).toContain("function open() {");
+    expect(widget).toContain("function close() {");
+  });
+
   test("an old toast can still reopen its conversation (omarchy-exec-argv)", () => {
     // --action=default dies with the notify-send process after eight seconds.
     // The hint is what Omarchy persists, so a row in the notification center
