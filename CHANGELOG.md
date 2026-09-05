@@ -7,7 +7,9 @@
   no live bar widget": the bar looks a panel up through `open()`, `close()`
   and an `opened` property, and the widget had no `opened`. One readonly
   property, the same line Omarchy's clock and weather widgets carry; the
-  README shows the stock `o.bind` for it.
+  README shows the stock `o.bind` for it. The ⇱ tooltip and the security-code
+  toast no longer name SUPER+M and Super+Shift+V: both are bindings the README
+  asks you to add yourself, and Omarchy's own tooltips name no keys.
 - **Bug hunt (Codex, gpt-6-astra), fourteen fixes.** A 2FA code was written
   to Omarchy's on-disk notification history — the daemon persists every
   displayed toast regardless of the `transient` hint — so the toast now says a

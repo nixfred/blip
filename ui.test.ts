@@ -73,7 +73,10 @@ describe("QML safety invariants", () => {
     // the popout gets out of the way, and closes BEFORE the window is shown
     expect(panel).toContain('hostWidget.close()');
     expect(panel.indexOf("hostWidget.close()")).toBeLessThan(panel.indexOf("hostWidget.showApp()"));
-    expect(panel).toContain('tooltipText: "Open the app window (SUPER+M)"');
+    // The tooltip names the action, not a key: SUPER+M is an optional
+    // binding from the README, and Omarchy's own tooltips name no keys.
+    expect(panel).toContain('tooltipText: "Open the app window"');
+    expect(panel).not.toContain("SUPER+M)");
   });
 
   test("group rows and tiles show the GROUP's photo, never the last speaker's", () => {

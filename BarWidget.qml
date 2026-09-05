@@ -678,7 +678,7 @@ BarWidget {
     // one is recorded — so a body with the code put the code on disk (Astra
     // #1). The toast says a code arrived; click copies it from memory.
     var body = (pendingCode.domain !== "" ? "For " + pendingCode.domain + " · " : "")
-             + "Click to copy · Super+Shift+V types it"
+             + "Click to copy"
     fireToasts([{ chat: "", name: "Security code from " + who, text: body, ts: pendingCode.ts, key: "", code: pendingCode.code }])
   }
   // sh reads the code from its environment, hands it to the tool on stdin.
