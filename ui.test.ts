@@ -70,9 +70,11 @@ describe("QML safety invariants", () => {
     expect(panel).toContain("var sentUrl = root.firstUrl(completedText)");
     expect(panel).toContain("function openApp()");
     expect(panel).toContain('hostWidget.showApp()');
-    // the popout gets out of the way, and closes BEFORE the window is shown
-    expect(panel).toContain('hostWidget.close()');
-    expect(panel.indexOf("hostWidget.close()")).toBeLessThan(panel.indexOf("hostWidget.showApp()"));
+    // the popout gets out of the way, and closes BEFORE the window is shown —
+    // inside showApp(), so double-click, ⇱ and IPC `app` (SUPER+M) all agree
+    const showApp = widget.slice(widget.indexOf("function showApp()"), widget.indexOf("function anySurfaceOpen"));
+    expect(showApp.indexOf("root.close()")).toBeLessThan(showApp.indexOf("ensureWindow()"));
+    expect(showApp.indexOf("root.close()")).toBeGreaterThan(-1);
     // The tooltip names the action, not a key: SUPER+M is an optional
     // binding from the README, and Omarchy's own tooltips name no keys.
     expect(panel).toContain('tooltipText: "Open the app window"');

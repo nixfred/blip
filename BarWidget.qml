@@ -172,6 +172,10 @@ BarWidget {
   // the user, and a plain toggle would HIDE it ("SUPER+M doesn't load the
   // app"). Hyprland ≥0.56 dispatch takes Lua; classic focuswindow is rejected.
   function showApp() {
+    // The popout gets out of the way first: the window is the same view,
+    // larger. Here, once, so double-click, the ⇱ button and IPC `app` (a
+    // SUPER+M bind) all agree — `app` used to leave the popout open.
+    root.close()
     ensureWindow()
     if (!windowLoader.item) return
     // Fire-and-forget on purpose: a Process object silently ignores
@@ -200,7 +204,6 @@ BarWidget {
     }
     if (dblClick.running) {
       dblClick.stop()
-      root.close()
       root.showApp()
       return
     }
