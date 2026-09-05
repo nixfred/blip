@@ -487,6 +487,7 @@ rather than hang:
 | thread | `Ctrl+V` | paste — an image on the clipboard becomes a queued file, text pastes normally |
 | thread | `/attach <path>` + `Enter` | queue any file on this machine; drag-and-drop works too |
 | thread | `↑` / `↓` (empty compose) | select a bubble, newest first, and keep it in view; `↓` past the newest or `Esc` drops the selection and returns to the bottom |
+| thread | `Enter` · `Ctrl+C` · `Ctrl+R` (bubble selected) | open its attachment or link · copy its text · quote it into the compose field (`> …`) |
 | thread | `PgUp` / `PgDn` · `Home` / `End` (empty compose) | page through history · jump to the ends; with text typed the arrows and Home/End move the caret |
 | thread | `Esc` | back to list (or clear a text selection first) |
 | anywhere | `Esc` | close |

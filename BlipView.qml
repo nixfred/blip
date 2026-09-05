@@ -453,6 +453,24 @@ FocusScope {
       scrollConversation(it.y + it.height + margin - flick.height - flick.contentY)
   }
   function clearBubbleCursor() { bubbleCursor = -1; bubbleCursorItem = null }
+  function selectedBubble() {
+    return bubbleCursor >= 0 && bubbleCursor < bubbles.length ? bubbles[bubbleCursor] : null
+  }
+  /** Enter on the selected bubble: its first attachment, else its link card,
+   *  else the first URL in its text — the same handlers a click reaches. */
+  function openBubble(b) {
+    if (b.attachments && b.attachments.length > 0) { openAttachment(b.attachments[0]); return }
+    var u = b.link && b.link.url ? String(b.link.url) : firstUrl(b.text)
+    if (u !== "") openLink(u)
+  }
+  /** Ctrl+R: quote the selected bubble into the compose field. iMessage's
+   *  inline reply is not reachable through the bridge (no message GUID leaves
+   *  the Mac and AppleScript has no reply-to), so this is a plain "> quote". */
+  function quoteBubble(b) {
+    composeField.text = "> " + String(b.text || "").replace(/\s+/g, " ").slice(0, 200) + "\n"
+    composeField.cursorPosition = composeField.length
+    leaveBubbles()
+  }
   /** Out of the selection and back where reading started: newest at the
    *  bottom, stick re-armed. Down past the newest and Esc both land here. */
   function leaveBubbles() {
@@ -2824,6 +2842,14 @@ FocusScope {
                   event.accepted = true
                   root.moveBubbleCursor(event.key === Qt.Key_Up ? -1 : 1)
                   return
+                }
+                // Actions on the selected bubble. Enter is free here: with no
+                // text and no queued file, send() would do nothing anyway.
+                var b = empty && root.draftPath === "" ? root.selectedBubble() : null
+                if (b) {
+                  if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { event.accepted = true; root.openBubble(b); return }
+                  if (event.matches(StandardKey.Copy)) { event.accepted = true; root.copyText(String(b.text || "")); return }
+                  if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) { event.accepted = true; root.quoteBubble(b); return }
                 }
                 var dy = root.conversationStep(event.key, empty)
                 if (dy !== 0) {

@@ -218,6 +218,17 @@ describe("QML safety invariants", () => {
     expect(panel).toContain("root.moveBubbleCursor(event.key === Qt.Key_Up ? -1 : 1)");
   });
 
+  test("bubble actions reuse the click handlers and never steal a real send", () => {
+    // Enter/Ctrl+C/Ctrl+R act on the selection only with an empty field and
+    // no queued file — a queued file's Enter is a send, and must stay one.
+    expect(panel).toContain('var b = empty && root.draftPath === "" ? root.selectedBubble() : null');
+    const open = qmlFunction("openBubble");
+    expect(open).toContain("openAttachment(b.attachments[0])");
+    expect(open).toContain("openLink(u)");
+    expect(panel).toContain("root.copyText(String(b.text || \"\"))");
+    expect(qmlFunction("quoteBubble")).toContain("leaveBubbles()");
+  });
+
   test("an old toast can still reopen its conversation (omarchy-exec-argv)", () => {
     // --action=default dies with the notify-send process after eight seconds.
     // The hint is what Omarchy persists, so a row in the notification center
