@@ -694,6 +694,36 @@ FocusScope {
     for (var i = 0; i < (list || []).length; i++) s += list[i].emoji
     return s
   }
+  // The tapback pill, overlapping the top corner opposite the tail. One
+  // definition for the text bubble and for the attachments: a picture-only
+  // message hides its text bubble, so the pill sits on the picture (or the
+  // file chip) itself, or the reaction is never seen.
+  component TapbackPill: Rectangle {
+    id: pill
+    property bool mine: false
+    property var tapbacks: []
+    visible: (tapbacks || []).length > 0
+    width: Math.ceil(pillText.implicitWidth) + Style.space(12)
+    height: Math.ceil(pillText.implicitHeight) + Style.space(8)
+    radius: height / 2
+    color: mine ? Qt.darker(root.mineFill, 2.2) : root.mineFill
+    border.color: Qt.rgba(0, 0, 0, 0.5)
+    border.width: 2
+    z: 2
+    anchors.top: parent.top
+    anchors.topMargin: -Style.space(12)
+    anchors.right: mine ? undefined : parent.right
+    anchors.rightMargin: mine ? 0 : -Style.space(6)
+    anchors.left: mine ? parent.left : undefined
+    anchors.leftMargin: mine ? -Style.space(6) : 0
+    Text {
+      id: pillText
+      anchors.centerIn: parent
+      text: root.tapbackRow(pill.tapbacks)
+      textFormat: Text.PlainText
+      font.pixelSize: root.fontCaption
+    }
+  }
 
   // ---------------------------------------------------- attachment fetching
 
@@ -2781,6 +2811,9 @@ FocusScope {
                         flick.contentY = Math.max(0, flick.contentY + d)
                     }
                     readonly property string attId: String(modelData.id || "")
+                    // the pill lands here when the message has no text bubble to carry it
+                    readonly property bool pillHere: index === 0 && String(bubbleRow.modelData.text || "") === ""
+                                                     && (bubbleRow.modelData.tapbacks || []).length > 0
                     // undefined = not fetched, "" = failed, else file:// url
                     readonly property var fileUrl: root.attFiles[chipRow.attId]
                     readonly property bool failed: chipRow.fileUrl === ""
@@ -2789,13 +2822,15 @@ FocusScope {
                       root.isImageMime(chipRow.modelData.mime) &&
                       chipRow.fileUrl !== undefined && chipRow.fileUrl !== ""
                     Layout.fillWidth: true
-                    Layout.topMargin: index === 0 && bubbleRow.modelData.groupStart ? Style.space(6) : 0
+                    Layout.topMargin: (index === 0 && bubbleRow.modelData.groupStart ? Style.space(6) : 0)
+                                      + (pillHere ? Style.space(12) : 0)
                     spacing: 0
                     Item { Layout.fillWidth: true; visible: bubbleRow.mine }
 
                     // fetched image renders inline, like Messages; click = full view
                     Image {
                       id: attImage
+                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.modelData.tapbacks }
                       visible: chipRow.showImage
                       readonly property real maxW: Math.round(content.width * 0.6)
                       // Retina PNGs carry their density in the header (read by
@@ -2841,6 +2876,7 @@ FocusScope {
                     }
 
                     Rectangle {
+                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.modelData.tapbacks }
                       visible: !chipRow.showImage
                       Layout.preferredWidth: Math.ceil(chipText.implicitWidth) + Style.space(18)
                       Layout.preferredHeight: Math.ceil(chipText.implicitHeight) + Style.space(12)
@@ -3078,29 +3114,7 @@ FocusScope {
                       }
                     }
 
-                    // tapback pill overlapping the corner opposite the tail
-                    Rectangle {
-                      visible: (modelData.tapbacks || []).length > 0
-                      width: Math.ceil(tapbackText.implicitWidth) + Style.space(12)
-                      height: Math.ceil(tapbackText.implicitHeight) + Style.space(8)
-                      radius: height / 2
-                      color: bubbleRow.mine ? Qt.darker(root.mineFill, 2.2) : root.mineFill
-                      border.color: Qt.rgba(0, 0, 0, 0.5)
-                      border.width: 2
-                      anchors.top: parent.top
-                      anchors.topMargin: -Style.space(12)
-                      anchors.right: bubbleRow.mine ? undefined : parent.right
-                      anchors.rightMargin: bubbleRow.mine ? 0 : -Style.space(6)
-                      anchors.left: bubbleRow.mine ? parent.left : undefined
-                      anchors.leftMargin: bubbleRow.mine ? -Style.space(6) : 0
-                      Text {
-                        id: tapbackText
-                        anchors.centerIn: parent
-                        text: root.tapbackRow(modelData.tapbacks)
-                        textFormat: Text.PlainText
-                        font.pixelSize: root.fontCaption
-                      }
-                    }
+                    TapbackPill { mine: bubbleRow.mine; tapbacks: modelData.tapbacks }
                   }
 
                   Item { Layout.fillWidth: true; visible: !bubbleRow.mine }
