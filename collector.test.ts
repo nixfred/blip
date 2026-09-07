@@ -17,6 +17,7 @@ import {
   fetchGroups,
   groupName,
   dedupeSelfEcho,
+  mergeTapbacks,
   isGroupChat,
   displayName,
   messagePreview,
@@ -204,6 +205,36 @@ describe("self-echo in the thread list", () => {
     const threads = buildThreads(msgs, "2026-08-30 10:00:00");
     expect(threads[0]!.unread).toBe(0);
     expect(threads[0]!.last_from_me).toBe(true);
+  });
+
+  test("a tapback on either twin of a self-thread message survives the dedupe", () => {
+    // Messages attaches the tapback to whichever row the reacting device
+    // considers the message; the dedupe used to keep one row and lose the
+    // other's tapbacks, so a reaction on your own note never showed.
+    const love = [{ emoji: "❤️", from_me: true, by: null }];
+    const base = { chat: "SELF", handle: "SELF", ts: "2026-09-05 17:00:00", text: "note" };
+    for (const order of [[true, false], [false, true]]) {
+      const msgs = dedupeSelfEcho([
+        msg({ ...base, from_me: order[0]!, tapbacks: order[0] ? love : null }),
+        msg({ ...base, from_me: order[1]!, tapbacks: order[1] ? love : null }),
+      ], ["SELF"]);
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]!.from_me).toBe(true);
+      expect(msgs[0]!.tapbacks).toEqual(love);
+    }
+    // the empty-outbound shape (an attachment) hands its tapback to the echo it promotes
+    const empty = dedupeSelfEcho([
+      msg({ chat: "SELF", handle: "SELF", ts: "2026-09-05 17:01:00", from_me: true, text: "", tapbacks: love }),
+      msg({ chat: "SELF", handle: "SELF", ts: "2026-09-05 17:01:00", from_me: false, text: "" }),
+    ], ["SELF"]);
+    expect(empty).toHaveLength(1);
+    expect(empty[0]!.tapbacks).toEqual(love);
+    // the same tapback on both twins is one tapback
+    const both = dedupeSelfEcho([
+      msg({ ...base, ts: "2026-09-05 17:02:00", from_me: true, tapbacks: love }),
+      msg({ ...base, ts: "2026-09-05 17:02:00", from_me: false, tapbacks: love }),
+    ], ["SELF"]);
+    expect(both[0]!.tapbacks).toEqual(love);
   });
 
   test("the same text in two different chats at one ts is two messages", () => {

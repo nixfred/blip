@@ -33,6 +33,10 @@
   start of the text steps back. Leaving the list for the search or new-message
   field ends the preview, and the sidebar holds still while the pane fills or
   empties. The bar panel is unchanged.
+- **A reaction on a note to yourself shows.** The self-thread stores each
+  message twice, and Messages attaches a tapback to whichever row the reacting
+  device considers the message; folding the two rows into one dropped the
+  other row's tapbacks. The kept row now carries both.
 
 ## 2.4.0 — 2026-09-08 — read it from the keyboard, send without the wait
 
