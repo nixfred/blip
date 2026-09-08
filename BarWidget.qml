@@ -552,7 +552,14 @@ BarWidget {
   }
   Timer {
     id: pingDebounce
-    interval: 250
+    // 60 ms, not 250: this delay is paid on EVERY received message and on
+    // every send (Messages writing the row is itself a chat.db change, so the
+    // ping is what resolves the "Sending…" bubble). A burst still costs one
+    // fetch — messages in a burst land milliseconds apart, far inside 60 ms —
+    // but a single message no longer waits a quarter second before anything
+    // starts. Measured: the fetch it triggers is ~116 ms, so the debounce was
+    // more than twice the cost of the work it was coalescing.
+    interval: 60
     onTriggered: {
       var panel = panelLoader.item
       // Carrying the open thread's chat means a message landing in the

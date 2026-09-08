@@ -14,8 +14,9 @@
 # holding the tools; default ~/.blip/bin), python (default python3),
 # automation (on|off — read by the plugin, not the shim).
 #
-# The connectivity probe MUST be `ssh -n`: a bare probe eats stdin and
-# silently empties `imsg-send --file-stdin` payloads (learned the hard way).
+# There is deliberately NO connectivity probe — see the note above the ssh
+# call at the bottom. The old one cost 41 ms on every call and had to be
+# `ssh -n` or it ate stdin and silently emptied --file-stdin payloads.
 set -euo pipefail
 
 CONF="${BLIP_BRIDGE_CONF:-$HOME/.config/blip/bridge.conf}"
@@ -57,23 +58,41 @@ case "$tool" in
 esac
 
 # With the dedicated key (blip-setup enrolls it as restrict,command=blip-dispatch)
-# the Mac side can ONLY run the bridge tools, so the remote command is bare and
-# the probe is dispatch's "ping". The key gets its own ControlMaster socket:
-# sharing the general key's master would silently bypass the forced command.
+# the Mac side can ONLY run the bridge tools, so the remote command is bare.
+# The key gets its own ControlMaster socket: sharing the general key's master
+# would silently bypass the forced command.
 if [[ -r "$key" ]]; then
   ssh=(ssh -i "$key" -o IdentitiesOnly=yes -o ControlMaster=auto
        -o "ControlPath=$HOME/.ssh/cm-blip-%r@%h:%p" -o ControlPersist=10m)
-  probe="ping"; remote="$tool ${*@Q}"
+  remote="$tool ${*@Q}"
 else
   ssh=(ssh)
-  probe="true"; remote="PATH=/opt/homebrew/bin:/usr/local/bin:\$PATH $python $remote_bin/$tool ${*@Q}"
+  remote="PATH=/opt/homebrew/bin:/usr/local/bin:\$PATH $python $remote_bin/$tool ${*@Q}"
 fi
-if ! err="$("${ssh[@]}" -n -o ConnectTimeout=5 -o BatchMode=yes -- "$host" "$probe" 2>&1 >/dev/null)"; then
-  # keep the exit code (69 → Blip greys out) but say why: auth, host key, dispatch refusal…
-  echo "$tool: $host unreachable — the iMessage bridge is offline.${err:+ ($(printf '%s' "$err" | tail -n1))}" >&2
-  exit 69   # EX_UNAVAILABLE (Blip greys out on this code)
-fi
-
+# NO PREFLIGHT PROBE. There used to be one, and it cost a full ssh round trip
+# plus a Python start on the Mac — 41 ms measured, on EVERY call, ~31% of a
+# 133 ms query — purely to turn a transport failure into a friendlier message.
+# ssh already reports that itself as 255, and every caller in Blip treats 255
+# exactly like 69 (collector, thread, fetch, avatar, search, send-file,
+# contact-search), so the real call carries the news at no cost. We still
+# translate it, so the documented 69 contract is unchanged.
+#
+# This also retires the old "the probe MUST be ssh -n" trap: a probe without
+# it ate stdin and silently emptied `imsg-send --file-stdin` payloads. No
+# probe, no trap — do not add one back.
+#
 # ${*@Q} quotes each argument for the remote side (dispatch shlex-splits it
 # exactly like a shell): apostrophes, spaces, leading dashes survive intact.
-exec "${ssh[@]}" -- "$host" "$remote"
+# Not exec: we need the exit code to translate it. stdio is inherited either
+# way, so attachment streaming and --file-stdin are untouched.
+set +e
+"${ssh[@]}" -o ConnectTimeout=5 -o BatchMode=yes -- "$host" "$remote"
+rc=$?
+set -e
+if (( rc == 255 )); then
+  # ssh has already printed its own reason (auth, host key, dispatch refusal)
+  # on stderr, which is more than the probe's one-line tail ever carried.
+  echo "$tool: $host unreachable — the iMessage bridge is offline." >&2
+  exit 69   # EX_UNAVAILABLE (Blip greys out on this code)
+fi
+exit "$rc"

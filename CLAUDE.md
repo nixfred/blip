@@ -148,9 +148,18 @@ what it is handed. Keep it that way.
   them by design; do not persist them. `push-read.log` beside state.json
   records each read-push's exit code and `imsg-read`'s status line — never
   content.
-- **The Linux shims' ssh preflight must use `ssh -n`.** A bare
-  `ssh <mac> true` connectivity probe EATS STDIN, which silently empties
-  `imsg-send --file-stdin` payloads. Fixed 2026-08-31.
+- **There is NO ssh preflight in the shim, and adding one back is a bug.**
+  It cost a full ssh round trip plus a Python start on the Mac — 41 ms
+  measured, on every call, ~31% of a 133 ms query — and bought only a
+  friendlier error string. ssh reports transport failure as 255 itself, every
+  caller already treats 255 exactly like 69 (collector, thread, fetch, avatar,
+  search, send-file, contact-search), and the shim translates it so the
+  documented `69 → Blip greys out` contract is unchanged. This also retires
+  the trap that came with it: the probe HAD to be `ssh -n`, because a bare
+  `ssh <mac> true` EATS STDIN and silently empties `imsg-send --file-stdin`
+  payloads. No probe, no trap. The shim no longer `exec`s ssh (it needs the
+  exit code to translate); stdio is inherited either way, so attachment
+  streaming and `--file-stdin` are untouched — covered by a stub-ssh test.
 - **`bridge.conf` is data, never `source`d.** The shim parses four keys and
   validates them; keep it that way (audit #7). `automation=on` is what lets
   `qs ipc … goto/compose/bubbles` work — off, they return a refusal string.
@@ -302,6 +311,19 @@ what it is handed. Keep it that way.
   right-aligned element rendered off-panel, invisible, with no QML warning.
   Attachment chips are one per row for this reason. Debug trick: log
   `bubbleRow.width` per delegate; 1136 in a 560 panel = this bug.
+
+- **Latency is startup, not work — measure before tuning.** Every bridge call
+  pays a fixed tax while the SQL underneath is ~1 ms: ssh round trip 16 ms,
+  `blip-dispatch` Python start ~25 ms, `imsg` Python start + module parse
+  ~20 ms, sqlite connect (218 MB chat.db) 27 ms. That is why Blip feels
+  subtly laggy rather than slow, and why "make the query faster" is almost
+  always the wrong move. Two measured examples: replacing `cmd_chats`'
+  300-query N+1 with a single window function made it SLOWER (70 ms → 107 ms)
+  — the per-chat lookups are indexed; and in `cmd_chats` name resolution
+  costs ~104 ms, of which 46 ms is 60,112 `_same_number` calls, because a
+  handle that misses the exact last-ten key falls back to a linear scan of
+  every contact. Profile on the Mac with `cProfile` + `runpy` before changing
+  anything (see the war-room note on wheel scrolling for the same lesson).
 
 ## Working on it
 

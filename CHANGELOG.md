@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **The bridge stopped paying a toll on every call.** Blip felt subtly laggy
+  rather than slow, and measuring said why: nothing was slow, everything paid
+  startup. A bridge call cost ~133 ms while the SQL underneath ran in about a
+  millisecond — 16 ms ssh, ~25 ms for `blip-dispatch`'s Python start, ~20 ms
+  for `imsg`'s, 27 ms to open a 218 MB chat.db. On top of that the shim fired
+  a *second* full ssh round trip before every call, purely as a connectivity
+  probe: 41 ms, a third of the total, to turn a transport failure into a
+  friendlier sentence. ssh already reports that as 255 and every caller in
+  Blip has always treated 255 exactly like 69, so the probe is gone and the
+  real call carries the news; the `69 → Blip greys out` contract is unchanged.
+  That also retires the trap it came with — the probe had to be `ssh -n` or it
+  ate stdin and silently emptied `--file-stdin` payloads.
+  The push debounce came down from 250 ms to 60 ms. It is paid on every
+  received message *and* on every send (Messages writing the row is itself a
+  chat.db change), and at 250 ms it was more than twice the cost of the 116 ms
+  fetch it was coalescing; a burst still costs one fetch. The post-send reload
+  fell from 600 ms to 250 ms, now a fall-back for when the watcher is down
+  rather than the mechanism.
+  Measured, warm: a bridge call 132 → ~95 ms, opening a conversation 223 →
+  ~185 ms, a poll 160 → ~118 ms, a deep poll 707 → ~590 ms.
+  Two things measurement talked us OUT of: replacing `cmd_chats`' 300-query
+  N+1 with one window function is slower (70 → 107 ms; the per-chat lookups
+  are indexed), and bundling the deep poll's three calls into one would be
+  undone by the persistent channel coming next.
+
 - **A message can carry several files.** Dropping five photos on a
   conversation attached one and threw the other four away without a word: the
   drop handler read `urls[0]` and the draft was a single path. Drafts are a

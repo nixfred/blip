@@ -1793,7 +1793,14 @@ FocusScope {
     // returning; a reload that beats it keeps the pending bubble (thread.ts)
     // and tries again. No `loading` flag: the bubble is already on screen,
     // and a "loading…" flash after every send is the thing we are removing.
-    interval: 600
+    //
+    // This is now the FALL-BACK, not the mechanism: Messages writing the row
+    // is a chat.db change, so `imsg watch` pings and the 60 ms push debounce
+    // reloads the open conversation well before this fires. It stays for the
+    // case where the watcher is down (sleep, network) and the 6 s poll is all
+    // there is — 250 ms rather than 600 because a retry that arrives early
+    // costs one cheap reload and keeps the pending bubble anyway.
+    interval: 250
     onTriggered: if (root.inThread && String(root.active.chat) === root.reloadChat) {
       root.requestThreadLoad(root.reloadChat)
     }
