@@ -901,3 +901,43 @@ describe("cache file names (Astra B#1)", () => {
     expect(cacheFileName("9", "doc.pdf", "application/pdf")).toBe("9-orig-doc.pdf");
   });
 });
+
+describe("bridgeRun: the fast path is optional and invisible", () => {
+  const { bridgeRun } = require("./collector") as typeof import("./collector");
+
+  test("a caller with its own runner never touches the socket", () => {
+    // This is what keeps every other test in this suite honest: they inject a
+    // runner and assert on real argv, so the accelerator must stay out of the
+    // way entirely when one is supplied.
+    const seen: { cmd: string; args: string[] }[] = [];
+    const runner = ((cmd: string, args: string[]) => {
+      seen.push({ cmd, args });
+      return { status: 0, stdout: "[]", stderr: "" };
+    }) as never;
+    const res = bridgeRun(["--json", "recent", "5"], runner);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.cmd).toContain("/bin/imsg");
+    expect(seen[0]!.args).toEqual(["--json", "recent", "5"]);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toBe("[]");
+  });
+
+  test("a stdin payload is passed through, never folded into argv", () => {
+    // Message text must not ride argv on either machine (audit #4).
+    const seen: { args: string[]; opts: { input?: string } }[] = [];
+    const runner = ((_c: string, args: string[], opts: { input?: string }) => {
+      seen.push({ args, opts });
+      return { status: 0, stdout: "[]", stderr: "" };
+    }) as never;
+    bridgeRun(["--json", "search", "--stdin"], runner, { input: "secret words" });
+    expect(seen[0]!.opts.input).toBe("secret words");
+    expect(seen[0]!.args.join(" ")).not.toContain("secret");
+  });
+
+  test("a non-zero exit is reported, not swallowed", () => {
+    const runner = (() => ({ status: 3, stdout: "", stderr: "imsg: boom" })) as never;
+    const res = bridgeRun(["--json", "recent", "5"], runner);
+    expect(res.status).toBe(3);
+    expect(res.stderr).toContain("boom");
+  });
+});

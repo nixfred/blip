@@ -8,6 +8,7 @@
 #   2. ~/.ssh/config                 ControlMaster block for the host (47 ms warm
 #                                    round trips — Blip polls; this is required)
 #   3. ~/bin/{imsg,imsg-send,imsg-read,contacts}  the bridge shim (existing files backed up;
+#      plus ~/bin/blip-bridged, the persistent-channel daemon the bar widget runs
 #                                    claude-on-mac remote shims are left alone)
 #   4. Mac install                   copies bridge/mac to the Mac and runs
 #                                    install.sh there (needs ssh access already)
@@ -100,7 +101,17 @@ for t in imsg imsg-send imsg-read contacts; do
   fi
   install -m 0755 "$here/bridge/linux/blip-shim" "$target"
 done
-echo "✓ shims installed: ~/bin/imsg ~/bin/imsg-send ~/bin/imsg-read ~/bin/contacts"
+install -m 0755 "$here/bridge/linux/blip-bridged" "$HOME/bin/blip-bridged"
+echo "✓ shims installed: ~/bin/imsg ~/bin/imsg-send ~/bin/imsg-read ~/bin/contacts ~/bin/blip-bridged"
+# blip-bridged holds `imsg serve` channels open so a query costs the query
+# instead of ~90 ms of ssh + two Python starts + opening a 218 MB chat.db.
+# The bar widget starts it. It needs socat to be reachable from the plugin;
+# without socat Blip simply keeps using the one-shot path, so this is a note,
+# never a failure.
+if ! command -v socat >/dev/null 2>&1; then
+  echo "• socat not found — Blip will work, but every query pays ~90 ms of startup."
+  echo "  Install it for the fast path:  pacman -S socat"
+fi
 
 # 4. Mac install (needs ssh to already work — key-based)
 if ssh -n -o ConnectTimeout=6 -o BatchMode=yes -- "$host" true 2>/dev/null; then

@@ -700,3 +700,13 @@ describe("a multi-part send is pinned to the thread it started in", () => {
     expect(pump).not.toContain("root.active.service");
   });
 });
+
+describe("the accelerator channel is an optimisation, never a dependency", () => {
+  test("the leader bar supervises blip-bridged, and only the leader", () => {
+    // Two bars would hold two pairs of Mac processes.
+    expect(widget).toContain('command: [root.home + "/bin/blip-bridged"]');
+    const proc = widget.slice(widget.indexOf("id: bridgeProc"), widget.indexOf("id: bridgeRestart"));
+    expect(proc).toContain("running: root.leader");
+    expect(proc).toContain("onExited: bridgeRestart.restart()");
+  });
+});

@@ -509,6 +509,33 @@ BarWidget {
                               root.activeReadChat(), root.activeSeenTs())
   }
 
+  // ------------------------------------------------- the accelerator channel
+  // blip-bridged holds `imsg serve` channels open to the Mac, so a query costs
+  // the query instead of ~90 ms of ssh + two Python starts + opening a 218 MB
+  // chat.db. Measured end to end: opening a conversation 223 → 103 ms, a poll
+  // 160 → 38 ms. It rides here for the same reason the watcher does — the
+  // shell is the process that outlives every one-shot script, which is why
+  // Blip needs no daemon of its own — and only on the LEADER bar, or every
+  // monitor would hold its own pair of Mac processes.
+  //
+  // Nothing depends on it: collector.ts and thread.ts fall back to the plain
+  // one-shot ssh path whenever the socket is missing or a frame does not
+  // parse, so a failure here costs speed and nothing else.
+  Process {
+    id: bridgeProc
+    command: [root.home + "/bin/blip-bridged"]
+    running: root.leader
+    onExited: bridgeRestart.restart()
+  }
+  Timer {
+    id: bridgeRestart
+    // It exits on its own when idle; the poller keeps it busy in practice, so
+    // this is mostly the crash path. Slow enough not to spin if the binary is
+    // missing entirely (a setup that never installed it).
+    interval: 30000
+    onTriggered: if (root.leader) bridgeProc.running = true
+  }
+
   // ------------------------------------------------- real-time push
   // `imsg watch` blocks on the Mac and emits one line per chat.db change — an
   // INVALIDATION, no content (BlueFerry's design: session-visible push

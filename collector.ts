@@ -21,8 +21,8 @@ import { openSync, writeSync, fsyncSync, closeSync } from "node:fs";
 import { homedir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const HOME = process.env.HOME ?? homedir();
 
@@ -1032,11 +1032,92 @@ export function explainBridgeError(status: number | null, stderr: string): strin
   return last || `imsg exit ${status}`;
 }
 
-export function fetchMessages(limit: number, runner = spawnSync): FetchResult {
-  const res = runner(`${HOME}/bin/imsg`, ["--json", "recent", String(limit)], {
-    encoding: "utf8",
-    timeout: 15000, maxBuffer: 64 * 1024 * 1024,
+// ------------------------------------------------- the accelerator channel
+
+/** Where blip-bridged listens, when it is running. */
+export const BRIDGE_SOCK = join(
+  process.env.XDG_RUNTIME_DIR || `/tmp/blip-${typeof process.getuid === "function" ? process.getuid() : ""}`,
+  "blip", "bridge.sock",
+);
+
+/**
+ * Run one bridge command, over the persistent channel when there is one.
+ *
+ * A one-shot `~/bin/imsg` call pays ~90 ms of pure startup before it reads a
+ * row — ssh, blip-dispatch's Python, imsg's own, and opening a 218 MB
+ * chat.db — while the query underneath takes about a millisecond. blip-bridged
+ * holds `imsg serve` channels open so that toll is paid once; `recent 150`
+ * measured 100 ms one-shot against 13 ms here.
+ *
+ * It is an ACCELERATOR, never a dependency. No socket, no socat, a daemon
+ * that died mid-request, a frame that does not parse — anything at all — and
+ * this falls through to the ordinary one-shot path, which is still the only
+ * thing that has to work. That is also what keeps the tests honest: they
+ * inject their own `runner`, and a caller with a custom runner never touches
+ * the socket, so every existing test still exercises the real argv.
+ */
+export function bridgeRun(
+  argv: string[],
+  runner: typeof spawnSync = spawnSync,
+  opts: { input?: string; timeout?: number; maxBuffer?: number } = {},
+): { status: number | null; stdout: string; stderr: string; error?: Error } {
+  const timeout = opts.timeout ?? 15000;
+  const maxBuffer = opts.maxBuffer ?? 64 * 1024 * 1024;
+  if (runner === spawnSync) {
+    const fast = viaBridgeSocket(argv, opts.input, timeout, maxBuffer);
+    if (fast) return fast;
+  }
+  const res = runner(`${HOME}/bin/imsg`, argv, {
+    encoding: "utf8", timeout, maxBuffer,
+    ...(opts.input === undefined ? {} : { input: opts.input }),
   });
+  return {
+    status: res.status,
+    stdout: (res.stdout ?? "") as string,
+    stderr: (res.stderr ?? "") as string,
+    ...(res.error ? { error: res.error as Error } : {}),
+  };
+}
+
+/** One request over the unix socket, or null to mean "use the slow path". */
+function viaBridgeSocket(
+  argv: string[],
+  input: string | undefined,
+  timeout: number,
+  maxBuffer: number,
+): { status: number | null; stdout: string; stderr: string } | null {
+  try {
+    if (!existsSync(BRIDGE_SOCK)) return null;
+    const req = JSON.stringify(input === undefined ? { argv } : { argv, stdin: input });
+    // socat, not a bun/python client: spawning either costs 7-11 ms, which is
+    // most of what the channel just saved. A plain spawn is ~1 ms.
+    // No `encoding`: the default hands back Buffers, and the frame counts
+    // BYTES. Passing "buffer" throws ERR_UNKNOWN_ENCODING in Bun, the catch
+    // below swallowed it, and the fast path silently never ran — every call
+    // quietly took the slow one and the whole channel looked like a no-op.
+    const res = spawnSync("socat", ["-t", String(Math.ceil(timeout / 1000)), "-", `UNIX-CONNECT:${BRIDGE_SOCK}`], {
+      input: req + "\n", timeout, maxBuffer,
+    });
+    if (res.error || res.status !== 0 || !res.stdout) return null;
+    const buf = res.stdout as Buffer;
+    const nl = buf.indexOf(0x0a);
+    if (nl < 0) return null;
+    const meta = JSON.parse(buf.subarray(0, nl).toString("utf8")) as { status: number; len: number };
+    const body = buf.subarray(nl + 1);
+    // A short frame means the channel desynchronised: take the slow path
+    // rather than hand a caller half a JSON document.
+    if (typeof meta.len !== "number" || body.length < meta.len) return null;
+    const out = body.subarray(0, meta.len).toString("utf8");
+    return meta.status === 0
+      ? { status: 0, stdout: out, stderr: "" }
+      : { status: meta.status, stdout: "", stderr: out };
+  } catch {
+    return null;
+  }
+}
+
+export function fetchMessages(limit: number, runner = spawnSync): FetchResult {
+  const res = bridgeRun(["--json", "recent", String(limit)], runner);
 
   if (res.error) {
     // spawn itself failed: ~/bin/imsg missing (run blip-setup) or not executable
@@ -1215,10 +1296,7 @@ export const CHAT_LIST_LIMIT = 300;
  * widget's memory. Previews are never persisted (no content on disk).
  */
 export function fetchChats(runner = spawnSync): ChatInfo[] | null {
-  const res = runner(`${HOME}/bin/imsg`, ["--json", "chats", String(CHAT_LIST_LIMIT)], {
-    encoding: "utf8",
-    timeout: 20000, maxBuffer: 64 * 1024 * 1024,
-  });
+  const res = bridgeRun(["--json", "chats", String(CHAT_LIST_LIMIT)], runner, { timeout: 20000 });
   if (res.status !== 0) return null;
   try {
     const rows = JSON.parse(res.stdout as string);
@@ -1381,7 +1459,7 @@ export function mergeChats(
 }
 
 export function fetchGroups(runner = spawnSync): Record<string, GroupInfo> | null {
-  const res = runner(`${HOME}/bin/imsg`, ["--json", "groups"], { encoding: "utf8", timeout: 15000, maxBuffer: 64 * 1024 * 1024 });
+  const res = bridgeRun(["--json", "groups"], runner);
   if (res.status !== 0) return null;
   try {
     const rows = JSON.parse(res.stdout as string);

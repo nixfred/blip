@@ -325,6 +325,29 @@ what it is handed. Keep it that way.
   every contact. Profile on the Mac with `cProfile` + `runpy` before changing
   anything (see the war-room note on wheel scrolling for the same lesson).
 
+- **The persistent channel is an ACCELERATOR; the one-shot path is the
+  contract.** `blip-bridged` (Linux, started by the LEADER BarWidget) holds
+  two `imsg serve` channels open over ssh, so a query costs the query instead
+  of ~90 ms of startup. `bridgeRun()` in collector.ts routes through it and
+  falls back to plain `~/bin/imsg` on ANY fault — no socket, no socat, a dead
+  daemon, a frame that will not parse, a short body. Three rules:
+  (1) A caller that passes its own `runner` NEVER touches the socket. That is
+  what keeps the suite honest — every existing test injects a runner and
+  asserts on real argv.
+  (2) `serve` answers read-only queries only (`SERVE_ALLOWED`). `attachment`
+  and `avatar` stream binary and would park the channel behind a 100 MB photo;
+  `watch` blocks forever; `serve` would recurse. Those stay one-shot.
+  (3) A request carries `stdin` separately, so message text still never rides
+  argv. Framing is `{"status","len"}\n` + exactly len BYTES — length-counted,
+  not escaped, or a 122 KB payload gets re-encoded into a JSON string.
+  Channels are POOLED (2): Blip refreshes the list and reloads the open
+  conversation in parallel on every ping, and one channel would queue the
+  reload behind a 259 ms `chats` call. Do not pass `encoding: "buffer"` to
+  Bun's `spawnSync` — it throws `ERR_UNKNOWN_ENCODING`, the catch swallows it,
+  and the fast path silently never runs (cost us a whole debugging round).
+  **"Offline" in a test means clearing HOME *and* XDG_RUNTIME_DIR**, or the
+  socket answers underneath the test.
+
 ## Working on it
 
 ```
