@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **A message can carry several files.** Dropping five photos on a
+  conversation attached one and threw the other four away without a word: the
+  drop handler read `urls[0]` and the draft was a single path. Drafts are a
+  list now — drag-and-drop takes every file, `/attach` and Ctrl+V add to it,
+  and each chip has its own ✕. They ship one part per file in the order you
+  queued them, with the caption on the first only (repeating it would post the
+  same sentence five times), and the service is captured when the batch starts
+  so switching threads mid-send cannot push a later part onto a different one.
+  A part that fails stops the batch and leaves the rest attached, saying how
+  many, rather than making you work out which of five went out. Capped at ten
+  files, because a stray drop of a folder should be refused and not become
+  eighty sends. Chips are one per row, like the received ones — a row of N
+  sums its implicit widths and drags the whole column off the panel.
+
 - **GIFs move.** An animated GIF arrived as a still, and did so twice over. The
   inline-preview path asks the Mac to resample every image with sips, which
   flattens an animation to a single frame — a 1.4 MB GIF reached Linux as a

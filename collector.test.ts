@@ -803,7 +803,7 @@ describe("a link that just arrived opens the share sheet", () => {
 
   test("every link of a message rides along; url stays the first", () => {
     const out = selectIncomingLinks([
-      msg({ ts: "2026-09-02 12:30:00", from_me: false, text: "two: https://a.test/1, and https://b.test/2." }),
+      msg({ ts: "2026-09-02T12:30:00Z", from_me: false, text: "two: https://a.test/1, and https://b.test/2." }),
     ], WM, []);
     expect(out[0]!.url).toBe("https://a.test/1");
     expect(out[0]!.urls).toEqual(["https://a.test/1", "https://b.test/2"]);
@@ -882,13 +882,13 @@ describe("a re-keyed group is ONE conversation", () => {
     const email = "pat@example.com";
     const out = foldThreadAliases(
       [
-        thread(phone, "2026-09-04 21:32:29", 40, 0),
-        thread(email, "2026-09-05 17:24:01", 12, 1),
+        thread(phone, "2026-09-04T21:32:29Z", 40, 0),
+        thread(email, "2026-09-05T17:24:01Z", 12, 1),
       ],
       { [phone]: email },
     );
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ chat: email, last_ts: "2026-09-05 17:24:01", unread: 1 });
+    expect(out[0]).toMatchObject({ chat: email, last_ts: "2026-09-05T17:24:01Z", unread: 1 });
   });
 });
 

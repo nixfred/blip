@@ -242,7 +242,9 @@ describe("QML safety invariants", () => {
     expect(panel).toContain("openThread(threads[i])");
     const catcher = panel.slice(panel.indexOf("function catchNavText"), panel.indexOf("function catchEscape"));
     expect(catcher).toContain('text >= "1" && text <= "9"');
-    expect(catcher).toContain("root.draftPath");
+    // A queued attachment still blocks the 1-9 jump: with a draft armed the
+    // keystroke belongs to the caption, not to thread navigation.
+    expect(catcher).toContain("root.attachCount > 0");
     expect(catcher).toContain("return handleTextKey(text) === true");
     const fn = handleTextKeySource();
     expect(fn).toContain("if (searching || newMode) return false");
@@ -371,7 +373,9 @@ describe("QML safety invariants", () => {
   test("bubble actions reuse the click handlers and never steal a real send", () => {
     // Enter/Ctrl+C/Ctrl+R act on the selection only with an empty field and
     // no queued file — a queued file's Enter is a send, and must stay one.
-    expect(panel).toContain('var b = empty && root.draftPath === "" ? root.selectedBubble() : null');
+    // draftPath became attachCount when a message learned to carry SEVERAL
+    // files; the guard is the same one — no queued attachment.
+    expect(panel).toContain('var b = empty && root.attachCount === 0 ? root.selectedBubble() : null');
     const open = qmlFunction("openBubble");
     expect(open).toContain("openAttachment(b.attachments[0])");
     expect(open).toContain("openShare(urls, false)");   // a link goes to the sheet, never straight to the browser
@@ -623,4 +627,76 @@ test("the share sheet steps through a message's links", () => {
   // swaps the image instead of collapsing and re-growing the card.
   expect(sheet).toContain('visible: root.shareQr !== "" || qrProc.running');
   expect(qmlFunction("showShareUrl")).not.toContain('shareQr = ""');
+});
+
+describe("a message can carry several files (multi-file drafts)", () => {
+  function source(fn: string, until: string) {
+    const start = panel.indexOf(`function ${fn}`);
+    return panel.slice(start, panel.indexOf(until, start));
+  }
+
+  test("a drop attaches EVERY file, not just the first", () => {
+    // drop.urls[0] attached one photo of five and discarded the rest with no
+    // message — worse than refusing the drop.
+    expect(panel).not.toContain("var u = String(drop.urls[0])");
+    expect(panel).toContain("for (var i = 0; i < drop.urls.length; i++)");
+    expect(panel).toContain("root.addAttachments(paths)");
+  });
+
+  test("the draft is a list, and it is capped", () => {
+    expect(panel).toContain("property var attachDrafts: []");
+    expect(panel).toContain("readonly property int attachMax: 10");
+    // A stray drop of a whole folder is refused, not turned into 80 sends.
+    const add = source("addAttachment", "function addAttachments");
+    expect(add).toContain("root.attachDrafts.length >= root.attachMax");
+    // the same file twice is one attachment
+    expect(add).toContain("root.attachDrafts[i].path === p");
+  });
+
+  test("files ship one part at a time, and only the first carries the caption", () => {
+    const pump = source("pumpFileSend", "Process { id: copyProc }");
+    // fileSendProc is a single Process: a second start would clobber the first.
+    expect(pump).toContain("if (fileSendProc.running) return");
+    expect(pump).toContain("root.fileQueue = root.fileQueue.slice(1)");
+    // caption over stdin, never argv (audit #4)
+    expect(pump).toContain("--caption-stdin");
+    expect(pump).not.toContain("root.sendCaption]");
+    // spent after the first part, so five files do not post one sentence five times
+    expect(pump).toContain('root.sendCaption = ""');
+  });
+
+  test("only the part that shipped is retired; a failure keeps the rest attached", () => {
+    expect(panel).toContain("root.removeAttachment(root.sendDraftPath)");
+    // mid-batch the field must not clear and focus must not jump
+    expect(panel).toContain("if (root.fileQueue.length > 0)");
+    expect(panel).toContain("still attached");
+  });
+
+  test("draft chips are one per row, never a RowLayout of N", () => {
+    // Summed implicit widths stretch the column past the panel and take every
+    // right-aligned element off-screen with it (CLAUDE.md).
+    expect(panel).toContain("id: attachList");
+    expect(panel).toContain("model: root.attachDrafts");
+    // each chip removes ITSELF, not the whole draft
+    expect(panel).toContain("root.removeAttachment(modelData.path)");
+    expect(panel).toContain("attachList.width");
+  });
+
+  test("switching threads still drops every queued file", () => {
+    // a queued file must never survive into another conversation
+    const clear = source("clearAttachments", "/** Ship the next queued file");
+    expect(clear).toContain("root.attachDrafts = []");
+    expect(clear).toContain("root.fileQueue = []");
+  });
+});
+
+describe("a multi-part send is pinned to the thread it started in", () => {
+  test("the service is captured once, not re-read per part", () => {
+    // root.active can change under a batch; a later part must not go out on a
+    // different service from the first (war room #2).
+    expect(panel).toContain("property string sendService");
+    expect(panel).toContain('root.sendService !== "" ? ["--service", root.sendService] : []');
+    const pump = panel.slice(panel.indexOf("function pumpFileSend"), panel.indexOf("Process { id: copyProc }"));
+    expect(pump).not.toContain("root.active.service");
+  });
 });

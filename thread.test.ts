@@ -466,9 +466,9 @@ describe("selectThread", () => {
     const phone = "+15550100001";
     const email = "pat@example.com";
     const raw = [
-      msg({ chat: phone, handle: phone, ts: "2026-09-04 21:32:29", text: "sms" }),
-      msg({ chat: email, handle: email, ts: "2026-09-05 17:24:01", text: "imessage" }),
-      msg({ chat: "+15550100002", handle: "+15550100002", ts: "2026-09-05 18:00:00", text: "other" }),
+      msg({ chat: phone, handle: phone, ts: "2026-09-04T21:32:29Z", text: "sms" }),
+      msg({ chat: email, handle: email, ts: "2026-09-05T17:24:01Z", text: "imessage" }),
+      msg({ chat: "+15550100002", handle: "+15550100002", ts: "2026-09-05T18:00:00Z", text: "other" }),
     ];
     const aliases = { [phone]: email };
     expect(selectThread(raw, email, false, 80, [], aliases).map((m) => m.text))

@@ -161,8 +161,15 @@ FocusScope {
   property var fetchQueue: []
   property string fetchingId: ""
   // Compose draft attachment (one per message in v1).
-  property string draftPath: ""
-  property string draftLabel: ""
+  // Queued attachments, oldest first: [{ path, label }]. A single draft could
+  // only ever ship the first of five dropped photos, silently discarding the
+  // rest — a drop that loses four files with no message is worse than a
+  // refusal. Sends go out one part per file, in this order.
+  property var attachDrafts: []
+  readonly property int attachCount: attachDrafts.length
+  /** How many files one message may carry. A stray drop of a whole folder
+   *  should be refused, not turned into eighty sends. */
+  readonly property int attachMax: 10
   // What the in-flight file send / paste belong to, so late completions
   // can't clobber a NEWER draft or land in a DIFFERENT conversation.
   property string sendDraftPath: ""
@@ -345,6 +352,15 @@ FocusScope {
   // Text sends queue instead of refusing while one is on the wire; each gets
   // its bubble the instant Enter is pressed (see pendingSends).
   property var sendQueue: []
+  // Files still to ship for the send in flight: one part per file, in order.
+  // The caption rides the FIRST part only — repeating it on each would post
+  // the same sentence five times.
+  property var fileQueue: []
+  property string sendCaption: ""
+  // The service is captured when the batch STARTS, never re-read per part:
+  // root.active can change under a multi-part send, and a later part must not
+  // go out on a different service from the first (war room #2).
+  property string sendService: ""
   // Sends the Mac has not written a row for yet, {chat, text, ts}. Every
   // thread reload carries them to thread.ts (--pending-stdin, never argv),
   // which keeps their bubbles until the real row lands. Memory only.
@@ -458,7 +474,7 @@ FocusScope {
     loading = false
     pendingThreadChat = ""
     composeField.text = ""
-    clearDraft()   // a queued file must never survive into another thread
+    clearAttachments()   // a queued file must never survive into another thread
     pinToBottom = false
     // Top of the list for a mouse user; the cursor row for a keyboard user.
     Qt.callLater(function() {
@@ -486,7 +502,7 @@ FocusScope {
     loading = true
     composeField.text = drafts[String(t.chat)] || ""   // this conversation's unsent text
     composeField.cursorPosition = composeField.length
-    clearDraft()   // a queued file must never survive into another thread
+    clearAttachments()   // a queued file must never survive into another thread
     requestThreadLoad(String(t.chat))
     Qt.callLater(function() { composeField.forceActiveFocus() })
   }
@@ -859,18 +875,41 @@ FocusScope {
 
   // ------------------------------------------------------ compose attachment
 
-  function setDraft(path) {
+  /** Queue one more file on the draft. The same path twice is one attachment. */
+  function addAttachment(path) {
     var p = String(path || "")
     if (p === "") return
-    draftPath = p
+    for (var i = 0; i < root.attachDrafts.length; i++) if (root.attachDrafts[i].path === p) return
+    if (root.attachDrafts.length >= root.attachMax) {
+      root.note = "at most " + root.attachMax + " files per message"
+      return
+    }
     var parts = p.split("/")
-    draftLabel = parts[parts.length - 1] || "file"
+    root.attachDrafts = root.attachDrafts.concat([{ path: p, label: parts[parts.length - 1] || "file" }])
     Qt.callLater(function() { composeField.forceActiveFocus() })
   }
 
-  function clearDraft() {
-    draftPath = ""
-    draftLabel = ""
+  /** Queue several at once — a multi-file drop. Reports what would not fit
+   *  rather than dropping it on the floor. */
+  function addAttachments(paths) {
+    var before = root.attachDrafts.length
+    for (var i = 0; i < (paths || []).length; i++) {
+      if (root.attachDrafts.length >= root.attachMax) {
+        root.note = "attached " + (root.attachDrafts.length - before) + " — at most "
+                  + root.attachMax + " files per message"
+        return
+      }
+      root.addAttachment(paths[i])
+    }
+  }
+
+  function removeAttachment(path) {
+    root.attachDrafts = root.attachDrafts.filter(function(d) { return d.path !== String(path) })
+  }
+
+  function clearAttachments() {
+    root.attachDrafts = []
+    root.fileQueue = []
   }
 
   function startPaste() {
@@ -1219,35 +1258,35 @@ FocusScope {
     if (trimmed.indexOf("/attach ") === 0) {
       var p = trimmed.slice(8).trim()
       if (p.indexOf("~/") === 0) p = root.home + p.slice(1)
-      setDraft(p)
+      addAttachment(p)
       composeField.text = ""
-      note = "attached — type a caption or press Enter to send"
+      note = root.attachCount > 1
+        ? root.attachCount + " files attached — caption, or Enter to send"
+        : "attached — type a caption or press Enter to send"
       return
     }
 
-    if (draftPath === "" && trimmed === "") return
+    if (root.attachCount === 0 && trimmed === "") return
     if (!isSendable(root.active)) {
       note = "Read-only — group id unknown — send from your phone"
       return
     }
 
-    if (draftPath !== "") {
+    if (root.attachCount > 0) {
       if (sendProc.running || fileSendProc.running) {
         note = "a message is already sending"
         return
       }
-      note = "sending…"
       sendChat = String(root.active.chat)
       sendText = text
-      // send-file.ts owns target resolution (group guid or DM handle).
-      sendDraftPath = draftPath
-      // caption on stdin — never in this process's argv (audit #4, war room #1/#13)
-      fileSendProc.command = ["bun", root.sendFileScript, sendChat, draftPath, "--caption-stdin"]
-        .concat(/^(SMS|RCS)$/i.test(String(root.active.service || "")) ? ["--service", String(root.active.service).toUpperCase()] : [])
-      fileSendProc.stdinEnabled = true
-      fileSendProc.running = true
-      fileSendProc.write(trimmed !== "" ? text : "")
-      fileSendProc.stdinEnabled = false
+      // One part per file, in the order they were queued; the caption goes
+      // with the first only. fileSendProc is a single Process, so they ship
+      // strictly one at a time — pumpFileSend() starts the next as each lands.
+      root.fileQueue = root.attachDrafts.map(function(d) { return d.path })
+      root.sendCaption = trimmed
+      var svc = String(root.active.service || "")
+      root.sendService = /^(SMS|RCS)$/i.test(svc) ? svc.toUpperCase() : ""
+      pumpFileSend()
       return
     }
 
@@ -1334,6 +1373,27 @@ FocusScope {
     sendProc.running = true
     sendProc.write(job.text)
     sendProc.stdinEnabled = false
+  }
+
+  /** Ship the next queued file. The caption rides the FIRST part only, and
+   *  goes over stdin — never this process's argv (audit #4, war room #1/#13). */
+  function pumpFileSend() {
+    if (fileSendProc.running) return
+    if (root.fileQueue.length === 0) return
+    var path = root.fileQueue[0]
+    root.fileQueue = root.fileQueue.slice(1)
+    root.sendDraftPath = path
+    var left = root.fileQueue.length
+    root.note = left > 0 ? "sending… (" + (left + 1) + " left)" : "sending…"
+    // send-file.ts owns target resolution (group guid or DM handle).
+    fileSendProc.command = ["bun", root.sendFileScript, root.sendChat, path, "--caption-stdin"]
+      .concat(root.sendService !== "" ? ["--service", root.sendService] : [])
+    fileSendProc.stdinEnabled = true
+    fileSendProc.running = true
+    fileSendProc.write(root.sendCaption)
+    fileSendProc.stdinEnabled = false
+    // Spent: only the first part carries it.
+    root.sendCaption = ""
   }
 
   Process { id: copyProc }
@@ -1558,7 +1618,7 @@ FocusScope {
         if (!root.inThread || String(root.active.chat) !== root.pasteChat) return
         try {
           var d = JSON.parse(text.trim())
-          if (d.kind === "image" || d.kind === "file") root.setDraft(String(d.path || ""))
+          if (d.kind === "image" || d.kind === "file") root.addAttachment(String(d.path || ""))
           else if (d.kind === "text") {
             composeField.insert(composeField.cursorPosition, String(d.text || ""))
           }
@@ -1580,18 +1640,33 @@ FocusScope {
           if (!ok) err = d.online === false ? "not sent — Mac unreachable" : String(d.error || err)
         } catch (e) { /* fall through */ }
         if (ok) {
-          // Only clear the draft this send actually shipped — the user may
-          // have queued a NEWER file while this one was in flight.
-          if (root.draftPath === root.sendDraftPath) root.clearDraft()
+          // Retire only the part that actually shipped — the user may have
+          // queued another file while this one was in flight.
+          root.removeAttachment(root.sendDraftPath)
+          root.sendDraftPath = ""
+          root.reloadChat = root.sendChat
+          reloadTimer.restart()
+          if (root.fileQueue.length > 0) {
+            // More parts to go: keep sendChat/sendText, do NOT clear the
+            // field or hand focus back mid-batch.
+            root.pumpFileSend()
+            return
+          }
           if (belongsHere) {
             root.note = ""
             if (composeField.text === root.sendText) composeField.text = ""
           }
-          root.reloadChat = root.sendChat
-          reloadTimer.restart()
         } else if (belongsHere) {
-          root.note = err
+          // Stop the batch: the parts still queued stay attached, so the user
+          // can retry them rather than hunt for which of five went out.
+          var left = root.fileQueue.length
+          root.note = left > 0 ? err + " — " + (left + 1) + " still attached" : err
+          root.fileQueue = []
+          root.sendDraftPath = ""
         }
+        root.fileQueue = []
+        root.sendCaption = ""
+        root.sendService = ""
         root.sendChat = ""
         root.sendText = ""
         if (belongsHere) composeField.forceActiveFocus()
@@ -1777,7 +1852,7 @@ FocusScope {
       || (text >= "1" && text <= "9")
     if (!jump) return false
     if (searchField.activeFocus || newField.activeFocus || bubbleFocused) return false
-    if (composeField.activeFocus && (composeField.text.length > 0 || root.draftPath !== ""))
+    if (composeField.activeFocus && (composeField.text.length > 0 || root.attachCount > 0))
       return false
     return handleTextKey(text) === true
   }
@@ -3164,32 +3239,47 @@ FocusScope {
           foreground: root.foreground
         }
 
-        // queued attachment — one per message; ✕ removes it
-        RowLayout {
+        // queued attachments — ✕ removes one. ONE CHIP PER ROW, never a
+        // RowLayout of N: summed implicit widths stretch the whole column
+        // past the panel and take every right-aligned element off-screen
+        // with it (CLAUDE.md; the same rule the received chips follow).
+        ColumnLayout {
+          id: attachList
           Layout.fillWidth: true
-          visible: root.inThread && root.draftPath !== ""
-          spacing: 0
-          Rectangle {
-            Layout.preferredWidth: Math.ceil(draftText.implicitWidth) + Style.space(18)
-            Layout.preferredHeight: Math.ceil(draftText.implicitHeight) + Style.space(12)
-            radius: Style.space(14)
-            color: root.mineFill
-            opacity: 0.9
-            Text {
-              id: draftText
-              anchors.centerIn: parent
-              text: "📎 " + (root.draftLabel.length > 40
-                              ? root.draftLabel.slice(0, 37) + "…"
-                              : root.draftLabel) + "   ✕"
-              textFormat: Text.PlainText
-              color: root.mineText
-              font.family: root.fontFamily
-              font.pixelSize: root.fontCaption
+          visible: root.inThread && root.attachCount > 0
+          spacing: Style.space(4)
+          Repeater {
+            model: root.attachDrafts
+            delegate: RowLayout {
+              required property var modelData
+              Layout.fillWidth: true
+              spacing: 0
+              Rectangle {
+                // Capped at the compose column: a long filename must not
+                // push the row wider than the panel.
+                Layout.preferredWidth: Math.min(
+                  Math.ceil(attachChipText.implicitWidth) + Style.space(18),
+                  attachList.width)
+                Layout.preferredHeight: Math.ceil(attachChipText.implicitHeight) + Style.space(12)
+                radius: Style.space(14)
+                color: root.mineFill
+                opacity: 0.9
+                Text {
+                  id: attachChipText
+                  anchors.centerIn: parent
+                  readonly property string label: String(modelData.label || "file")
+                  text: "📎 " + (label.length > 40 ? label.slice(0, 37) + "…" : label) + "   ✕"
+                  textFormat: Text.PlainText
+                  color: root.mineText
+                  font.family: root.fontFamily
+                  font.pixelSize: root.fontCaption
+                }
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: root.removeAttachment(modelData.path) }
+              }
+              Item { Layout.fillWidth: true }
             }
-            HoverHandler { cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: root.clearDraft() }
           }
-          Item { Layout.fillWidth: true }
         }
 
         RowLayout {
@@ -3270,7 +3360,7 @@ FocusScope {
                 // instead; send() is the authoritative online/sendability guard.
                 enabled: true
                 readOnly: !root.online || !root.isSendable(root.active)
-                placeholderText: root.draftPath !== ""
+                placeholderText: root.attachCount > 0
                   ? "caption (optional) — Enter sends the file"
                   : root.isSendable(root.active) ? "iMessage" : "Read-only — group id unknown"
                 color: root.foreground
@@ -3329,7 +3419,7 @@ FocusScope {
                   }
                   // Actions on the selected bubble. Enter is free here: with no
                   // text and no queued file, send() would do nothing anyway.
-                  var b = empty && root.draftPath === "" ? root.selectedBubble() : null
+                  var b = empty && root.attachCount === 0 ? root.selectedBubble() : null
                   if (b) {
                     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { event.accepted = true; root.openBubble(b); return }
                     if (event.matches(StandardKey.Copy)) { event.accepted = true; root.copyBubble(b); return }
@@ -3364,7 +3454,7 @@ FocusScope {
           // send button — the blue arrow circle (lit when text OR a file is queued)
           Rectangle {
             Layout.alignment: Qt.AlignBottom
-            readonly property bool armed: composeField.text.trim() !== "" || root.draftPath !== ""
+            readonly property bool armed: composeField.text.trim() !== "" || root.attachCount > 0
             width: Style.space(28); height: width; radius: width / 2
             color: armed ? root.mineFill : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15)
             Text {
@@ -3404,9 +3494,16 @@ FocusScope {
       keys: ["text/uri-list"]
       onDropped: (drop) => {
         if (!drop.hasUrls || drop.urls.length === 0) return
-        var u = String(drop.urls[0])
-        if (u.indexOf("file://") !== 0) return
-        root.setDraft(decodeURIComponent(u.replace(/^file:\/\//, "")))
+        // EVERY dropped file, not just urls[0]: dropping five photos used to
+        // attach one and discard four without saying so.
+        var paths = []
+        for (var i = 0; i < drop.urls.length; i++) {
+          var u = String(drop.urls[i])
+          if (u.indexOf("file://") !== 0) continue
+          paths.push(decodeURIComponent(u.replace(/^file:\/\//, "")))
+        }
+        if (paths.length === 0) return
+        root.addAttachments(paths)
         drop.accept()
       }
     }
