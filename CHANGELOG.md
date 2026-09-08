@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **GIFs move.** An animated GIF arrived as a still, and did so twice over. The
+  inline-preview path asks the Mac to resample every image with sips, which
+  flattens an animation to a single frame — a 1.4 MB GIF reached Linux as a
+  198 KB JPEG, the motion gone before the panel ever saw it. Animated formats
+  now skip that path and cross as their own bytes, into the same cache slot a
+  click uses. And a QML `Image` paints one frame whatever you hand it, so
+  animated attachments render through `AnimatedImage` instead; stills stay on
+  `Image`, which is what applies `autoTransform` (the EXIF fall-back for
+  anything cached before orientation was baked in at fetch time). Only the
+  active renderer loads, so no photo decodes twice, and the decode is still
+  bounded in both axes. GIF dimensions now come off the header too — they read
+  0×0 before, leaving the bubble nothing to size itself from.
+
 - **Time crosses the bridge as UTC.** Stamps used to arrive as the Mac's naive
   wall clock ("2026-09-07 14:33:12") and were compared against the Linux
   clock — the same string only while both machines sat in one timezone. A Mac

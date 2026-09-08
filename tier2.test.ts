@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { CACHE_DIR, bakeOrientation, cacheFileName, exifOrientation, fetchAttachment, imageMetrics, isImageMime, jpegtranArgs, lruEvictions, sanitizeName, wantsJpeg } from "./fetch";
+import { CACHE_DIR, bakeOrientation, cacheFileName, exifOrientation, fetchAttachment, imageMetrics, isAnimatedMime, isImageMime, jpegtranArgs, lruEvictions, sanitizeName, wantsJpeg } from "./fetch";
 import { extFor, existingLocalFile, firstFileUri, pickImageType, snapshotClipboard } from "./paste";
 import { resolveTarget, sendFile } from "./send-file";
 import { linkHost, linkify, normalizeLink, selectThread } from "./thread";
@@ -826,6 +826,67 @@ describe("multi-photo messages and the preview transform (#Crystal/Thatchers)", 
     expect(panelSrc).toContain("for (var j = 0; j < atts.length; j++)");
     expect(panelSrc).toContain("b <= root.autoFetchMaxSource");
     expect(panelSrc).not.toContain("b <= 5 * 1024 * 1024");
+  });
+});
+
+describe("animated images have to keep moving", () => {
+  /** "GIF89a", then the logical screen size as u16 little-endian. */
+  const gifHeader = (w: number, h: number) => {
+    const b = Buffer.alloc(13);
+    b.write("GIF89a", 0, "ascii");
+    b.writeUInt16LE(w, 6);
+    b.writeUInt16LE(h, 8);
+    return b;
+  };
+
+  test("only the formats that actually animate count", () => {
+    expect(isAnimatedMime("image/gif")).toBe(true);
+    expect(isAnimatedMime("IMAGE/GIF")).toBe(true);          // mimes arrive in any case
+    expect(isAnimatedMime("image/png")).toBe(false);
+    expect(isAnimatedMime("image/heic")).toBe(false);
+    expect(isAnimatedMime("")).toBe(false);
+  });
+
+  test("a GIF auto-fetch is NEVER resampled — sips would flatten it to one frame", () => {
+    const seen: string[][] = [];
+    const runner = ((_c: string, args: string[]) => {
+      seen.push(args);
+      return { status: 0, stdout: gifHeader(498, 372), stderr: "" };
+    }) as never;
+    // The same cap that makes every other image take the resampling path.
+    fetchAttachment("881", "loop.gif", "image/gif", runner, 5 * 1024 * 1024);
+    expect(seen[0]).not.toContain("--max-dim");
+    expect(seen[0]).not.toContain("--jpeg");
+    // …while a still image on that same path still is resampled.
+    fetchAttachment("882", "shot.png", "image/png", runner, 5 * 1024 * 1024);
+    expect(seen[1]).toContain("--max-dim");
+    for (const f of ["881-orig-loop.gif", "882-prev-shot.jpg"]) {
+      try { unlinkSync(`${CACHE_DIR}/${f}`); } catch { /* fine */ }
+    }
+  });
+
+  test("it keeps its own extension and the shared orig slot", () => {
+    // Not "-prev-…jpg": that name is a promise the bytes are a JPEG, and
+    // xdg-open dispatches on the extension.
+    expect(cacheFileName("7", "loop.gif", "image/gif", false)).toBe("7-orig-loop.gif");
+  });
+
+  test("dimensions come from the GIF header, so the bubble can size itself", () => {
+    // 0×0 left the delegate with nothing to compute a height from.
+    expect(imageMetrics(gifHeader(498, 372), "image/gif"))
+      .toEqual({ pixelWidth: 498, pixelHeight: 372, pixelRatio: 1 });
+  });
+
+  test("the panel draws animated mimes with AnimatedImage and stills with Image", () => {
+    const panelSrc = readFileSync(new URL("./BlipView.qml", import.meta.url), "utf8");
+    expect(panelSrc).toContain("AnimatedImage {");
+    expect(panelSrc).toContain("root.isAnimatedMime(chipRow.modelData.mime)");
+    // The still path keeps autoTransform: it is the EXIF fall-back for
+    // anything cached before fetch.ts began baking orientation in.
+    expect(panelSrc).toContain("autoTransform: true");
+    // Only the active renderer loads, or every photo decodes twice.
+    expect(panelSrc).toContain("chipRow.showImage && !attImage.animated ? chipRow.fileUrl : \"\"");
+    expect(panelSrc).toContain("chipRow.showImage && attImage.animated ? chipRow.fileUrl : \"\"");
   });
 });
 

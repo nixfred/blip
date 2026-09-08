@@ -657,6 +657,10 @@ FocusScope {
   // ---------------------------------------------------- attachment fetching
 
   function isImageMime(m) { return String(m || "").indexOf("image/") === 0 }
+  /** Formats that MOVE — they render through AnimatedImage, not Image, and
+   *  fetch.ts keeps them off the resampling path that would flatten them.
+   *  Mirrors isAnimatedMime() in fetch.ts; keep the two in step. */
+  function isAnimatedMime(m) { return String(m || "").toLowerCase() === "image/gif" }
   function linkHost(u) { var m = /^https?:\/\/([^/?#]+)/i.exec(String(u || "")); return (m ? m[1] : String(u || "")).replace(/^www\./, "").toLowerCase() }
   /** Only http(s) ever reaches xdg-open from a card (thread.ts filters too). */
   function openLink(u) {
@@ -2739,10 +2743,21 @@ FocusScope {
                     spacing: 0
                     Item { Layout.fillWidth: true; visible: bubbleRow.mine }
 
-                    // fetched image renders inline, like Messages; click = full view
-                    Image {
+                    // fetched image renders inline, like Messages; click = full view.
+                    // A GIF has to MOVE, and Image paints frame one and stops,
+                    // so animated formats go through AnimatedImage instead.
+                    // Static formats stay on Image: it is the one that applies
+                    // autoTransform, the EXIF fall-back for anything cached
+                    // before fetch.ts started baking orientation in. Sizing is
+                    // computed ONCE here so the two can never disagree — a
+                    // delegate whose implicit width outgrows the panel takes
+                    // every right-aligned element off-screen with it.
+                    Item {
                       id: attImage
                       visible: chipRow.showImage
+                      readonly property bool animated: root.isAnimatedMime(chipRow.modelData.mime)
+                      readonly property var view: animated ? attAnimated : attStill
+                      readonly property int status: view.status
                       readonly property real maxW: Math.round(content.width * 0.6)
                       // Retina PNGs carry their density in the header (read by
                       // fetch.ts); divide it out so a 2x screenshot draws at
@@ -2753,35 +2768,64 @@ FocusScope {
                       readonly property real naturalWidth:
                         Number(chipRow.imageMetrics.pixelWidth || 0) > 0
                           ? Number(chipRow.imageMetrics.pixelWidth) / pixelRatio
-                          : implicitWidth
+                          : view.implicitWidth
                       readonly property real naturalHeight:
                         Number(chipRow.imageMetrics.pixelHeight || 0) > 0
                           ? Number(chipRow.imageMetrics.pixelHeight) / pixelRatio
-                          : implicitHeight
-                      source: chipRow.showImage ? chipRow.fileUrl : ""
-                      asynchronous: true
-                      fillMode: Image.PreserveAspectFit
-                      // iPhone photos store rotation as an EXIF tag, not in
-                      // the pixels (sips keeps the tag when it converts HEIC);
-                      // Qt ignores it unless asked, so portraits came out on
-                      // their side. implicitWidth/Height follow the transform.
-                      autoTransform: true
-                      // bound the DECODE in BOTH axes, not just the paint — a
-                      // 12MP photo (or a 100×100000 sliver) must not cost
-                      // 50 MB of texture (Codex review points 19 and #3)
-                      sourceSize.width: 800
-                      sourceSize.height: 800
-                      // LRU eviction or a corrupt file: fall back to the chip
-                      // (⚠ marker); a click re-fetches through fetch.ts.
-                      onStatusChanged: if (status === Image.Error) {
-                        var m = Object.assign({}, root.attFiles)
-                        m[chipRow.attId] = ""
-                        root.attFiles = m
-                      }
+                          : view.implicitHeight
+
                       Layout.preferredWidth: status === Image.Ready ? Math.min(maxW, naturalWidth) : maxW
                       Layout.preferredHeight: status === Image.Ready && naturalWidth > 0
                         ? Layout.preferredWidth * naturalHeight / naturalWidth
                         : Style.space(120)
+
+                      // LRU eviction or a corrupt file: fall back to the chip
+                      // (⚠ marker); a click re-fetches through fetch.ts.
+                      function forget() {
+                        var m = Object.assign({}, root.attFiles)
+                        m[chipRow.attId] = ""
+                        root.attFiles = m
+                      }
+
+                      Image {
+                        id: attStill
+                        anchors.fill: parent
+                        visible: !attImage.animated
+                        // Only the ACTIVE renderer loads: two sources would
+                        // decode every photo twice.
+                        source: chipRow.showImage && !attImage.animated ? chipRow.fileUrl : ""
+                        asynchronous: true
+                        fillMode: Image.PreserveAspectFit
+                        // iPhone photos store rotation as an EXIF tag, not in
+                        // the pixels (sips keeps the tag when it converts HEIC);
+                        // Qt ignores it unless asked, so portraits came out on
+                        // their side. implicitWidth/Height follow the transform.
+                        autoTransform: true
+                        // bound the DECODE in BOTH axes, not just the paint — a
+                        // 12MP photo (or a 100×100000 sliver) must not cost
+                        // 50 MB of texture (Codex review points 19 and #3)
+                        sourceSize.width: 800
+                        sourceSize.height: 800
+                        onStatusChanged: if (status === Image.Error) attImage.forget()
+                      }
+
+                      AnimatedImage {
+                        id: attAnimated
+                        anchors.fill: parent
+                        visible: attImage.animated
+                        source: chipRow.showImage && attImage.animated ? chipRow.fileUrl : ""
+                        asynchronous: true
+                        fillMode: Image.PreserveAspectFit
+                        // AnimatedImage honours sourceSize (measured), so the
+                        // same decode ceiling applies to a huge GIF.
+                        sourceSize.width: 800
+                        sourceSize.height: 800
+                        // Nothing animates off-screen: a thread full of GIFs
+                        // would otherwise decode frames nobody is looking at.
+                        playing: visible && root.inThread
+                        onStatusChanged: if (status === Image.Error) attImage.forget()
+                      }
+
                       HoverHandler { cursorShape: Qt.PointingHandCursor }
                       TapHandler { onTapped: root.openAttachment(chipRow.modelData) }
                     }
