@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Time crosses the bridge as UTC.** Stamps used to arrive as the Mac's naive
+  wall clock ("2026-09-07 14:33:12") and were compared against the Linux
+  clock — the same string only while both machines sat in one timezone. A Mac
+  an hour ahead put every read mark ahead of every message, so nothing ever
+  counted as unread; an hour behind and the backlog re-toasted. And once a
+  year, in the DST fall-back hour, the Mac's own clock repeated itself: two
+  messages an hour apart carried the SAME stamp, so ordering, the watermark
+  and "newer than the mark" all quietly stopped meaning anything for that
+  hour. The bridge now emits ISO-8601 UTC (`2026-09-07T18:33:12Z`), which is
+  monotonic and whose lexical order is chronological order — the property
+  every ledger, sort and watermark in Blip was already assuming. Local time
+  became a display concern: bubbles, day dividers, "Today"/"Yesterday" and
+  read receipts are rendered in the READER's zone, so a day still breaks at
+  your midnight and not at Greenwich's. `imsg`'s own plain-text output keeps
+  the Mac's clock — a person reading `imsg recent` wants the time they
+  remember. Upgrading migrates the marks in `state.json`, and stamps from a
+  Mac still on the old bridge are normalised as they come in, so a
+  half-upgraded pair keeps working instead of silently going quiet.
+
 - **Pinned avatars no longer grow on the first cursor move.** The tiles were
   measured before the grid had its width, and the layout kept that small size
   until the next relayout; the size is now a layout hint, so they render at

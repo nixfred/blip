@@ -52,6 +52,31 @@ what it is handed. Keep it that way.
   can carry a FUTURE timestamp (tz skew); a mark taken from the global max
   once suppressed unrelated threads until "tomorrow". The panel passes the
   newest VISIBLE ts (`--seen`) so mid-round-trip arrivals stay unread.
+- **Every stamp inside Blip is UTC; local time is a DISPLAY concern.** The
+  bridge emits ISO-8601 UTC to the second (`2026-09-07T18:33:12Z`, `fmt_ts`),
+  because fixed-width UTC is the one format whose LEXICAL order is
+  chronological order — which every watermark, ledger, `maxTs` and `a.ts <
+  b.ts` in the collector silently assumes. Naive Mac wall clock broke that
+  twice: against a Linux clock in another zone every mark sat ahead of every
+  message (nothing unread), and in the DST fall-back hour the Mac's own clock
+  repeats, so two messages an hour apart carried the same string. Convert to
+  the reader's zone only when rendering — `localDay()`/`formatStamp()` in
+  thread.ts, `stampMs()`/`localDay()`/`fmtTime()` in BlipView. NEVER slice a
+  date out of a stamp (`ts.slice(0, 10)`) to find its day: that is UTC's day,
+  and the divider belongs at the reader's midnight. `imsg`'s plain-text
+  renders keep `fmt_ts_local` — a human reading `imsg recent` wants the time
+  they remember; every JSON field is `fmt_ts`.
+  **Stamps are normalised at the two fetch doors** (`fetchMessages` in
+  collector.ts, `loadThread` in thread.ts) via `toUtcStamp`, and `loadState`
+  migrates the marks a pre-UTC release wrote. Both halves are load-bearing
+  together: migrating the marks while the bridge still emitted naive stamps
+  would sort every message BELOW every mark (`" "` < `"T"`) and silently
+  empty the badge and the toasts. Legacy stamps are read as Linux-local —
+  exact whenever the Mac shared the zone, which is every setup where the old
+  format looked right. The suite runs pinned to `TZ=UTC` (test-setup.ts),
+  where all of this is invisible; `timezone.test.ts` and
+  `bridge/mac/test_wire_time.py` set their own zones and are what actually
+  cover it.
 - **Reads are optimistic-with-suppression.** Persistent read state moves only
   via collector runs (~1 s), so BarWidget applies reads to the local model
   IMMEDIATELY and remembers them in `localReads[chat]` (thread last_ts at

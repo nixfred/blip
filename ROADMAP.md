@@ -180,9 +180,15 @@ panel (3 lenses × finding, against current main) confirmed 11 closed and
   digits-only id shorter than 5 as "not a phone", so a carrier-style sender
   opens read-only with "group id unknown". Widen to `{3,15}` (E.164 max is
   15) once tested against a real one. 5+ digit codes load correctly since 2.2.1.
-- [ ] **Timestamps are Mac-local wall-clock strings** compared against the
-  Linux clock (DST fall-back hour, a UTC Mac). Move the bridge to epoch/UTC
-  and convert on display. Cross-cutting; do it as its own release.
+- [x] **Timestamps are Mac-local wall-clock strings** compared against the
+  Linux clock (DST fall-back hour, a UTC Mac) — fixed: the bridge emits
+  ISO-8601 UTC (`fmt_ts`), `fmt_ts_local` keeps the human CLI renders on the
+  Mac's clock, and every label is converted to the reader's zone at display
+  (`localDay`/`formatStamp` in thread.ts, `fmtTime` in BlipView). Stamps are
+  normalised at the two fetch doors, so a Mac on the old bridge still works;
+  `state.json` marks migrate on load. Covered by `timezone.test.ts` and
+  `bridge/mac/test_wire_time.py` (both pin a zone; the rest of the suite runs
+  at UTC, where the bug is invisible).
 - [ ] **One never-opened unread pins the catch-up loop** — every poll walks
   150→8192 rows across sequential ssh calls. Cache the reconciliation
   boundary per chat.

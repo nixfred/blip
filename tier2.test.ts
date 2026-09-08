@@ -272,9 +272,9 @@ describe("search shaping", () => {
 
   test("attachment-only rows (placeholder char) are dropped", () => {
     const rows = [
-      { ts: "2026-08-31 10:00:00", from_me: false, handle: "+15551234567", name: "A",
+      { ts: "2026-08-31T10:00:00Z", from_me: false, handle: "+15551234567", name: "A",
         service: "iMessage", chat: "+15551234567", text: "￼" },
-      { ts: "2026-08-31 10:01:00", from_me: true, handle: "+15551234567", name: "A",
+      { ts: "2026-08-31T10:01:00Z", from_me: true, handle: "+15551234567", name: "A",
         service: "iMessage", chat: "+15551234567", text: "real match" },
     ] as never[];
     const out = shapeResults(rows, "match", 10);
@@ -285,7 +285,7 @@ describe("search shaping", () => {
 
   test("group hits are flagged and limit respected", () => {
     const rows = Array.from({ length: 5 }, (_, i) => ({
-      ts: `2026-08-31 10:0${i}:00`, from_me: false, handle: "+15551234567", name: "G",
+      ts: `2026-08-31T10:0${i}:00Z`, from_me: false, handle: "+15551234567", name: "G",
       service: "iMessage", chat: "abcdef0123456789abcdef0123456789", text: `hit ${i}`,
     })) as never[];
     const out = shapeResults(rows, "hit", 3);
@@ -299,9 +299,9 @@ describe("search shaping", () => {
       messageMatchScore("cat", "A scatter of leaves."),
     );
     const rows = [
-      { ts: "2026-08-28 17:29:00", from_me: false, handle: "+15550001111", name: "Alice",
+      { ts: "2026-08-28T17:29:00Z", from_me: false, handle: "+15550001111", name: "Alice",
         service: "iMessage", chat: "group-a", text: "A scatter of leaves." },
-      { ts: "2026-05-18 16:34:00", from_me: true, handle: "+15550002222", name: "Bob",
+      { ts: "2026-05-18T16:34:00Z", from_me: true, handle: "+15550002222", name: "Bob",
         service: "iMessage", chat: "+15550002222", text: "The cat sat down." },
     ] as never[];
     const out = shape(rows, "cat", 10);
@@ -312,23 +312,23 @@ describe("search shaping", () => {
   test("query case does not change whole-word recency order", () => {
     const { shapeResults: shape } = require("./search") as typeof import("./search");
     const rows = [
-      { ts: "2026-05-25 22:20:00", from_me: false, handle: "+15550001111", name: "Alice",
+      { ts: "2026-05-25T22:20:00Z", from_me: false, handle: "+15550001111", name: "Alice",
         service: "iMessage", chat: "group-a", text: "Alice thanks Bob." },
-      { ts: "2026-08-25 20:45:00", from_me: false, handle: "+15550002222", name: "Bob",
+      { ts: "2026-08-25T20:45:00Z", from_me: false, handle: "+15550002222", name: "Bob",
         service: "iMessage", chat: "+15550002222", text: "Thanks" },
     ] as never[];
     const lower = shape(rows, "thanks", 10).map((h) => h.ts);
     const titled = shape(rows, "Thanks", 10).map((h) => h.ts);
     expect(lower).toEqual(titled);
-    expect(lower[0]).toBe("2026-08-25 20:45:00");
+    expect(lower[0]).toBe("2026-08-25T20:45:00Z");
   });
 
   test("same match quality ties break on message time, not thread order", () => {
     const { shapeResults: shape } = require("./search") as typeof import("./search");
     const rows = [
-      { ts: "2025-07-15 17:24:00", from_me: false, handle: "+15550001111", name: "Alice",
+      { ts: "2025-07-15T17:24:00Z", from_me: false, handle: "+15550001111", name: "Alice",
         service: "iMessage", chat: "quiet-old-thread", text: "Thanks everyone." },
-      { ts: "2026-05-25 22:20:00", from_me: false, handle: "+15550002222", name: "Bob",
+      { ts: "2026-05-25T22:20:00Z", from_me: false, handle: "+15550002222", name: "Bob",
         service: "iMessage", chat: "busy-new-thread", text: "Alice thanks Bob." },
     ] as never[];
     const out = shape(rows, "thanks", 10);
@@ -363,7 +363,7 @@ describe("search shaping", () => {
     const runner = () => ({
       status: 0,
       stdout: JSON.stringify([{
-        ts: "2026-05-01 10:00:00", from_me: false, handle: "+15550002222", name: "Bob",
+        ts: "2026-05-01T10:00:00Z", from_me: false, handle: "+15550002222", name: "Bob",
         service: "iMessage", chat: "+15550002222", text: "the car is red",
       }]),
       stderr: "",
@@ -386,7 +386,7 @@ describe("search shaping", () => {
     }];
     const msgs = [{
       chat: "+2", name: "Bob", handle: "+2", service: "iMessage",
-      ts: "2026-09-02 10:00:00", from_me: true, text: "ann called", group: false,
+      ts: "2026-09-02T10:00:00Z", from_me: true, text: "ann called", group: false,
     }];
     const out = mergeSearchResults(people, msgs);
     expect(out.map((h) => h.name)).toEqual(["Ann", "Bob"]);
@@ -612,8 +612,8 @@ describe("war-room hardening (2.1)", () => {
     expect(sanitizeName("写真.png")).toBe("写真.png");
   });
   test("a DM thread never admits the same person's GROUP messages", () => {
-    const dm = { ts: "2026-08-30 12:00:00", from_me: false, handle: "+15551234567", name: "A", service: "iMessage", chat: "+15551234567", text: "dm" } as never;
-    const grp = { ts: "2026-08-30 12:01:00", from_me: false, handle: "+15551234567", name: "A", service: "iMessage", chat: "abcdef0123456789abcdef0123456789", text: "in group" } as never;
+    const dm = { ts: "2026-08-30T12:00:00Z", from_me: false, handle: "+15551234567", name: "A", service: "iMessage", chat: "+15551234567", text: "dm" } as never;
+    const grp = { ts: "2026-08-30T12:01:00Z", from_me: false, handle: "+15551234567", name: "A", service: "iMessage", chat: "abcdef0123456789abcdef0123456789", text: "in group" } as never;
     const out = selectThread([dm, grp], "+15551234567", false, 50);
     expect(out.map((m: { text: string }) => m.text)).toEqual(["dm"]);
   });
@@ -765,8 +765,8 @@ describe("the contact graph never rides argv", () => {
   });
 
   test("a bad or absent map degrades ranking, never the search", () => {
-    expect(parseRecency('{"+15550100011":"2026-09-03 09:00:00"}'))
-      .toEqual({ "+15550100011": "2026-09-03 09:00:00" });
+    expect(parseRecency('{"+15550100011":"2026-09-03T09:00:00Z"}'))
+      .toEqual({ "+15550100011": "2026-09-03T09:00:00Z" });
     expect(parseRecency("not json")).toEqual({});
     expect(parseRecency("[1,2,3]")).toEqual({});
     expect(parseRecency("null")).toEqual({});

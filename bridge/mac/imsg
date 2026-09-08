@@ -442,6 +442,27 @@ def decode_attributed_body(blob: bytes | None) -> str | None:
 
 
 def fmt_ts(apple_ns: int | None) -> str:
+    """WIRE format: UTC, ISO-8601, second precision ("2026-09-07T18:33:12Z").
+
+    Stamps used to cross the bridge as NAIVE Mac-local wall clock, and the
+    Linux side compared them against its OWN clock. Two ways that lied: a Mac
+    in another timezone shifted every read mark by the offset (marks ahead of
+    every message = nothing ever unread), and on the DST fall-back the Mac's
+    own wall clock repeats an hour, so for that hour string order stopped
+    matching real order. Every `a.ts < b.ts` in the client depends on those
+    being the same thing. UTC is monotonic and sorts lexicographically in
+    chronological order; clients convert to local for DISPLAY only.
+    """
+    if not apple_ns:
+        return "?"
+    return dt.datetime.fromtimestamp(
+        apple_ns / 1e9 + APPLE_EPOCH, dt.timezone.utc
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def fmt_ts_local(apple_ns: int | None) -> str:
+    """Mac-local wall clock, for the HUMAN plain-text renders only. A person
+    reading `imsg recent` wants the time they remember, not UTC."""
     if not apple_ns:
         return "?"
     return dt.datetime.fromtimestamp(apple_ns / 1e9 + APPLE_EPOCH).strftime(
@@ -908,7 +929,7 @@ def render(rows, as_json: bool, with_names: bool = True, con=None, rich: bool = 
         text = message_text(r).replace("\n", " | ")
         chat = r["room_name"] or r["chat_identifier"] or ""
         chat_tag = f" [{chat}]" if chat and chat != (r["handle"] or "") else ""
-        print(f"{fmt_ts(r['date'])}  {who:>30}{chat_tag}: {text}")
+        print(f"{fmt_ts_local(r['date'])}  {who:>30}{chat_tag}: {text}")
 
 
 # Two kinds of rows live in the message table without being messages. Both are
@@ -1083,7 +1104,7 @@ def cmd_contacts(con, args):
     for r in rows:
         nm = name_for(r["handle"]) if not args.no_names else None
         suffix = f"  ({nm})" if nm else ""
-        print(f"{fmt_ts(r['last_date'])}  {r['n']:>6}  {r['service']:>8}  {r['handle']}{suffix}")
+        print(f"{fmt_ts_local(r['last_date'])}  {r['n']:>6}  {r['service']:>8}  {r['handle']}{suffix}")
 
 
 def cmd_chats(con, args):
@@ -1165,7 +1186,7 @@ def cmd_chats(con, args):
         return
     for r in rows:
         name = r["display_name"] or r["room_name"] or r["chat_identifier"]
-        print(f"{fmt_ts(r['last_date'])}  {r['n']:>5}  {r['service_name']:>8}  {name}")
+        print(f"{fmt_ts_local(r['last_date'])}  {r['n']:>5}  {r['service_name']:>8}  {name}")
 
 
 def cmd_groups(con, args):
@@ -1235,7 +1256,7 @@ def cmd_groups(con, args):
             for h in ((r["participants"] or "").split(",") if r["participants"] else [])
         )
         name = r["display_name"] or members or r["chat_identifier"]
-        print(f"{fmt_ts(r['last_date']) if r['last_date'] else '':19}  {r['guid']}  {name}")
+        print(f"{fmt_ts_local(r['last_date']) if r['last_date'] else '':19}  {r['guid']}  {name}")
 
 
 ATTACHMENTS_ROOT = os.path.expanduser("~/Library/Messages/Attachments")

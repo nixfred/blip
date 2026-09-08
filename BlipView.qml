@@ -1251,7 +1251,7 @@ FocusScope {
     // writing the row) happens behind it. The field clears at once, so a
     // second message can follow without waiting — sends queue in order.
     var chat = String(root.active.chat)
-    var stamp = root.localStamp()
+    var stamp = root.wireStamp()
     var target = root.activeIsGroup
       ? ["--chat-id", String(root.active.guid)]
       : ["--to", chat]
@@ -1267,9 +1267,27 @@ FocusScope {
     pumpSend()
   }
 
-  /** Local wall clock as a chat.db-style stamp; the pending bubble's ts. */
-  function localStamp() {
-    return Qt.formatDateTime(new Date(), "yyyy-MM-dd HH:mm:ss")
+  /** Now in the bridge's WIRE format (UTC ISO-8601): the pending bubble's ts.
+   *  It is compared against real message stamps — which are UTC — so a local
+   *  wall clock here would put every in-flight bubble hours out of order. */
+  function wireStamp() {
+    return new Date().toISOString().replace(/\.\d{3}Z$/, "Z")
+  }
+
+  /** Wire stamp → epoch ms. Mirrors stampMs() in thread.ts, including the
+   *  fallback that reads a pre-UTC stamp as local. */
+  function stampMs(ts) {
+    var t = String(ts || "")
+    if (t === "") return NaN
+    return Date.parse(t.indexOf("T") >= 0 ? t : t.replace(" ", "T"))
+  }
+
+  /** The LOCAL calendar date a wire stamp falls on — day dividers break at
+   *  the reader's midnight, never UTC's. Mirrors localDay() in thread.ts. */
+  function localDay(ts) {
+    var ms = stampMs(ts)
+    if (isNaN(ms)) return ""
+    return Qt.formatDate(new Date(ms), "yyyy-MM-dd")
   }
 
   /** The instant echo: thread.ts's pendingBubble() in miniature — enough to
@@ -1278,8 +1296,8 @@ FocusScope {
   function appendPendingBubble(list, text, stamp) {
     var out = (list || []).slice()
     var prev = out.length ? out[out.length - 1] : null
-    var newDay = !prev || String(prev.ts || "").slice(0, 10) !== stamp.slice(0, 10)
-    var gapMin = prev ? (Date.parse(stamp.replace(" ", "T")) - Date.parse(String(prev.ts || "").replace(" ", "T"))) / 60000 : Infinity
+    var newDay = !prev || root.localDay(prev.ts) !== root.localDay(stamp)
+    var gapMin = prev ? (root.stampMs(stamp) - root.stampMs(prev.ts)) / 60000 : Infinity
     var start = !prev || newDay || prev.from_me !== true || !(gapMin <= 15)
     if (!start) { var p = Object.assign({}, prev); p.groupEnd = false; p.time = ""; out[out.length - 1] = p }
     out.push({ ts: stamp, from_me: true, name: "", text: String(text).trim(), day: newDay ? "Today" : "",
@@ -1331,13 +1349,15 @@ FocusScope {
   // The same patterns as the bubbles: today the time, older rows the date and
   // the time, with the year once it is not this year.
   function fmtTime(ts) {
-    var s = String(ts || "")
-    if (s.length < 16) return s
+    var ms = root.stampMs(ts)
+    if (isNaN(ms)) return String(ts || "")
     var now = new Date()
-    var at = new Date(+s.substring(0, 4), +s.substring(5, 7) - 1, +s.substring(8, 10),
-                      +s.substring(11, 13), +s.substring(14, 16))
+    // The stamp is UTC; every label below is the reader's local time. Reading
+    // the digits out of the string (as this did) showed a Mac's clock, and
+    // compared it against a Linux date.
+    var at = new Date(ms)
     var clock = Qt.formatTime(at, root.timeFormat)
-    if (s.substring(0, 10) === Qt.formatDate(now, "yyyy-MM-dd")) return clock
+    if (Qt.formatDate(at, "yyyy-MM-dd") === Qt.formatDate(now, "yyyy-MM-dd")) return clock
     // Messages stamps a row "Yesterday", then the weekday for the last week,
     // then a date — never a date-plus-clock, which is what a mail client does.
     var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -2256,7 +2276,7 @@ FocusScope {
                       font.bold: true
                     }
                     Text {
-                      text: String(modelData.ts || "").slice(0, 16)
+                      text: root.fmtTime(modelData.ts)
                       textFormat: Text.PlainText
                       color: root.dim
                       font.family: root.fontFamily

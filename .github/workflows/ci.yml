@@ -25,6 +25,8 @@ jobs:
         run: python3 bridge/mac/test_unsent.py
       - name: conversation cluster pins (no macOS needed)
         run: python3 bridge/mac/test_cluster.py
+      - name: stamps cross the bridge as UTC (no macOS needed)
+        run: python3 bridge/mac/test_wire_time.py
       - name: shell scripts (bash -n + shellcheck)
         run: |
           bash -n bridge/linux/blip-shim scripts/blip-setup scripts/sync-bridge.sh scripts/demo/blip-shots bridge/mac/install.sh

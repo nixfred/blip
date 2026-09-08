@@ -18,6 +18,7 @@ import {
   dedupeSelfEcho,
   isGroupChat,
   loadState,
+  normalizeMsgStamps,
   type AttachmentMeta,
   type ImsgMessage,
   type LinkCard,
@@ -94,7 +95,8 @@ export interface Bubble {
 }
 
 /** A send in flight: what was typed, where, and when Enter was pressed
- *  (local "YYYY-MM-DD HH:MM:SS"). Lives in BarWidget memory only. */
+ *  (the wire format, UTC — it is compared against real message stamps).
+ *  Lives in BarWidget memory only. */
 export interface PendingSend { chat: string; text: string; ts: string }
 
 export interface ThreadOutput {
@@ -140,24 +142,61 @@ const MONTHS = ["January", "February", "March", "April", "May", "June",
                 "July", "August", "September", "October", "November", "December"];
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+/** A wire stamp shaped like the bridge emits, or the pre-UTC stamp it used to. */
+const STAMP = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?Z?)?$/;
+
 /**
- * Qt's QDateTime::toString() for a "YYYY-MM-DD HH:MM:SS" stamp, the tokens
- * Blip needs: d dd ddd dddd · M MM MMM MMMM · yy yyyy · h hh H HH · m mm · s ss ·
+ * A wire stamp as epoch ms.
+ *
+ * The bridge emits UTC ("2026-09-07T18:33:12Z"). A stamp without the marker
+ * is the pre-UTC naive format and is read as LOCAL, so a Mac still running an
+ * old bridge degrades to the behaviour it always had rather than jumping by
+ * the whole UTC offset. A bare date is local midnight — parsing it by the
+ * ISO rule would make it UTC midnight, i.e. the day before, west of Greenwich.
+ */
+export function stampMs(ts: string): number {
+  const s = String(ts ?? "");
+  if (!STAMP.test(s)) return Number.NaN;
+  if (s.length === 10) return Date.parse(`${s}T00:00:00`);
+  return Date.parse(s.includes("T") ? s : s.replace(" ", "T"));
+}
+
+/** A wire stamp's fields in THIS machine's local time — the display side of UTC. */
+function localFields(ts: string) {
+  const ms = stampMs(ts);
+  if (Number.isNaN(ms)) return null;
+  const d = new Date(ms);
+  const p = (n: number, w = 2) => String(n).padStart(w, "0");
+  return {
+    year: p(d.getFullYear(), 4), month: p(d.getMonth() + 1), day: p(d.getDate()),
+    hour: p(d.getHours()), minute: p(d.getMinutes()), second: p(d.getSeconds()),
+    weekday: d.getDay(),
+  };
+}
+
+/** The local calendar date a wire stamp falls on, "" when unparseable. */
+export function localDay(ts: string): string {
+  const f = localFields(ts);
+  return f ? `${f.year}-${f.month}-${f.day}` : "";
+}
+
+/**
+ * Qt's QDateTime::toString() for a wire stamp, the tokens Blip needs:
+ * d dd ddd dddd · M MM MMM MMMM · yy yyyy · h hh H HH · m mm · s ss ·
  * AP ap A a, and 'quoted literals' with '' as an apostrophe. h/hh are 12-hour
- * when an AM/PM token is present, 24-hour otherwise, as in Qt. Works on the
- * string so a Mac-local stamp never meets the Linux time zone. Malformed
- * input formats to "".
+ * when an AM/PM token is present, 24-hour otherwise, as in Qt. The stamp is
+ * UTC on the wire and every label is LOCAL, so this converts first — a
+ * message is shown at the time the reader's own clock said. Malformed input
+ * formats to "".
  */
 export function formatStamp(ts: string, pattern: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(ts);
-  if (!m) return "";
-  const [year, month, day, hour = "00", minute = "00", second = "00"] =
-    m.slice(1) as [string, string, string, string?, string?, string?];
+  const f = localFields(ts);
+  if (!f) return "";
+  const { year, month, day, hour, minute, second, weekday } = f;
   const h24 = Number(hour);
   const h12 = h24 % 12 || 12;                                   // 0 and 12 read as 12
   const ampm = h24 < 12 ? "am" : "pm";
   const twelveHour = /[Aa]/.test(pattern.replace(/'(?:[^']|'')*'/g, ""));
-  const weekday = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))).getUTCDay();
 
   const field = (v: string, n: number) => (n === 1 ? String(Number(v)) : v);          // "08" → "8" | "08"
   const clock = (h: number, n: number) => (n === 1 ? String(h) : String(h).padStart(2, "0"));
@@ -191,8 +230,8 @@ export function clockLabel(ts: string, time = DEFAULT_FORMATS.time): string {
 
 /** "Today" / "Yesterday", else the date — with the year when it is not this year. */
 export function dayLabel(ts: string, today: string, formats = DEFAULT_FORMATS): string {
-  const date = ts.slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "";
+  const date = localDay(ts);                       // the reader's day, not UTC's
+  if (!date) return "";
   if (date === today) return "Today";
 
   const d = new Date(`${date}T00:00:00`);
@@ -203,10 +242,10 @@ export function dayLabel(ts: string, today: string, formats = DEFAULT_FORMATS): 
   return formatStamp(ts, date.slice(0, 4) === today.slice(0, 4) ? formats.date : formats.dateWithYear);
 }
 
-/** Minutes between two "YYYY-MM-DD HH:MM:SS" stamps. */
+/** Minutes between two wire stamps. */
 export function minutesBetween(a: string, b: string): number {
-  const pa = Date.parse(a.replace(" ", "T"));
-  const pb = Date.parse(b.replace(" ", "T"));
+  const pa = stampMs(a);
+  const pb = stampMs(b);
   if (Number.isNaN(pa) || Number.isNaN(pb)) return Number.POSITIVE_INFINITY;
   return Math.abs(pb - pa) / 60000;
 }
@@ -235,7 +274,10 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
     const prev = i > 0 ? msgs[i - 1]! : null;
     const next = i < msgs.length - 1 ? msgs[i + 1]! : null;
 
-    const newDay = !prev || prev.ts.slice(0, 10) !== m.ts.slice(0, 10);
+    // Day dividers fall on the READER's midnight: the stamps are UTC, so
+    // slicing the date off the string would break the day in the wrong place
+    // for anyone not on UTC.
+    const newDay = !prev || localDay(prev.ts) !== localDay(m.ts);
     // In a group, two members' messages must not merge into one run under
     // the first name — so a run breaks on sender (handle) change, not only
     // on the from_me flip.
@@ -248,7 +290,7 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
       minutesBetween(prev.ts, m.ts) > GROUP_GAP_MINUTES;
     const groupEnd =
       !next ||
-      next.ts.slice(0, 10) !== m.ts.slice(0, 10) ||
+      localDay(next.ts) !== localDay(m.ts) ||
       !sameSender(m, next) ||
       minutesBetween(m.ts, next.ts) > GROUP_GAP_MINUTES;
 
@@ -338,16 +380,12 @@ export const PENDING_MAX_AGE_MS = 2 * 60 * 1000;
 /** A real row may carry a Mac timestamp a little BEHIND the Linux clock. */
 const PENDING_SKEW_MS = 5 * 60 * 1000;
 
-function stampMs(ts: string): number {
-  return Date.parse(String(ts).replace(" ", "T"));
-}
-
 /** The bubble for a send in flight, decorated against the bubble before it
  *  the way decorate() would: same run when it follows one of yours within
  *  the gap (that bubble then loses its time), a day divider when it starts one. */
 export function pendingBubble(prev: Bubble | undefined, send: PendingSend, today: string, formats = DEFAULT_FORMATS): { bubble: Bubble; prev: Bubble | undefined } {
   const ts = send.ts;
-  const newDay = !prev || prev.ts.slice(0, 10) !== ts.slice(0, 10);
+  const newDay = !prev || localDay(prev.ts) !== localDay(ts);
   const groupStart = !prev || newDay || !prev.from_me || minutesBetween(prev.ts, ts) > GROUP_GAP_MINUTES;
   const bubble: Bubble = {
     ts,
@@ -516,8 +554,11 @@ export function loadThread(
     const parsed = JSON.parse(res.stdout as string);
     if (!Array.isArray(parsed)) throw new Error("not an array");
     const state = loadState();
+    // Same door rule as the collector: stamps become the wire format on the
+    // way in, so a Mac on the pre-UTC bridge cannot mix formats downstream.
+    const rows = (parsed as ImsgMessage[]).map(normalizeMsgStamps);
     const msgs = selectThread(
-      parsed as ImsgMessage[], chat, group, limit, state.selfChats, state.chatAliases,
+      rows, chat, group, limit, state.selfChats, state.chatAliases,
     );
     return { ok: true, online: true, error: "", bubbles: decorate(msgs, today, formats) };
   } catch (e) {
