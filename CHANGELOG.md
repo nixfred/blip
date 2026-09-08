@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **The conversation list stopped scanning the address book.** With startup
+  amortised, what was left was compute — and `chats` was spending 104 ms of
+  every request resolving names, because a handle with no exact last-ten key
+  fell back to comparing it against all 442 saved numbers. 298 conversations
+  meant 60,112 comparisons. They are bucketed by their last seven digits now,
+  which is sound rather than lucky: the matching rule only ever matches when
+  one number is a suffix of the other with a seven-digit floor, so the last
+  seven always agree. Checked against the old full scan over all 750 distinct
+  handles in a real chat.db: identical answers, zero mismatches.
+  Group clusters and pins are memoised too, against the chat table's shape and
+  the pinning plist's mtime rather than chat.db's — which changes on every
+  message and would have cached nothing during the busy minute that matters.
+  Opening a conversation is 83 ms now (223 ms before any of this), a poll
+  39 ms (160 ms), a deep poll 342 ms (707 ms).
+
 - **A persistent channel to the Mac.** Even with the probe gone, every query
   still paid ~90 ms before it read a row: ssh, `blip-dispatch`'s Python start,
   `imsg`'s own, and opening a 218 MB chat.db — for SQL that takes about a

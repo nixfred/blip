@@ -348,6 +348,22 @@ what it is handed. Keep it that way.
   **"Offline" in a test means clearing HOME *and* XDG_RUNTIME_DIR**, or the
   socket answers underneath the test.
 
+- **A name lookup that misses must not scan the address book.** `_same_number`
+  only matches when one national number is a SUFFIX of the other with a floor
+  of seven digits, so the last seven digits ALWAYS agree — which is what makes
+  `_PHONE_SUFFIX` (last-seven → cards) sound. Before it, every handle without
+  an exact last-ten key scanned all 442 cards: 298 conversations cost 60,112
+  `_same_number` calls, 46 ms of a 292 ms `chats`. Verified identical against
+  the full scan over all 750 distinct handles in a real chat.db — zero
+  mismatches — and that check is the one to repeat if this is ever touched,
+  because the matching rules have been got wrong twice before.
+  **Caches invalidate on what they DERIVE from, never on chat.db's mtime**,
+  which changes on every message and would cache nothing during exactly the
+  busy minute that matters: group clusters key on the chat table's
+  (count, max ROWID), pins on the pinning plist's mtime, and the Contacts
+  index on the address books' — the last one exists because the serve channel
+  outlives an edit in Contacts.app, where a one-shot run always rebuilt.
+
 ## Working on it
 
 ```

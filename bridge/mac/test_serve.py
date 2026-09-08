@@ -56,5 +56,37 @@ class ServeSurface(unittest.TestCase):
         self.assertEqual(ns.func, imsg.cmd_serve)
 
 
+class ContactIndex(unittest.TestCase):
+    """The suffix bucket must answer exactly as the old full scan did."""
+
+    def test_a_match_always_shares_the_last_seven_digits(self):
+        # This is what makes bucketing sound: _same_number only matches when
+        # one national number is a SUFFIX of the other, with a floor of seven
+        # digits — so the last seven always agree.
+        n = imsg._LOCAL_NUMBER_DIGITS
+        self.assertEqual(n, 7)
+        pairs = [
+            (("1", "2145550123"), ("1", "2145550123")),
+            (("47", "12345678"), ("47", "12345678")),
+            (("44", "7700900123"), ("44", "07700900123")),   # saved trunk zero
+        ]
+        for handle, card in pairs:
+            if imsg._same_number(handle, card):
+                stripped = card[1].removeprefix("0")
+                self.assertTrue(
+                    handle[1][-n:] in (card[1][-n:], stripped[-n:]),
+                    f"{handle} vs {card} matched without sharing the last {n} digits",
+                )
+
+    def test_forgetting_contacts_clears_every_index(self):
+        # The serve channel outlives an edit in Contacts.app, so it re-reads.
+        imsg._NAME_CACHE["x"] = "stale"
+        imsg._forget_contacts()
+        self.assertEqual(imsg._NAME_CACHE, {})
+        self.assertIsNone(imsg._NAME_INDEX)
+        self.assertIsNone(imsg._PHONE_SUFFIX)
+        self.assertEqual(imsg._EXACT_SEEN, set())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
