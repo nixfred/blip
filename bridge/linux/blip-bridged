@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""blip-bridged — keeps `imsg serve` channels open to the Mac.
+
+Every one-shot bridge call pays a fixed toll before it reads a single row:
+~16 ms ssh round trip, ~25 ms for blip-dispatch's Python start, ~20 ms for
+imsg's own, and ~27 ms to open a 218 MB chat.db — while the SQL underneath
+runs in about a millisecond. That toll, not the work, is what made Blip feel
+subtly laggy. This daemon pays it once per channel and holds the channel open,
+so a query costs the query.
+
+Measured on the gateway Mac, one-shot → on the channel:
+    recent 150      100 ms →  11 ms
+    groups          145 ms →  25 ms
+    thread 40 rich  197 ms →  71 ms
+    chats 300       341 ms → 259 ms   (compute-bound, not startup-bound)
+
+Shape
+-----
+A unix socket in $XDG_RUNTIME_DIR/blip (user-only, 0700). One connection is
+one request: the client writes a single JSON line and reads a framed reply,
+then the connection closes. No client-side request ids, no multiplexing.
+
+    ->  {"argv": ["--json","recent","150"], "stdin": "optional"}
+    <-  {"status":0,"len":N}\n  followed by exactly N bytes
+
+`stdin` is passed through to the command, so message text keeps riding stdin
+rather than argv (`search --stdin`) exactly as it does one-shot.
+
+Channels are POOLED. Blip refreshes the thread list and reloads the open
+conversation in parallel on every push ping; with a single channel the reload
+would queue behind a 259 ms `chats` call and the fix would make the case it
+was meant to help slower.
+
+This daemon is an accelerator and never a dependency. If it is not running,
+cannot start, or dies mid-flight, the shim's ordinary one-shot ssh path still
+answers — the client falls back on any error at all. That is also why it may
+exit freely when idle.
+"""
+from __future__ import annotations
+
+import errno
+import json
+import os
+import socket
+import subprocess
+import sys
+import threading
+import time
+
+POOL_SIZE = 2
+IDLE_EXIT_SECONDS = 15 * 60
+CONNECT_TIMEOUT = "8"
+
+
+def runtime_dir() -> str:
+    base = os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/blip-{os.getuid()}"
+    d = os.path.join(base, "blip")
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    return d
+
+
+def socket_path() -> str:
+    return os.path.join(runtime_dir(), "bridge.sock")
+
+
+def read_conf() -> dict:
+    """The same four keys the shim parses, with the same rules: the file is
+    DATA, never sourced, and remote_bin stays literal (the Mac expands it)."""
+    path = os.environ.get("BLIP_BRIDGE_CONF", os.path.expanduser("~/.config/blip/bridge.conf"))
+    conf = {"host": "", "key": os.path.expanduser("~/.ssh/blip_ed25519"),
+            "remote_bin": "$HOME/.blip/bin", "python": "python3"}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.split("#", 1)[0]
+                line = "".join(line.split())
+                if "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                v = v.strip("\"'")
+                if k in conf:
+                    conf[k] = v
+    except OSError:
+        pass
+    return conf
+
+
+class Channel:
+    """One `imsg serve` process behind one ssh session."""
+
+    def __init__(self, conf: dict) -> None:
+        self.conf = conf
+        self.lock = threading.Lock()
+        self.proc: subprocess.Popen | None = None
+
+    def _spawn(self) -> None:
+        conf = self.conf
+        key = conf["key"]
+        if os.access(key, os.R_OK):
+            # The dedicated key is enrolled with command="blip-dispatch", so the
+            # remote command is bare and dispatch execs the tool. Its own
+            # ControlMaster socket: sharing the general key's master would
+            # silently bypass the forced command.
+            ssh = ["ssh", "-i", key, "-o", "IdentitiesOnly=yes",
+                   "-o", "ControlMaster=auto",
+                   "-o", f"ControlPath={os.path.expanduser('~')}/.ssh/cm-blip-%r@%h:%p",
+                   "-o", "ControlPersist=10m"]
+            remote = "imsg serve"
+        else:
+            ssh = ["ssh"]
+            remote = f"PATH=/opt/homebrew/bin:/usr/local/bin:$PATH {conf['python']} {conf['remote_bin']}/imsg serve"
+        cmd = ssh + ["-o", f"ConnectTimeout={CONNECT_TIMEOUT}", "-o", "BatchMode=yes",
+                     "--", conf["host"], remote]
+        self.proc = subprocess.Popen(
+            cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, bufsize=0)
+        line = self.proc.stdout.readline()
+        if line.strip() != b"ready":
+            self.kill()
+            raise RuntimeError("serve channel did not come up")
+
+    def kill(self) -> None:
+        if self.proc is not None:
+            try:
+                self.proc.kill()
+            except OSError:
+                pass
+            self.proc = None
+
+    def request(self, payload: bytes) -> bytes:
+        """Send one request line, return the framed reply (header + body).
+
+        Any fault kills the channel rather than leaving it half-consumed: a
+        desynchronised channel would hand the NEXT caller someone else's
+        bytes, which is far worse than a client falling back to one-shot.
+        """
+        with self.lock:
+            if self.proc is None or self.proc.poll() is not None:
+                self._spawn()
+            try:
+                self.proc.stdin.write(payload)
+                self.proc.stdin.flush()
+                header = self.proc.stdout.readline()
+                if not header:
+                    raise RuntimeError("serve channel closed")
+                meta = json.loads(header)
+                want = int(meta["len"])
+                body = b""
+                while len(body) < want:
+                    chunk = self.proc.stdout.read(want - len(body))
+                    if not chunk:
+                        raise RuntimeError("short body from serve channel")
+                    body += chunk
+                return header + body
+            except Exception:
+                self.kill()
+                raise
+
+
+class Pool:
+    def __init__(self, conf: dict, size: int = POOL_SIZE) -> None:
+        self.channels = [Channel(conf) for _ in range(size)]
+        self.turn = threading.Semaphore(size)
+        self.free = list(self.channels)
+        self.guard = threading.Lock()
+
+    def request(self, payload: bytes) -> bytes:
+        self.turn.acquire()
+        with self.guard:
+            ch = self.free.pop()
+        try:
+            return ch.request(payload)
+        finally:
+            with self.guard:
+                self.free.append(ch)
+            self.turn.release()
+
+    def shutdown(self) -> None:
+        for ch in self.channels:
+            ch.kill()
+
+
+def serve_client(conn: socket.socket, pool: Pool) -> None:
+    conn.settimeout(30)
+    try:
+        buf = b""
+        while b"\n" not in buf:
+            chunk = conn.recv(65536)
+            if not chunk:
+                return
+            buf += chunk
+            if len(buf) > 1 << 20:          # a request line is argv, not a payload
+                return
+        line, _ = buf.split(b"\n", 1)
+        reply = pool.request(line + b"\n")
+        conn.sendall(reply)
+    except Exception:
+        # Say nothing and close: a client that gets no usable frame falls back
+        # to the one-shot path, which is the whole safety story here.
+        pass
+    finally:
+        try:
+            conn.close()
+        except OSError:
+            pass
+
+
+def main() -> None:
+    conf = read_conf()
+    if not conf["host"]:
+        sys.exit("blip-bridged: no Mac configured (host= in bridge.conf)")
+
+    path = socket_path()
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        # A stale socket from a killed daemon must not keep the fast path down
+        # forever, but a LIVE one means we are the second copy and should go.
+        try:
+            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            probe.settimeout(1)
+            probe.connect(path)
+            probe.close()
+            return                          # somebody is already serving
+        except OSError as e:
+            if e.errno not in (errno.ECONNREFUSED, errno.ENOENT):
+                return
+            if os.path.exists(path):
+                os.unlink(path)
+        old = os.umask(0o077)
+        try:
+            srv.bind(path)
+        finally:
+            os.umask(old)
+        srv.listen(16)
+    except OSError as e:
+        sys.exit(f"blip-bridged: cannot listen on {path}: {e}")
+
+    pool = Pool(conf)
+    last_seen = time.time()
+    srv.settimeout(30)
+    try:
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except socket.timeout:
+                if time.time() - last_seen > IDLE_EXIT_SECONDS:
+                    break               # nothing wants us; the shim restarts us on demand
+                continue
+            last_seen = time.time()
+            threading.Thread(target=serve_client, args=(conn, pool), daemon=True).start()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        pool.shutdown()
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    main()

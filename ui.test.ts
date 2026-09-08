@@ -800,3 +800,13 @@ test("tapbacks on picture-only messages get a pill on the picture", () => {
    expect(run(1,1,qt,"sample",{y:0},rect,3)).toBe(false);
    expect(run(99,0,qt,"sample",{y:0},rect,3)).toBe(false);
  });
+
+describe("the accelerator channel is an optimisation, never a dependency", () => {
+  test("the leader bar supervises blip-bridged, and only the leader", () => {
+    // Two bars would hold two pairs of Mac processes.
+    expect(widget).toContain('command: [root.home + "/bin/blip-bridged"]');
+    const proc = widget.slice(widget.indexOf("id: bridgeProc"), widget.indexOf("id: bridgeRestart"));
+    expect(proc).toContain("running: root.leader");
+    expect(proc).toContain("onExited: bridgeRestart.restart()");
+  });
+});

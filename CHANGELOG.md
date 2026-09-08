@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **A persistent channel to the Mac.** Even with the probe gone, every query
+  still paid ~90 ms before it read a row: ssh, `blip-dispatch`'s Python start,
+  `imsg`'s own, and opening a 218 MB chat.db — for SQL that takes about a
+  millisecond. `imsg serve` now answers many requests on one long-lived
+  process with chat.db already open, and `blip-bridged` on the Linux side
+  keeps two of those channels up (two, because Blip refreshes the list and
+  reloads the open conversation in parallel, and a single channel would queue
+  the reload behind a 259 ms `chats` call). The bar widget starts it, on the
+  leader bar only, exactly as it already runs the push watcher — which is why
+  Blip still needs no daemon of its own.
+  It is an accelerator and never a dependency: no socket, no socat, a daemon
+  that died mid-request, a frame that will not parse — anything at all — and
+  the ordinary one-shot ssh path answers instead. The channel carries
+  read-only queries only; attachments and avatars stream binary and would park
+  it behind a 100 MB photo, and `watch` blocks by design, so those stay
+  one-shot. Message text still rides stdin rather than argv.
+  Measured end to end: opening a conversation 223 → ~105 ms, a poll 160 →
+  ~36 ms, a deep poll 707 → ~370 ms.
+
 - **The bridge stopped paying a toll on every call.** Blip felt subtly laggy
   rather than slow, and measuring said why: nothing was slow, everything paid
   startup. A bridge call cost ~133 ms while the SQL underneath ran in about a
