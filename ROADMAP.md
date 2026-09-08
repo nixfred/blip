@@ -176,6 +176,17 @@ panel (3 lenses × finding, against current main) confirmed 11 closed and
 - [x] One BarWidget per monitor → leader election (2.2.0; follower bars
   show the badge from state.json and forward clicks over IPC).
 - [x] SMS/RCS threads send on their own service (2.2.0).
+- [ ] **Sending tapbacks may be possible after all** (2026-09-07). The
+  "needs SIP-off injection" verdict predates macOS 26: Messages now has
+  `Edit ▸ Tapback Message…` as a real menu item (also `Reply to Message…`
+  and `Edit Last Message…`), enumerated over System Events. That is the same
+  shape `imsg-read` used to overturn "marking read is impossible". Unproven:
+  the items read `enabled=false` from the background, which proves nothing
+  (responder-chain validation — test with Messages frontmost); the item acts
+  on the SELECTED message and selecting an arbitrary bubble from Linux is the
+  open problem; the picker needs navigating for the emoji; and it steals
+  focus. Groups remain unaddressable.
+
 - [ ] **3–4 digit short codes classify as groups** — `isGroupChat()` treats a
   digits-only id shorter than 5 as "not a phone", so a carrier-style sender
   opens read-only with "group id unknown". Widen to `{3,15}` (E.164 max is

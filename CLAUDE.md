@@ -392,7 +392,22 @@ to whatever has focus otherwise.
 
 ## Things that are not possible
 
-- Tapbacks, edits, typing indicators out. Needs SIP-off code injection; rejected.
+- ~~Tapbacks, edits, typing indicators out — needs SIP-off code injection.~~
+  **Half wrong; do not quote this as settled** (2026-09-07). macOS 26 Messages
+  has real MENU ITEMS for three of them — `Edit ▸ Tapback Message…`,
+  `Edit ▸ Reply to Message…`, `Edit ▸ Edit Last Message…`, plus `Send Later…`
+  — enumerated over System Events on the gateway Mac. A menu item is
+  scriptable, which is exactly how `imsg-read` overturned the old "marking
+  read is impossible" note. Typing indicators have no menu item and stay out.
+  What is NOT yet proved, and what anyone picking this up must establish
+  first: all four read `enabled=false` from the background, which per the
+  read-push note is evidence of NOTHING (AppKit validates menus against the
+  ACTIVE app's responder chain) — so feasibility has to be tested with
+  Messages frontmost. Then the real obstacles: the item acts on the SELECTED
+  message, and selecting an arbitrary bubble from Linux is the unsolved part;
+  the "…" suggests a picker that needs further navigation for the emoji;
+  Messages must come forward, so it steals focus the way `--chat` read-push
+  does; and a GROUP still cannot be addressed at all (next bullet).
 - Selecting a GROUP on the Mac from Linux. `imessage://` addresses a handle;
   a group's `chat<digits>` id has no URL form. So per-conversation read-push
   is DMs only; groups clear through `--all`.
