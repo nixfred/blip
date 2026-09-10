@@ -15,7 +15,7 @@ import {
   sniffImage,
 } from "./linkpreview";
 import { AVATAR_DIR, AVATAR_NONE_TTL_MS, AVATAR_TTL_MS, avatarArgs, avatarKey, fetchAvatar } from "./avatar";
-import { readFileSync, writeFileSync, unlinkSync, utimesSync, mkdtempSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, utimesSync, mkdtempSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -688,6 +688,17 @@ describe("country code + service (2.2.0)", () => {
     expect(normalizeHandle("07911 123456", "44")).toBe("+447911123456");
     expect(normalizeHandle("447911123456", "44")).toBe("+447911123456");
     expect(normalizeHandle("(404) 555-0123", "1")).toBe("+14045550123");
+  });
+  test("the default country code comes from the test's own bridge.conf, never the developer's", () => {
+    // test-setup.ts points XDG_CONFIG_HOME at a scratch dir; without that, a
+    // developer with country_code=47 saw the five NANP cases above fail.
+    const { defaultCountryCode } = require("./contact-search") as typeof import("./contact-search");
+    expect(process.env.XDG_CONFIG_HOME).toBeDefined();   // or the line below writes to ./undefined/
+    const dir = `${process.env.XDG_CONFIG_HOME}/blip`;
+    mkdirSync(dir, { recursive: true });
+    expect(defaultCountryCode()).toBe("1");
+    writeFileSync(`${dir}/bridge.conf`, "country_code=47\n");
+    try { expect(defaultCountryCode()).toBe("47"); } finally { unlinkSync(`${dir}/bridge.conf`); }
   });
   test("SMS threads send files on the SMS service; groups never carry --service", () => {
     let seen: string[] = [];
