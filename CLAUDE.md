@@ -69,8 +69,7 @@ what it is handed. Keep it that way.
   stdin (`--pending-stdin`) and `withPendingSends()` in thread.ts keeps each
   bubble until a real from-me row with the same text lands, resolving one
   send per row. The read watermark (`--seen`) skips pending bubbles: their ts
-  is THIS machine's clock. A failed send drops its bubble and restores the
-  text. Never go back to "wait 1.5 s, then reload".
+  is THIS machine's clock. A failed send retains its bubble with a failure reason in memory. Never go back to "wait 1.5 s, then reload".
 - **A peeked thread is not read.** In the window, the sidebar cursor resting on
   a row shows that thread (`peeking`); focus stays in the list and neither
   read path fires — `markRead()` in BlipView (the only caller of the host's
@@ -316,7 +315,7 @@ what it is handed. Keep it that way.
 bun test                                   # 90+ tests, ~40 ms
 bun collector.ts --deep | jq .unread       # live against the Mac
 bun thread.ts <chat-id> 40 | jq .bubbles   # one conversation
-cp *.qml *.ts manifest.json ~/.config/omarchy/plugins/nixfred.blip/
+cp *.qml *.ts *.mjs manifest.json ~/.config/omarchy/plugins/nixfred.blip/
 omarchy-restart-shell                      # ALWAYS restart (hot-reload leaves IPC on a zombie)
 # MANDATORY after every deploy — a QML syntax error kills BOTH surfaces silently (2.1.4 shipped one):
 qs log /run/user/1000/quickshell/by-id/$(basename $(readlink /run/user/1000/quickshell/by-pid/$(pgrep -x quickshell)))/log.qslog -t 400 | grep -iE 'nixfred.blip.*(error|warn|unavailable|token)'
@@ -394,3 +393,10 @@ to whatever has focus otherwise.
 - **Attachments out.** `send POSIX file` works on Sequoia IF the file is staged
   in `~/Pictures/` — from anywhere else Messages fails silently (`error=25`,
   "Not Delivered"). Verified delivered for PNG and PDF. See ROADMAP.md.
+
+Local text-send failures retain their optimistic bubble and a bounded reason
+in memory, including across thread reloads. `send-state.ts` builds the QML
+module `SendState.mjs`; regenerate it with the command in its header. Local
+send IDs distinguish same-second sends. A reload started before a local send
+or failure is discarded and retried, so it cannot erase the new state. Failed
+local bubbles remain provisional and never advance read marks.

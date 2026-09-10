@@ -79,11 +79,11 @@ describe("QML safety invariants", () => {
   });
 
   test("a send shows its bubble at once and reloads carry the in-flight ledger on stdin", () => {
-    expect(panel).toContain("root.bubbles = root.appendPendingBubble(root.bubbles, text, stamp)");
-    expect(panel).toContain("root.pendingSends = root.pendingSends.concat([{ chat: chat, text: text, ts: stamp }])");
+    expect(panel).toContain("root.bubbles = root.appendPendingBubble(root.bubbles, text, stamp, localId)");
+    expect(panel).toContain("root.pendingSends = root.pendingSends.concat([{ chat: chat, text: text, ts: stamp, localId: localId }])");
     expect(panel).toContain('"--pending-stdin"');
     expect(panel).toContain("threadProc.write(JSON.stringify(pending))");
-    expect(panel).toContain("root.dropPending(completedChat, completedStamp)");
+    expect(panel).toContain("root.failPending(completedChat, completedId, reason, completedText, completedStamp)");
     expect(panel).toContain('modelData.pending === true ? "Sending…"');
     // the read watermark never takes a pending bubble's local-clock stamp
     expect(panel).toContain("if (list[k].pending === true) continue");
@@ -669,4 +669,23 @@ test("the share sheet steps through a message's links", () => {
   // swaps the image instead of collapsing and re-growing the card.
   expect(sheet).toContain('visible: root.shareQr !== "" || qrProc.running');
   expect(qmlFunction("showShareUrl")).not.toContain('shareQr = ""');
+});
+
+
+test("a thread response taken before a local send or failure cannot replace bubbles", () => {
+  const start = panel.indexOf("onStreamFinished: {", panel.indexOf("id: threadProc"));
+  const brace = panel.indexOf("{", start);
+  let depth = 1, end = brace + 1;
+  for (; depth && end < panel.length; end++) {
+    if (panel[end] === "{") depth++;
+    if (panel[end] === "}") depth--;
+  }
+  const bubbles = [{text: "new local send"}];
+  const requested: string[] = [];
+  const root = {surfaceOpen:true, inThread:true, active:{chat:"+15551234567"},
+    threadRunningChat:"+15551234567", threadPendingRevision:1, pendingRevision:2,
+    bubbles, loading:true, requestThreadLoad:(chat:string) => requested.push(chat)};
+  new Function("root", panel.slice(brace + 1, end - 1))(root);
+  expect(root.bubbles).toBe(bubbles);
+  expect(requested).toEqual(["+15551234567"]);
 });

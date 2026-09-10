@@ -40,7 +40,7 @@ attempts trigger prompts on the Mac's screen.
 
 ```sh
 bun test
-cp *.qml *.ts manifest.json ~/.config/omarchy/plugins/nixfred.blip/
+cp *.qml *.ts *.mjs manifest.json ~/.config/omarchy/plugins/nixfred.blip/
 omarchy-restart-shell        # NOT a hot-reload: IPC would stay on the old instance
 qs -p /usr/share/omarchy/shell ipc call nixfred.blip status
 ```

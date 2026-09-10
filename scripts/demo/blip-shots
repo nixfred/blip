@@ -74,7 +74,7 @@ CONF
 echo "· shell copy $SHELLDIR"
 cp -r /usr/share/omarchy/shell "$SHELLDIR"
 touch "$SHELLDIR/.blip-demo-scratch"
-cp "$REPO"/*.qml "$REPO"/*.ts "$REPO/manifest.json" "$SHELLDIR/"   # manifest: the header's version (Astra D#7)
+cp "$REPO"/*.qml "$REPO"/*.ts "$REPO"/*.mjs "$REPO/manifest.json" "$SHELLDIR/"   # manifest: the header's version (Astra D#7)
 cp "$REPO/scripts/demo/DemoShell.qml" "$SHELLDIR/shell.qml"
 
 echo "· launching"

@@ -91,11 +91,13 @@ export interface Bubble {
   /** Drawn the moment Enter was pressed, before the Mac has written the row;
    *  "Sending…" replaces the time. Absent on every real bubble. */
   pending?: boolean;
+  localId?: string;
+  failureReason?: string;
 }
 
 /** A send in flight: what was typed, where, and when Enter was pressed
  *  (local "YYYY-MM-DD HH:MM:SS"). Lives in BarWidget memory only. */
-export interface PendingSend { chat: string; text: string; ts: string }
+export interface PendingSend { chat: string; text: string; ts: string; localId?: string; failed?: boolean; failureReason?: string }
 
 export interface ThreadOutput {
   ok: boolean;
@@ -369,8 +371,10 @@ export function pendingBubble(prev: Bubble | undefined, send: PendingSend, today
     effect: "",
     audio: false,
     html: linkify(send.text.trim()),
-    failed: false,
+    failed: send.failed === true,
     pending: true,
+    ...(send.localId ? { localId: send.localId } : {}),
+    ...(send.failureReason ? { failureReason: send.failureReason } : {}),
   };
   return { bubble, prev: prev && !groupStart ? { ...prev, groupEnd: false, time: "" } : prev };
 }
@@ -385,12 +389,14 @@ export function pendingBubble(prev: Bubble | undefined, send: PendingSend, today
  */
 export function withPendingSends(bubbles: Bubble[], pending: PendingSend[], today: string, formats = DEFAULT_FORMATS, now = Date.now()): { bubbles: Bubble[]; pending: PendingSend[] } {
   const live = pending
-    .filter((p) => Number.isFinite(stampMs(p.ts)) && now - stampMs(p.ts) <= PENDING_MAX_AGE_MS)
+    .filter((p) => Number.isFinite(stampMs(p.ts)) && (p.failed === true || now - stampMs(p.ts) <= PENDING_MAX_AGE_MS))
     .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
   if (live.length === 0) return { bubbles, pending: [] };
   const taken = new Set<number>();
   const open: PendingSend[] = [];
   for (const p of live) {
+    // A rejected attempt is not resolved by an older identical message.
+    if (p.failed === true) { open.push(p); continue; }
     const want = p.text.trim();
     let hit = -1;
     for (let i = bubbles.length - 1; i >= 0; i--) {

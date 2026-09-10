@@ -1,3 +1,4 @@
+import "SendState.mjs" as SendState
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -345,6 +346,10 @@ FocusScope {
   property string pendingThreadChat: "" // latest chat requested while it runs
   property string sendChat: ""          // immutable context for the current send
   property string sendText: ""
+  property string sendLocalId: ""
+  property int nextSendId: 0
+  property int pendingRevision: 0
+  property int threadPendingRevision: 0
   property string sendStamp: ""         // local "YYYY-MM-DD HH:mm:ss" the current send was typed at
   // Text sends queue instead of refusing while one is on the wire; each gets
   // its bubble the instant Enter is pressed (see pendingSends).
@@ -541,6 +546,7 @@ FocusScope {
     if (threadProc.running || pendingThreadChat === "") return
     threadRunningChat = pendingThreadChat
     pendingThreadChat = ""
+    root.threadPendingRevision = root.pendingRevision
     var pending = root.pendingSends.filter(function(p) { return p.chat === threadRunningChat })
     threadProc.command = ["bun", root.threadScript, threadRunningChat, "80",
                           "--time-format", root.timeFormat,
@@ -1301,12 +1307,14 @@ FocusScope {
     // green-bubble (SMS/RCS) threads send on their own service (war room #2)
     var svc = String(root.active.service || "")
     if (!root.activeIsGroup && /^(SMS|RCS)$/i.test(svc)) target = target.concat(["--service", svc.toUpperCase()])
-    root.pendingSends = root.pendingSends.concat([{ chat: chat, text: text, ts: stamp }])
-    root.bubbles = root.appendPendingBubble(root.bubbles, text, stamp)
+    var localId = String(++root.nextSendId)
+    root.pendingRevision++
+    root.pendingSends = root.pendingSends.concat([{ chat: chat, text: text, ts: stamp, localId: localId }])
+    root.bubbles = root.appendPendingBubble(root.bubbles, text, stamp, localId)
     root.pinToBottom = true
     composeField.text = ""
     note = ""
-    root.sendQueue = root.sendQueue.concat([{ chat: chat, text: text, stamp: stamp, target: target }])
+    root.sendQueue = root.sendQueue.concat([{ chat: chat, text: text, stamp: stamp, localId: localId, target: target }])
     pumpSend()
   }
 
@@ -1318,25 +1326,29 @@ FocusScope {
   /** The instant echo: thread.ts's pendingBubble() in miniature — enough to
    *  draw the bubble in the right run with the right clock. Every reload
    *  replaces it with the TypeScript version until the real row lands. */
-  function appendPendingBubble(list, text, stamp) {
+  function appendPendingBubble(list, text, stamp, localId) {
     var out = (list || []).slice()
     var prev = out.length ? out[out.length - 1] : null
     var newDay = !prev || String(prev.ts || "").slice(0, 10) !== stamp.slice(0, 10)
     var gapMin = prev ? (Date.parse(stamp.replace(" ", "T")) - Date.parse(String(prev.ts || "").replace(" ", "T"))) / 60000 : Infinity
     var start = !prev || newDay || prev.from_me !== true || !(gapMin <= 15)
     if (!start) { var p = Object.assign({}, prev); p.groupEnd = false; p.time = ""; out[out.length - 1] = p }
-    out.push({ ts: stamp, from_me: true, name: "", text: String(text).trim(), day: newDay ? "Today" : "",
+    out.push({ localId: localId, ts: stamp, from_me: true, name: "", text: String(text).trim(), day: newDay ? "Today" : "",
                groupStart: start, groupEnd: true, time: Qt.formatTime(new Date(), root.timeFormat),
                receipt: "", tapbacks: [], attachments: [], replyText: "", replyMine: false, edited: false,
                link: null, retracted: false, effect: "", audio: false, html: "", failed: false, pending: true })
     return out
   }
 
-  /** Drop one in-flight send (by chat + stamp) from the ledger and the view. */
-  function dropPending(chat, stamp) {
-    root.pendingSends = root.pendingSends.filter(function(p) { return !(p.chat === chat && p.ts === stamp) })
-    if (root.inThread && String(root.active.chat) === chat)
-      root.bubbles = root.bubbles.filter(function(b) { return !(b.pending === true && String(b.ts) === stamp) })
+  function failPending(chat, localId, reason, text, stamp) {
+    root.pendingRevision++
+    root.pendingSends = SendState.markSendFailed(root.pendingSends, localId, reason,
+      {chat: chat, localId: localId, text: text, ts: stamp})
+    if (root.inThread && String(root.active.chat) === chat) {
+      if (!root.bubbles.some(function(b) { return b.localId === localId }))
+        root.bubbles = root.appendPendingBubble(root.bubbles, text, stamp, localId)
+      root.bubbles = SendState.markSendFailed(root.bubbles, localId, reason)
+    }
   }
 
   /** Start the next queued text send when the wire is free. */
@@ -1347,6 +1359,8 @@ FocusScope {
     root.sendChat = job.chat
     root.sendText = job.text
     root.sendStamp = job.stamp
+    root.sendLocalId = job.localId
+    sendProc.lastErr = ""
     root.reloadTries = 0
     // Body on STDIN (--text-stdin), never argv: argv is readable by every
     // process on this machine and travels through ssh into the Mac's ps.
@@ -1400,6 +1414,12 @@ FocusScope {
         // render into a hidden view or mark the thread read unseen.
         var belongsHere = root.surfaceOpen && root.inThread && String(root.active.chat) === root.threadRunningChat
         if (!belongsHere) return
+        // A send or failure happened after this request took its snapshot.
+        // Keep the current bubbles and request a fresh snapshot on exit.
+        if (root.threadPendingRevision !== root.pendingRevision) {
+          root.requestThreadLoad(root.threadRunningChat)
+          return
+        }
         root.loading = false
         try {
           var d = JSON.parse(text.trim())
@@ -1419,7 +1439,7 @@ FocusScope {
             if (Array.isArray(d.pending)) {
               var chat = root.threadRunningChat
               root.pendingSends = root.pendingSends.filter(function(p) { return p.chat !== chat }).concat(d.pending)
-              if (d.pending.length > 0 && root.reloadTries < 8) {
+              if (d.pending.some(function(p) { return p.failed !== true }) && root.reloadTries < 8) {
                 root.reloadTries++
                 root.reloadChat = chat
                 reloadTimer.restart()
@@ -1480,10 +1500,12 @@ FocusScope {
       var completedChat = root.sendChat
       var completedText = root.sendText
       var completedStamp = root.sendStamp
+      var completedId = root.sendLocalId
       var belongsHere = root.inThread && String(root.active.chat) === completedChat
       root.sendChat = ""
       root.sendText = ""
       root.sendStamp = ""
+      root.sendLocalId = ""
       if (code === 0) {
         // A URL you just SHARED opens the sheet too (Fred, 2.3.0): send it,
         // then offer the QR / LocalSend / copy for the same link.
@@ -1493,9 +1515,11 @@ FocusScope {
         root.reloadChat = completedChat
         reloadTimer.restart()
       } else {
-        // The bubble comes down, the words go back in the field (unless a
+        // Keep the failed bubble; put the words back in the field (unless a
         // newer draft is there), and the reason is on the status line.
-        root.dropPending(completedChat, completedStamp)
+        var reason = code === 69 || code === 255 ? "Mac unreachable"
+          : sendProc.lastErr !== "" ? sendProc.lastErr : "Send failed (exit " + code + ")"
+        root.failPending(completedChat, completedId, reason, completedText, completedStamp)
         if (belongsHere) {
           if (composeField.text === "") composeField.text = completedText
           if (code === 69 || code === 255) root.note = "not sent — Mac unreachable"
@@ -3118,8 +3142,11 @@ FocusScope {
                   Text {
                     Layout.rightMargin: bubbleRow.mine ? Style.space(6) : 0
                     Layout.leftMargin: bubbleRow.mine ? 0 : Style.space(6)
+                    Layout.maximumWidth: Math.max(1, content.width * 0.78)
+                    wrapMode: Text.WrapAnywhere
                     text: [modelData.failed === true ? "⚠ Not Delivered" : "",
-                           modelData.pending === true ? "Sending…" : String(modelData.time || ""),
+                           modelData.failed === true ? String(modelData.failureReason || "")
+                             : modelData.pending === true ? "Sending…" : String(modelData.time || ""),
                            modelData.edited === true ? "Edited" : "",
                            String(modelData.effect || "") !== "" ? "sent with " + modelData.effect : ""]
                           .filter(function(s) { return s !== "" }).join(" · ")
