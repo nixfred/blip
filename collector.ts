@@ -528,6 +528,20 @@ export function hasIdentity(m: ImsgMessage): boolean {
  * else the members' names. Member names are resolved from whoever has spoken
  * in the fetched window; a silent member falls back to their handle.
  */
+/**
+ * A group "name" that is merely the chat id is NOT a name. `imsg chats`
+ * substitutes the identifier when a group has no display name, so the raw
+ * `3734fc1a…` came back as the name and won every `||` chain ahead of the
+ * participant fallback - the fallback was unreachable for exactly the groups
+ * it exists for (Fred, 2026-09-10). Aliases count too: a re-keyed group's
+ * retired id is just as much not-a-name.
+ */
+export function namedGroup(name: unknown, chat: string, aliases: string[] = []): string {
+  const value = String(name ?? "").trim();
+  if (!value || value === chat || aliases.includes(value)) return "";
+  return value;
+}
+
 export function groupName(chat: string, info: GroupInfo | undefined, byHandle: Map<string, string>): string {
   if (info?.name) return info.name;
   const members = groupParticipants(info, byHandle).map((member) =>
@@ -1450,6 +1464,16 @@ export function mergeChats(
   unreadCounts: Record<string, number>,
 ): Thread[] {
   const infoByChat = new Map(chats.map((c) => [c.id, c]));
+  // Every participant name the window already resolved, so a chat that is new
+  // to this run still names its group after people rather than bare handles.
+  const participantNames = new Map<string, string>();
+  for (const thread of threads) {
+    for (const person of thread.participants ?? []) {
+      if (person.name && !participantNames.has(person.handle)) {
+        participantNames.set(person.handle, person.name);
+      }
+    }
+  }
   const applyPin = (thread: Thread): Thread => {
     const info = infoByChat.get(thread.chat);
     if (!info) return thread;
@@ -1467,8 +1491,11 @@ export function mergeChats(
       aliases,
       guid: group ? groupInfo?.guid ?? thread.guid : "",
       name: group
-        ? (groupInfo?.name || info.name || (groupInfo?.participants.length
-          ? groupName(thread.chat, groupInfo, knownParticipantNames) : thread.name || thread.chat))
+          ? (namedGroup(groupInfo?.name, thread.chat, aliases)
+            || namedGroup(info.name, thread.chat, aliases)
+            || (groupInfo?.participants.length
+              ? groupName(thread.chat, groupInfo, knownParticipantNames)
+              : namedGroup(thread.name, thread.chat, aliases) || thread.chat))
         : (info.last_name || info.name || thread.name || thread.chat),
       service: info.service || thread.service,
       last_text: info.last === thread.last_ts ? info.last_text : messagePreview(thread.last_text),
@@ -1492,7 +1519,8 @@ export function mergeChats(
     const groupInfo = groups[c.id]
       ?? aliases.map((alias) => groups[alias]).find((value) => value !== undefined);
     const name = group
-      ? (groupInfo?.name || c.name || groupName(c.id, groupInfo, new Map()))
+        ? (namedGroup(groupInfo?.name, c.id, aliases) || namedGroup(c.name, c.id, aliases)
+          || groupName(c.id, groupInfo, participantNames))
       : (c.last_name || c.name || c.id);
     out.push({
       chat: c.id,

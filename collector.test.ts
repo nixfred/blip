@@ -993,6 +993,31 @@ describe("complete conversation list (mergeChats)", () => {
     expect(mergeChats([], [chat], {}, {})[0]!.name).toBe(chat.id);
   });
 
+    test("a group whose only name IS its chat id still names itself after people", () => {
+      // The real shape, and the one the case above missed by using name:null.
+      // `imsg chats` substitutes the identifier when a group has no display
+      // name, so `name` came back as "3734fc1a..." and won the || chain ahead
+      // of the participant fallback - unreachable for exactly the groups it is
+      // for. Found live (Fred, 2026-09-10): 26 groups showed a raw hex id.
+      const id = "ce5a593a78af408282d61461ade89135";
+      const idChat = {...chats[1]!, id, name: id, aliases: [id]};
+      const info = {name: "", guid: "any;+;" + id,
+        participants: ["+15551234567", "+15550001111"],
+        participantNames: {"+15551234567": "Pat", "+15550001111": "Sam"}};
+      const groups = {[id]: info};
+      expect(mergeChats([], [idChat], groups, {})[0]!.name).toBe("Pat & Sam");
+      // and through the applyPin path, where an existing thread carries the id
+      const existing = {...windowThread, chat: id, name: id, guid: "",
+        participants: [{handle: "+15551234567", name: "Pat"},
+                       {handle: "+15550001111", name: "Sam"}]};
+      expect(mergeChats([existing], [idChat], groups, {})[0]!.name).toBe("Pat & Sam");
+      // a retired alias id is just as much not-a-name
+      const rekeyed = {...idChat, id: "chat9999", name: id, aliases: ["chat9999", id]};
+      expect(mergeChats([], [rekeyed], {chat9999: info}, {})[0]!.name).toBe("Pat & Sam");
+      // a real title still wins over the participants
+      expect(mergeChats([], [{...idChat, name: "Lunch Crew"}], groups, {})[0]!.name).toBe("Lunch Crew");
+    });
+
   test("quiet conversations outside the window appear, newest first", () => {
     const out = mergeChats([windowThread], chats, { ce5a593a78af408282d61461ade89135: { name: "Lunch Crew", guid: "any;+;ce5a", participants: [] } }, { ce5a593a78af408282d61461ade89135: 2 });
     expect(out.map((t) => t.chat)).toEqual(["+15551234567", "ce5a593a78af408282d61461ade89135", "+15559990000"]);
