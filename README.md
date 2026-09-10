@@ -537,6 +537,7 @@ helper; the optional availability check needs Automation → Contacts on the Mac
 | list | `a` · *mark all read* link | clear every badge and dot — and tell the Mac, so your iPhone catches up too |
 | list | `/` | search conversations by name as you type, then messages; Enter opens the highlight, Esc backs out |
 | list | `n` · *＋ new* link | start a conversation with anyone — search contacts by name, or type a number/email directly |
+| panel or window | `Ctrl+1` … `Ctrl+9` | open the corresponding pinned conversation, left to right then top to bottom; works while typing; unused numbers do nothing |
 | thread | `Enter` | send (text, or the queued file with the text as caption) |
 | thread | `Ctrl+V` | paste — an image on the clipboard becomes a queued file, text pastes normally |
 | thread | `/attach <path>` + `Enter` | queue any file on this machine; drag-and-drop works too |

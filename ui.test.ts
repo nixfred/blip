@@ -691,3 +691,13 @@ test("a thread response taken before a local send or failure cannot replace bubb
   expect(root.bubbles).toBe(bubbles);
   expect(requested).toEqual(["+15551234567"]);
 });
+ test("Ctrl+number shortcuts use pin order and remain available in editors", () => {
+   const source = readFileSync(new URL("./PinnedShortcuts.qml", import.meta.url), "utf8");
+   expect(source).toContain('sequence: "Ctrl+" + (index + 1)');
+   expect(source).toContain('context: Qt.WindowShortcut');
+   expect(source).toContain('model: 9');
+   expect(source).toContain('if (thread) root.chosen(thread)');
+   expect(panel).toContain('pins: root.pinnedThreads');
+   expect(panel).toContain('active: root.surfaceOpen && !root.contactsOpen && root.shareUrl === ""');
+   expect(panel).toContain('String(root.active.chat) === String(thread.chat)) root.focusDefault()');
+ });

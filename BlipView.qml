@@ -21,6 +21,17 @@ import qs.Ui
 FocusScope {
   id: root
 
+  PinnedShortcuts {
+    pins: root.pinnedThreads
+    active: root.surfaceOpen && !root.contactsOpen && root.shareUrl === ""
+    onChosen: function(thread) {
+      if (root.newMode) root.exitNew()
+      if (root.searching) root.exitSearch()
+      if (root.inThread && String(root.active.chat) === String(thread.chat)) root.focusDefault()
+      else root.openThread(thread)
+    }
+  }
+
   // ---- host contract (docs/app-design-review.md) ----------------------
   property var hostWidget: null
   /** Qt format strings, owned by the host widget (see BarWidget). Empty when no host is
@@ -2641,6 +2652,19 @@ FocusScope {
         RowLayout {
           Layout.fillWidth: true
           spacing: Style.space(8)
+          PanelActionButton {
+            visible: root.inThread && !root.splitView
+            Layout.alignment: Qt.AlignTop
+            Layout.topMargin: Style.space(6)
+            iconText: "←"
+            tooltipText: "Back to messages (Esc)"
+            Accessible.name: "Back to messages"
+            focusable: true
+            foreground: root.foreground
+            hoverColor: root.accent
+            fontFamily: root.fontFamily
+            onClicked: root.back()
+          }
           PanelHero {
             Layout.fillWidth: true
             title: root.inThread ? String(root.active.name || root.active.chat) : "Select a conversation"
@@ -2649,9 +2673,7 @@ FocusScope {
                   ? (root.isSendable(root.active) ? "group" : "group · read-only (id unknown)")
                   : String(root.active.handle))
               : ""
-            detail: root.inThread
-              ? (root.loading ? "loading…" : (root.splitView ? "" : "Esc = back"))
-              : ""
+            detail: root.inThread && root.loading ? "loading…" : ""
             foreground: root.foreground
             fontFamily: root.fontFamily
           }
