@@ -3439,9 +3439,10 @@ FocusScope {
                 else if (contentY > max) contentY = max
               }
 
-              TextArea {
+              ComposerInput {
                 id: composeField
                 onActiveFocusChanged: if (activeFocus) root.commitPeek()
+                spellingColor: root.urgent
                 width: composeFlick.width
                 // At least the viewport, so a click in empty space still lands in
                 // the field; taller than it once the text outgrows five lines.
@@ -3500,22 +3501,13 @@ FocusScope {
                     root.startPaste()
                     return
                   }
-                  // Reading history without the mouse: the compose field is the
-                  // thread's focus holder, so the keys live here. An empty field
-                  // has no caret for Up/Down to move; they select bubbles instead.
-                  // The arrows are the bubbles' when there is no caret line to
-                  // move to: Up from the first line of a draft (or an empty
-                  // field), Down from the last line while a bubble is selected.
-                  // Omarchy's own lists get this for free from single-line
-                  // fields; the compose box is multi-line, hence the edge rule.
                   var empty = text.length === 0
-                  var caret = cursorRectangle
-                  var onFirstLine = empty || caret.y < topPadding + caret.height * 0.5
-                  var onLastLine = empty || caret.y + caret.height > topPadding + contentHeight - caret.height * 0.5
-                  if ((event.key === Qt.Key_Up && onFirstLine)
-                      || (event.key === Qt.Key_Down && onLastLine && root.bubbleCursor >= 0)) {
-                    event.accepted = true
-                    root.moveBubbleCursor(event.key === Qt.Key_Up ? -1 : 1)
+                  // Ordinary editing keys belong to the draft, including at
+                  // its boundaries. History selection uses Page Up/Page Down.
+                  if (event.key === Qt.Key_Up || event.key === Qt.Key_Down
+                      || event.key === Qt.Key_Home || event.key === Qt.Key_End) {
+                    root.clearBubbleCursor()
+                    event.accepted = composeField.moveAtBoundary(event.key, event.modifiers)
                     return
                   }
                   // PgUp/PgDn work with a draft in the field (they move no caret):
@@ -3534,22 +3526,6 @@ FocusScope {
                     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { event.accepted = true; root.openBubble(b); return }
                     if (event.matches(StandardKey.Copy)) { event.accepted = true; root.copyBubble(b); return }
                     if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) { event.accepted = true; root.quoteBubble(b); return }
-                  }
-                  // Home/End select the oldest / newest bubble from an empty
-                  // field, or once the caret already sits at the start / end
-                  // of its line — the first press is the caret's, the second
-                  // the bubbles' (the arrows' edge rule). Neighbour glyphs on
-                  // another line mean a line edge, so wrapped lines count too.
-                  var atLineStart = empty || cursorPosition === 0
-                    || positionToRectangle(cursorPosition - 1).y < caret.y - 1
-                  var atLineEnd = empty || cursorPosition === length
-                    || positionToRectangle(cursorPosition + 1).y > caret.y + 1
-                  if (((event.key === Qt.Key_Home && atLineStart) || (event.key === Qt.Key_End && atLineEnd))
-                      && root.bubbles.length > 0) {
-                    event.accepted = true
-                    root.bubbleCursor = event.key === Qt.Key_Home ? 0 : root.bubbles.length - 1
-                    root.revealBubbleCursor()
-                    return
                   }
                   if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                       && !(event.modifiers & Qt.ShiftModifier)) {

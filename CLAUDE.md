@@ -401,3 +401,7 @@ module `SendState.mjs`; regenerate it with the command in its header. Local
 send IDs distinguish same-second sends. A reload started before a local send
 or failure is discarded and retried, so it cannot erase the new state. Failed
 local bubbles remain provisional and never advance read marks.
+The composer keeps arrow/Home/End keys for native text editing; PageUp/PageDown
+select history bubbles. `ComposerInput.qml` exposes the editable accessibility
+field and draws spelling ranges supplied by `spellcheck.ts`. Draft text stays
+on bounded stdin, never argv or disk; the helper emits only UTF-16 ranges.

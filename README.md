@@ -546,11 +546,11 @@ helper; the optional availability check needs Automation → Contacts on the Mac
 | thread | `Enter` | send (text, or the queued file with the text as caption) |
 | thread | `Ctrl+V` | paste — an image on the clipboard becomes a queued file, text pastes normally |
 | thread | `/attach <path>` + `Enter` | queue any file on this machine; drag-and-drop works too |
-| thread | `↑` / `↓` | select a bubble, newest first, and keep it in view — from an empty compose field, or from the first / last line of a draft; `↓` past the newest or `Esc` drops the selection and returns to the bottom |
+| thread | `↑` / `↓` | move through draft lines; on the first / last visual line, jump to the beginning / end of the draft |
 | thread | `Enter` · `Ctrl+C` · `Ctrl+R` (bubble selected) | open its attachment or link · copy its text, or the picture itself when the bubble is only a picture · quote it into the compose field (`> …`) |
 | thread | `PgUp` / `PgDn` (Fn+`↑`/`↓` on a Mac keyboard) | select the topmost / bottommost visible bubble, then a screen further each press — also with text in the compose field, since they move no caret |
 | thread | `Shift+PgUp` / `Shift+PgDn` | one bubble at a time from anywhere in a draft, without moving the caret first |
-| thread | `Home` / `End` | select the oldest / newest bubble — from an empty compose field, or once the caret already sits at the start / end of its line |
+| thread | `Home` / `End` · `Ctrl+Home` / `Ctrl+End` | start / end of the current line · start / end of the whole draft |
 | thread | `Esc` | back to list (or clear a text selection first) |
 | anywhere | `Esc` | close |
 
@@ -560,7 +560,18 @@ Its width and height are remembered across shell restarts in
 and never exceeds 80% of that display’s logical height, including its border
 and padding. Moving to a smaller display clamps the visible size without
 replacing your saved preference. The separate app window keeps its own size.
+The message composer exposes a named, editable multiline accessibility field for
+apps such as hyprcorrect. Quickshell must include upstream accessibility fix
+`916a0dd90c`; unpatched 0.3.1 hides its windows from accessibility clients.
 
+Misspellings receive red underlines using local Hunspell with an English (US)
+dictionary. Install `hunspell` and `hunspell-en_us` to enable this on Arch, or
+provide `en_US.aff` and `en_US.dic` under
+`$HOME/.local/share/blip/dictionaries/`. No packages are installed automatically.
+Spelling checks debounce for 350 ms, inspect at most 256 words in drafts up to
+8 KiB, and skip URLs and email addresses. Missing dictionaries or checker errors
+leave the draft usable without underlines. Draft text travels only over stdin;
+only character ranges return to the UI, and nothing is saved or sent remotely.
 
 IPC, for scripts and other plugins:
 

@@ -45,7 +45,7 @@ describe("QML safety invariants", () => {
     const start = panel.indexOf("id: composeField");
     expect(start).toBeGreaterThan(-1);
     const compose = panel.slice(Math.max(0, start - 80), start + 2800);
-    expect(compose).toContain("TextArea {");
+    expect(compose).toContain("ComposerInput {");
     expect(compose).toContain("wrapMode: TextEdit.Wrap");
     expect(compose).toContain("width: composeFlick.width");
     expect(compose).not.toContain("implicitWidth:");
@@ -351,10 +351,7 @@ describe("QML safety invariants", () => {
     expect(qmlFunction("scrollConversation")).toContain("flick.stick = flick.contentY >= max - 4");
     expect(panel).toContain("root.scrollConversation(-d)");
     expect(panel.split("flick.stick = flick.contentY >= max - 4").length - 1).toBe(1);
-    // Home/End select the ends only from an empty field (caret otherwise)
-    expect(panel).toContain("(event.key === Qt.Key_Home && atLineStart) || (event.key === Qt.Key_End && atLineEnd)");
-    expect(panel).toContain("var atLineStart = empty || cursorPosition === 0");
-    expect(panel).toContain("root.bubbleCursor = event.key === Qt.Key_Home ? 0 : root.bubbles.length - 1");
+    expect(panel).not.toContain("var atLineStart");
     expect(panel).not.toContain("conversationStep");
     // PgUp/PgDn select the edge bubble regardless of text, and page when already there
     expect(panel).toContain("if (event.modifiers & Qt.ShiftModifier) root.moveBubbleCursor(dir)");
@@ -366,7 +363,7 @@ describe("QML safety invariants", () => {
     expect(page).toContain("leaveBubbles()");
   });
 
-  test("arrows in an empty compose field select bubbles, and the selection clears cleanly", () => {
+  test("draft navigation keeps normal caret movement and clears history selection", () => {
     // The selection is a target for actions; it must never outlive the rows
     // it indexes (a reload renumbers them) and Esc must drop it before leaving.
     expect(panel).toContain("onBubblesChanged: clearBubbleCursor()");
@@ -378,11 +375,9 @@ describe("QML safety invariants", () => {
     expect(move).toContain("bubbleCursor = n - 1");            // Up from nothing = newest
     expect(move).toContain("leaveBubbles()");                  // Down past newest = same exit as Esc
     expect(qmlFunction("leaveBubbles")).toContain("scrollConversation(flick.contentHeight)");
-    expect(panel).toContain("root.moveBubbleCursor(event.key === Qt.Key_Up ? -1 : 1)");
-    // the edge rule: Up leaves a draft only from its first line, Down only from
-    // its last and only while a bubble is selected (otherwise the caret keeps it)
-    expect(panel).toContain("var onFirstLine = empty || caret.y < topPadding + caret.height * 0.5");
-    expect(panel).toContain("(event.key === Qt.Key_Down && onLastLine && root.bubbleCursor >= 0)");
+    expect(panel).toContain("event.key === Qt.Key_Home || event.key === Qt.Key_End");
+    expect(panel).toContain("root.clearBubbleCursor()\n                    event.accepted = composeField.moveAtBoundary(event.key, event.modifiers)");
+    expect(panel).not.toContain("var onFirstLine");
   });
 
   test("bubble actions reuse the click handlers and never steal a real send", () => {
@@ -709,3 +704,16 @@ test("tapbacks on picture-only messages get a pill on the picture", () => {
   expect(panel).toContain('readonly property bool pillHere: index === 0 && String(bubbleRow.modelData.text || "") === ""');
   expect(panel).toContain("+ (pillHere ? Style.space(12) : 0)");
 });
+ test("composer boundary arrows use visual lines and preserve modified keys", () => {
+   const source = readFileSync(new URL("./ComposerInput.qml", import.meta.url), "utf8");
+   const body = source.split("function moveAtBoundary(key, modifiers) {")[1]!.split("\n  }")[0]!;
+   const run = new Function("key", "modifiers", "Qt", "text", "cursorRectangle", "positionToRectangle", "cursorPosition", body + "; return false");
+   const qt = {NoModifier:0,Key_Up:1,Key_Down:2};
+   const rect = (p:number) => ({y:p === 0 ? 0 : 40});
+   expect(run(1,0,qt,"sample",{y:0},rect,3)).toBe(true);
+   expect(run(2,0,qt,"sample",{y:40},rect,3)).toBe(true);
+   expect(run(1,0,qt,"sample",{y:20},rect,3)).toBe(false);
+   expect(run(2,0,qt,"sample",{y:20},rect,3)).toBe(false);
+   expect(run(1,1,qt,"sample",{y:0},rect,3)).toBe(false);
+   expect(run(99,0,qt,"sample",{y:0},rect,3)).toBe(false);
+ });
