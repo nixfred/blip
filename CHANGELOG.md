@@ -60,6 +60,12 @@
   than the messages (Catppuccin Latte: 10:1 against 7:1 for the text itself).
   They now dim by alpha, as Omarchy's own placeholder text does. Dark themes
   look the same.
+- **Stickers show.** Messages files stickers (Memoji, Genmoji, sticker packs)
+  under `StickerCache/`, not `Attachments/`, and the bridge's path guard knew
+  only the latter — every sticker anyone sent came back as "attachment path
+  escapes the Messages store". The guard now admits that directory too, with
+  the same resolve-then-check, regular-file and size rules. Re-run
+  `blip-setup` so the Mac `imsg` picks it up.
 
 ## 2.4.0 — 2026-09-08 — read it from the keyboard, send without the wait
 
