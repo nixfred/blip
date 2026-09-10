@@ -574,6 +574,10 @@ Misspellings receive red underlines using local Hunspell with an English (US)
 dictionary. Install `hunspell` and `hunspell-en_us` to enable this on Arch, or
 provide `en_US.aff` and `en_US.dic` under
 `$HOME/.local/share/blip/dictionaries/`. No packages are installed automatically.
+`spell=en_US,nb_NO` in `bridge.conf` checks against several dictionaries at
+once — a word found in any of them is fine, which is what a bilingual draft
+needs — and `spell=off` turns the underlines off. Names follow the dictionary
+files (`hunspell -D` lists them); a name that is not installed is skipped.
 Spelling checks debounce for 350 ms, inspect at most 256 words in drafts up to
 8 KiB, and skip URLs and email addresses. Missing dictionaries or checker errors
 leave the draft usable without underlines. Draft text travels only over stdin;

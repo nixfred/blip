@@ -47,6 +47,10 @@
 - **Reactions on pictures show.** A message that is only a picture (or a file)
   has no text bubble, and that is where the tapback pill lived, so a reaction
   on a picture was never seen. The pill now sits on the picture or chip itself.
+- **`spell=` in `bridge.conf` picks the spelling dictionaries.** The checker
+  from 2.4.x asked Hunspell for `en_US` only, so a draft in any other language
+  was underlined word for word. `spell=en_US,nb_NO` checks against several at
+  once, `spell=off` turns it off; the default is unchanged.
 
 ## 2.4.0 — 2026-09-08 — read it from the keyboard, send without the wait
 
