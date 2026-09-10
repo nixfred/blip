@@ -282,6 +282,7 @@ unset, it follows Omarchy's type size.
 - Linux: [Omarchy](https://omarchy.org) (Hyprland + the Omarchy shell), and on
   the box: `bun`, `jq`, `openssh`, `libnotify`, `wl-clipboard`, `xdg-utils`.
   `blip-setup` checks for each and prints the `pacman` line for what's missing.
+  The optional **Save vCard…** action also uses `zenity` for its folder picker.
 
 > **Honest note on dependencies.** Blip is not a drop-in marketplace plugin
 > the way a clock widget is: it needs `bun` on the Linux side, a Mac you own
@@ -710,3 +711,19 @@ and it's the reason this took an evening, not a week.
 **Contributors:** [@jethrojones](https://github.com/jethrojones) — `blip-check` across every Contacts source (#2).
 
 MIT.
+
+
+### Export a contact
+
+In Contact review, choose the exact matching source card. **Copy vCard** copies
+a real `.vcf` file: press Ctrl+V directly in an app that supports pasting files,
+such as a file manager or an email attachment editor. Clipboard-history menus
+may retain only text and images, so selecting that entry again may lose its
+file type. Support for file pasting depends on the receiving app.
+
+**Copy vCard** and **Save vCard…** name the file with the contact’s nickname,
+or first name when no nickname is set (for example, `Ex.vcf`).
+
+**Save vCard…** lets you choose Downloads or another folder. It saves a named
+`.vcf` you can attach, drag, or keep; existing files are preserved by adding a
+number to the new filename. Neither action changes the contact on the Mac.

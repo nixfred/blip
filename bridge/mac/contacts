@@ -581,7 +581,7 @@ def run_bounded_process(
         process.stderr.close()
 
 
-def run_contact_repair(request: dict) -> dict:
+def run_contact_repair(request: dict, output_limit: int = MAX_REPAIR_PROCESS_BYTES) -> dict:
     script = os.path.join(os.path.dirname(os.path.realpath(__file__)), "contact-repair.js")
     info = os.lstat(script)
     if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or info.st_uid != os.getuid():
@@ -590,7 +590,7 @@ def run_contact_repair(request: dict) -> dict:
     if len(payload) > MAX_REPAIR_INPUT_BYTES:
         raise RuntimeError("Contacts repair request is too large")
     code, stdout, stderr = run_bounded_process(
-        ["/usr/bin/osascript", "-l", "JavaScript", script], payload
+        ["/usr/bin/osascript", "-l", "JavaScript", script], payload, output_limit=output_limit
     )
     try:
         response = json.loads(stdout.decode("utf-8"))
@@ -661,6 +661,15 @@ def _cmd_resolve(args):
                       "name": candidate["name"], "sourceName": candidate["cards"][number - 1]["sourceName"],
                       "accountNumber": account, "fields": fields})
         return
+    if operation == "vcard":
+        original, _, candidate, record, _, _ = selected_card(request.get("handle"), request.get("token"))
+        response = run_contact_repair({"operation": "vcard", "personUids": [record["uid"]]}, 3 * 1024 * 1024)
+        encoded = response.get("vcard")
+        if not isinstance(encoded, str) or not encoded or len(encoded) > 3 * 1024 * 1024:
+            raise RuntimeError("Contacts returned an invalid vCard")
+        emit_resolve({"ok": True, "handle": original, "token": request["token"],
+                      "name": candidate["name"], "vcard": encoded}, 3 * 1024 * 1024)
+        return
     if operation == "open":
         _, _, selected, selected_record, selected_card_number, selected_account_number = selected_card(
             request.get("handle"), request.get("token")
@@ -683,7 +692,7 @@ def _cmd_resolve(args):
         })
         return
     raise ValueError(
-        "operation must be candidates, fingerprint, audit, details, or open"
+        "operation must be candidates, fingerprint, audit, details, vcard, or open"
     )
 
 

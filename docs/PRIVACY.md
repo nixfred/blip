@@ -111,3 +111,28 @@ are never written to the audit cache. Requests and responses use the existing
 80-character labels, and 4,096-character values; oversized cards report an
 error instead of silently dropping fields. The reader uses the existing
 AddressBook object layer and enables no Contacts mutation operations.
+Copy vCard exports only the explicitly selected source card, revalidating its
+opaque token on the Mac. Apple's AddressBook vCard representation supplies the
+file; Blip does not merge or save cards in Contacts. The export is limited to
+2 MiB (3 MiB for the base64 JSON response). Contact bytes travel on bounded
+stdin/stdout, never argv, and never pass through the QML model.
+
+An explicit copy creates a private `.vcf` file under
+`$XDG_RUNTIME_DIR/blip/vcards` (directories 0700, files 0600) and places a file
+reference on the clipboard as `text/uri-list` for native file pasting. Each
+copy gets a separate random subdirectory, so its basename can remain the
+contact’s short name without replacing a previous export. Short names come
+from the selected vCard’s nickname or given-name fields; card bytes remain
+unchanged. Runtime directories are pinned and reject links
+or incorrect ownership/permissions. On each copy, Blip removes its files older
+than 24 hours and retains at most 32 files including the new one. Runtime
+files disappear when the login runtime directory is cleared. This is contact
+export data, not message content; no message text is persisted.
+
+Save vCard opens a folder picker (zenity), starting in the configured Downloads
+folder. The export is saved only after a folder is chosen. The destination
+is pinned, the file is created privately (0600), and publication never replaces
+an existing file or symbolic link; duplicate names receive a numbered suffix.
+Saved files are permanent user exports, outside runtime cleanup. Cancelling
+creates no file and leaves the clipboard unchanged. The folder-picker result
+is capped at 4,097 bytes with a five-minute deadline.

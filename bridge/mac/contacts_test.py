@@ -288,6 +288,20 @@ class ContactDetailsTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "invalid detail"):
                 contacts._cmd_resolve(None)
 
+class ContactVcardTests(unittest.TestCase):
+    def test_export_requires_exact_card_and_bounds_response(self):
+        token = "sha256:" + "a" * 64
+        selected = ("+15551234567", "key", {"name": "Example Person"}, {"uid": "synthetic-card"}, 1, 1)
+        with mock.patch.object(contacts, "read_resolve_request", return_value={"operation": "vcard", "handle": "+15551234567", "token": token}), \
+             mock.patch.object(contacts, "selected_card", return_value=selected) as resolve, \
+             mock.patch.object(contacts, "run_contact_repair", return_value={"ok": True, "vcard": "YWJj"}) as export, \
+             mock.patch.object(contacts, "emit_resolve") as emit:
+            contacts._cmd_resolve(None)
+        resolve.assert_called_once_with("+15551234567", token)
+        export.assert_called_once_with({"operation": "vcard", "personUids": ["synthetic-card"]}, 3 * 1024 * 1024)
+        self.assertEqual(emit.call_args.args[1], 3 * 1024 * 1024)
+        self.assertEqual(emit.call_args.args[0]["token"], token)
+
 
 if __name__ == "__main__":
     unittest.main()
