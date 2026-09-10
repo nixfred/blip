@@ -47,6 +47,11 @@
 - **Reactions on pictures show.** A message that is only a picture (or a file)
   has no text bubble, and that is where the tapback pill lived, so a reaction
   on a picture was never seen. The pill now sits on the picture or chip itself.
+- **Secondary text reads right on light themes.** Timestamps, previews and
+  labels dimmed with `Qt.darker`, which on a light theme made them *heavier*
+  than the messages (Catppuccin Latte: 10:1 against 7:1 for the text itself).
+  They now dim by alpha, as Omarchy's own placeholder text does. Dark themes
+  look the same.
 
 ## 2.4.0 — 2026-09-08 — read it from the keyboard, send without the wait
 

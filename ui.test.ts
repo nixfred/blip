@@ -403,6 +403,10 @@ describe("QML safety invariants", () => {
     // Empty status does not reserve a row; only failures are red.
     expect(panel).toContain('visible: root.note !== ""');
     expect(panel).toContain("color: calm ? root.dim : root.urgent");
+    // secondary text dims by alpha, which reads right on light and dark themes alike;
+    // Qt.darker on the foreground only works on a dark one
+    expect(panel).toContain("readonly property color dim: Qt.alpha(foreground, 0.66)");
+    expect(panel).not.toMatch(/Qt\.darker\((root\.)?foreground/);
   });
 
   test("a peeked thread is not read until the reader commits", () => {

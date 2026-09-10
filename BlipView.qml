@@ -94,7 +94,10 @@ FocusScope {
   readonly property int fontCaption: Math.max(1, Math.round(Style.font.caption * uiFontScale))
   readonly property int fontBodySmall: Math.max(1, Math.round(Style.font.bodySmall * uiFontScale))
   readonly property int fontBody: Math.max(1, Math.round(Style.font.body * uiFontScale))
-  readonly property color dim: Qt.darker(foreground, 1.45)
+  // Secondary text: the foreground at 0.66, as Omarchy's own placeholder text
+  // is. Not Qt.darker: darker is dimmer only on a dark theme — on a light one
+  // it made timestamps heavier than the messages they sit under.
+  readonly property color dim: Qt.alpha(foreground, 0.66)
   /** An editor owns the keyboard — the host's key catcher must stand down. */
   readonly property bool editorActive:
     contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused
@@ -3543,7 +3546,7 @@ FocusScope {
                   ? "caption (optional) — Enter sends the file"
                   : root.isSendable(root.active) ? "iMessage" : "Read-only — group id unknown"
                 color: root.foreground
-                placeholderTextColor: Qt.darker(root.foreground, 1.6)
+                placeholderTextColor: root.dim
                 selectionColor: Style.selectionFillFor(root.foreground, root.mineFill)
                 selectedTextColor: root.foreground
                 font.family: root.fontFamily
