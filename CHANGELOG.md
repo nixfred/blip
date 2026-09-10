@@ -51,6 +51,10 @@
   from 2.4.x asked Hunspell for `en_US` only, so a draft in any other language
   was underlined word for word. `spell=en_US,nb_NO` checks against several at
   once, `spell=off` turns it off; the default is unchanged.
+- **List rows follow the theme's hover colour.** The thread list, pins, search
+  hits and new-message hits highlighted with a hard-coded 8 % foreground; they
+  now take Omarchy's `hover-cursor-fill-alpha` / `hover-cursor-color`, like the
+  conversation's bubble cursor already did. Default themes look the same.
 
 ## 2.4.0 — 2026-09-08 — read it from the keyboard, send without the wait
 

@@ -115,6 +115,9 @@ FocusScope {
   readonly property color mineFill: accent
   readonly property color mineText: "#ffffff"
   readonly property color theirsFill: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.14)
+  // Omarchy's hover-cursor fill for rows and the bubble band alike: the theme's
+  // colour and alpha (foreground at 0.08 by default), not a hard-coded copy of them.
+  readonly property color hoverFill: Style.hoverFillFor(foreground, accent)
   readonly property color theirsText: foreground
 
   // Links inside a bubble take the bubble's readable text color instead of
@@ -2237,7 +2240,7 @@ FocusScope {
                 implicitHeight: contactRow.implicitHeight + Style.space(12)
                 radius: Style.cornerRadius
                 color: contactHover.hovered || hasCursor
-                  ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+                  ? root.hoverFill
                   : "transparent"
                 HoverHandler { id: contactHover }
                 TapHandler { onTapped: root.openContact(modelData) }
@@ -2348,7 +2351,7 @@ FocusScope {
                   implicitHeight: pinnedColumn.implicitHeight + Style.space(12)
                   radius: Style.cornerRadius
                   color: pinnedHover.hovered || (hasCursor && root.cursorShown)
-                    ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+                    ? root.hoverFill
                     : "transparent"
 
                   HoverHandler { id: pinnedHover }
@@ -2504,7 +2507,7 @@ FocusScope {
                 implicitHeight: hitCol.implicitHeight + Style.space(12)
                 radius: Style.cornerRadius
                 color: hitHover.hovered || hasCursor
-                  ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+                  ? root.hoverFill
                   : "transparent"
                 HoverHandler { id: hitHover }
                 TapHandler { onTapped: root.openSearchHit(modelData) }
@@ -2588,7 +2591,7 @@ FocusScope {
                   implicitHeight: rowRow.implicitHeight + Style.space(root.splitView ? 30 : 18)
                   radius: Style.cornerRadius
                   color: highlighted
-                    ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
+                    ? root.hoverFill
                     : "transparent"
 
                   HoverHandler {
@@ -2904,9 +2907,7 @@ FocusScope {
             y: root.bubbleCursorItem ? root.bubbleCursorItem.y - Style.space(2) : 0
             height: root.bubbleCursorItem ? root.bubbleCursorItem.height + Style.space(4) : 0
             radius: Style.cornerRadius
-            // Omarchy's cursor fill: the theme's hover-cursor colour and alpha
-            // (foreground at 0.08 by default), not a hard-coded copy of them.
-            color: Style.hoverFillFor(root.foreground, root.accent)
+            color: root.hoverFill
           }
           ColumnLayout {
             id: content

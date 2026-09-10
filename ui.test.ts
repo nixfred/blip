@@ -369,8 +369,10 @@ describe("QML safety invariants", () => {
     // The selection is a target for actions; it must never outlive the rows
     // it indexes (a reload renumbers them) and Esc must drop it before leaving.
     expect(panel).toContain("onBubblesChanged: clearBubbleCursor()");
-    // the band takes the theme's hover-cursor colour/alpha, like Omarchy's own rows
-    expect(panel).toContain("color: Style.hoverFillFor(root.foreground, root.accent)");
+    // the band and the list rows take the theme's hover-cursor colour/alpha through
+    // one property, like Omarchy's own rows; its default is never copied by hand
+    expect(panel).toContain("readonly property color hoverFill: Style.hoverFillFor(foreground, accent)");
+    expect(panel).not.toContain("foreground.b, 0.08)");
     expect(panel).toContain("onHasCursorChanged: if (hasCursor) root.bubbleCursorItem = bubbleRow");
     expect(panel).toContain("if (root.bubbleCursor >= 0) root.leaveBubbles(); else root.back()");
     const move = qmlFunction("moveBubbleCursor");
