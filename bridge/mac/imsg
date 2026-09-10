@@ -25,6 +25,7 @@ import argparse
 import datetime as dt
 import functools
 import html
+import io
 import json
 import os
 import plistlib
@@ -267,6 +268,14 @@ def _vote(local: dict, key, name: str) -> None:
 _EXACT_SEEN: set = set()                             # every exact key ANY source carried, ambiguous or not
 _NAME_INDEX: dict[str, str] | None = None            # exact keys: last-ten digits, lowercased email
 _PHONE_INDEX: dict[Phone, str] | None = None          # every saved number, parsed, for the region-aware fallback
+# The same cards bucketed by their last seven digits. _same_number only ever
+# matches when one national number is a SUFFIX of the other with a floor of
+# seven digits — so the last seven always agree, and a candidate that does not
+# share them cannot match. Without this, every handle that missed the exact
+# key scanned the whole address book: 298 conversations cost 60,112
+# _same_number calls (46 ms of a 292 ms `chats`).
+_PHONE_SUFFIX: dict[str, list[tuple[Phone, str]]] | None = None
+_NAME_CACHE: dict[str, str | None] = {}               # handle -> resolved name, per process
 
 
 def _is_dm_id(s: str | None) -> bool:
@@ -304,9 +313,14 @@ def name_for(handle: str | None) -> str | None:
     """Resolve a Messages handle (phone or email) to a Contacts display name.
     Lazily builds an in-memory index from all AddressBook source DBs on first
     call. Returns None if no contact match."""
-    global _NAME_INDEX, _PHONE_INDEX
+    global _NAME_INDEX, _PHONE_INDEX, _PHONE_SUFFIX
     if not handle:
         return None
+    # Same handle, same answer: `recent 150` asks for a couple of dozen people
+    # over and over, and on the serve channel the index outlives the request
+    # anyway. Reset with _forget_contacts() when the address book changes.
+    if handle in _NAME_CACHE:
+        return _NAME_CACHE[handle]
     if _NAME_INDEX is None:
         # One person usually exists in SEVERAL sources under slightly different
         # spellings ("Rob" vs "Robert"). That is not ambiguity. Ambiguity is two
@@ -365,6 +379,20 @@ def name_for(handle: str | None) -> str | None:
         resolved = {k: min(v.items(), key=lambda kv: (kv[1][0], -kv[1][1]))[0] for k, v in votes.items()}
         _NAME_INDEX = {k: n for k, n in resolved.items() if isinstance(k, str)}
         _PHONE_INDEX = {k: n for k, n in resolved.items() if isinstance(k, tuple)}
+        _PHONE_SUFFIX = {}
+        for card, n in _PHONE_INDEX.items():
+            # Bucket on the stripped variant too: _same_number tries the card
+            # both with and without a saved trunk zero.
+            for nsn in {card[1], card[1].removeprefix("0")}:
+                if len(nsn) >= _LOCAL_NUMBER_DIGITS:
+                    _PHONE_SUFFIX.setdefault(nsn[-_LOCAL_NUMBER_DIGITS:], []).append((card, n))
+    answer = _resolve_name(handle)
+    _NAME_CACHE[handle] = answer
+    return answer
+
+
+def _resolve_name(handle: str) -> str | None:
+    """name_for() minus the memo — the index is built by the time we get here."""
     if "@" in handle:
         return _NAME_INDEX.get(handle.strip().lower()) or None
     hit = _NAME_INDEX.get(_normalize_phone(handle))
@@ -374,10 +402,29 @@ def name_for(handle: str | None) -> str | None:
     # suffix match name a stranger over it (Astra C#2).
     if _normalize_phone(handle) in _EXACT_SEEN:
         return None
-    # No exact key: a unique region-aware match names it; two different names do not.
+    # No exact key: a unique region-aware match names it; two different names do
+    # not. Only cards sharing the last seven digits can match at all, so ask the
+    # bucket rather than the whole book — same answers, one lookup instead of a
+    # scan per unknown number.
     parsed = _parse_phone(handle)
-    near = {n for card, n in _PHONE_INDEX.items() if parsed and _same_number(parsed, card)}
+    if not parsed:
+        return None
+    nsn = parsed[1]
+    if len(nsn) < _LOCAL_NUMBER_DIGITS:
+        return None
+    bucket = (_PHONE_SUFFIX or {}).get(nsn[-_LOCAL_NUMBER_DIGITS:], ())
+    near = {n for card, n in bucket if _same_number(parsed, card)}
     return near.pop() if len(near) == 1 else None
+
+
+def _forget_contacts() -> None:
+    """Drop the Contacts indexes so the next lookup rebuilds them. One-shot
+    runs never needed this — the process ended — but the serve channel
+    outlives an edit in Contacts.app."""
+    global _NAME_INDEX, _PHONE_INDEX, _PHONE_SUFFIX
+    _NAME_INDEX = _PHONE_INDEX = _PHONE_SUFFIX = None
+    _EXACT_SEEN.clear()
+    _NAME_CACHE.clear()
 
 
 def label(handle: str | None, is_from_me: int, with_names: bool) -> str:
@@ -442,6 +489,27 @@ def decode_attributed_body(blob: bytes | None) -> str | None:
 
 
 def fmt_ts(apple_ns: int | None) -> str:
+    """WIRE format: UTC, ISO-8601, second precision ("2026-09-07T18:33:12Z").
+
+    Stamps used to cross the bridge as NAIVE Mac-local wall clock, and the
+    Linux side compared them against its OWN clock. Two ways that lied: a Mac
+    in another timezone shifted every read mark by the offset (marks ahead of
+    every message = nothing ever unread), and on the DST fall-back the Mac's
+    own wall clock repeats an hour, so for that hour string order stopped
+    matching real order. Every `a.ts < b.ts` in the client depends on those
+    being the same thing. UTC is monotonic and sorts lexicographically in
+    chronological order; clients convert to local for DISPLAY only.
+    """
+    if not apple_ns:
+        return "?"
+    return dt.datetime.fromtimestamp(
+        apple_ns / 1e9 + APPLE_EPOCH, dt.timezone.utc
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def fmt_ts_local(apple_ns: int | None) -> str:
+    """Mac-local wall clock, for the HUMAN plain-text renders only. A person
+    reading `imsg recent` wants the time they remember, not UTC."""
     if not apple_ns:
         return "?"
     return dt.datetime.fromtimestamp(apple_ns / 1e9 + APPLE_EPOCH).strftime(
@@ -537,6 +605,18 @@ def _app_card_text(row) -> str | None:
 
 
 def pinned_chat_identifiers() -> list[set[str]]:
+    """Memoised _pinned_chat_identifiers_uncached: the plist only changes when
+    you pin or unpin, and parsing it drives pin_order_for (~22 ms a request)."""
+    global _PINS_CACHE
+    gen = _pins_generation()
+    if _PINS_CACHE is not None and _PINS_CACHE[0] == gen:
+        return _PINS_CACHE[1]
+    out = _pinned_chat_identifiers_uncached()
+    _PINS_CACHE = (gen, out)
+    return out
+
+
+def _pinned_chat_identifiers_uncached() -> list[set[str]]:
     """Ordered pins from Messages' pinning preferences, one alias set each.
 
     Observed layout (macOS 15/26, undocumented): ``pD.pP`` is the ORDERED list
@@ -908,7 +988,7 @@ def render(rows, as_json: bool, with_names: bool = True, con=None, rich: bool = 
         text = message_text(r).replace("\n", " | ")
         chat = r["room_name"] or r["chat_identifier"] or ""
         chat_tag = f" [{chat}]" if chat and chat != (r["handle"] or "") else ""
-        print(f"{fmt_ts(r['date'])}  {who:>30}{chat_tag}: {text}")
+        print(f"{fmt_ts_local(r['date'])}  {who:>30}{chat_tag}: {text}")
 
 
 # Two kinds of rows live in the message table without being messages. Both are
@@ -1083,7 +1163,7 @@ def cmd_contacts(con, args):
     for r in rows:
         nm = name_for(r["handle"]) if not args.no_names else None
         suffix = f"  ({nm})" if nm else ""
-        print(f"{fmt_ts(r['last_date'])}  {r['n']:>6}  {r['service']:>8}  {r['handle']}{suffix}")
+        print(f"{fmt_ts_local(r['last_date'])}  {r['n']:>6}  {r['service']:>8}  {r['handle']}{suffix}")
 
 
 def cmd_chats(con, args):
@@ -1165,7 +1245,7 @@ def cmd_chats(con, args):
         return
     for r in rows:
         name = r["display_name"] or r["room_name"] or r["chat_identifier"]
-        print(f"{fmt_ts(r['last_date'])}  {r['n']:>5}  {r['service_name']:>8}  {name}")
+        print(f"{fmt_ts_local(r['last_date'])}  {r['n']:>5}  {r['service_name']:>8}  {name}")
 
 
 def cmd_groups(con, args):
@@ -1235,7 +1315,7 @@ def cmd_groups(con, args):
             for h in ((r["participants"] or "").split(",") if r["participants"] else [])
         )
         name = r["display_name"] or members or r["chat_identifier"]
-        print(f"{fmt_ts(r['last_date']) if r['last_date'] else '':19}  {r['guid']}  {name}")
+        print(f"{fmt_ts_local(r['last_date']) if r['last_date'] else '':19}  {r['guid']}  {name}")
 
 
 ATTACHMENTS_ROOT = os.path.expanduser("~/Library/Messages/Attachments")
@@ -1256,7 +1336,61 @@ def _sniff_image(head: bytes) -> str:
     return ""
 
 
+# Recomputed per request one-shot, which cost nothing because the process
+# ended anyway. On the serve channel a request is not the end of the world, so
+# both memoise against the thing they actually derive from — never against
+# chat.db's mtime, which changes on every message and would cache nothing
+# during exactly the busy minute you care about.
+_CLUSTER_CACHE: tuple | None = None
+_PINS_CACHE: tuple | None = None
+
+
+def _chat_table_generation(con) -> tuple:
+    """Cheap fingerprint of the chat table. Group clusters change only when a
+    chat row is added or re-keyed, never when a message lands."""
+    row = con.execute("SELECT COUNT(*), COALESCE(MAX(ROWID), 0) FROM chat").fetchone()
+    return (row[0], row[1])
+
+
+def _pins_generation() -> tuple:
+    """Pins live in a plist Messages rewrites when you pin or unpin."""
+    out = []
+    for path in PINNING_PLIST_PATHS:
+        try:
+            st = os.stat(path)
+            out.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((0, 0))
+    return tuple(out)
+
+
+def _contacts_generation() -> tuple:
+    """The address books, so an edit in Contacts.app is seen by a channel that
+    outlives it. One-shot runs rebuilt the index every time and never needed
+    this; serve would have gone on answering with the names it started with."""
+    out = []
+    for path in _ab_sources():
+        try:
+            st = os.stat(path)
+            out.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((0, 0))
+    return tuple(out)
+
+
 def _group_cluster_map(con) -> dict:
+    """Memoised _group_cluster_map_uncached: ~21 ms a request, and the answer
+    only moves when a chat row appears or is re-keyed."""
+    global _CLUSTER_CACHE
+    gen = _chat_table_generation(con)
+    if _CLUSTER_CACHE is not None and _CLUSTER_CACHE[0] == gen:
+        return _CLUSTER_CACHE[1]
+    out = _group_cluster_map_uncached(con)
+    _CLUSTER_CACHE = (gen, out)
+    return out
+
+
+def _group_cluster_map_uncached(con) -> dict:
     """chat_identifier -> canonical chat_identifier, for group rows that are
     the SAME Messages conversation split across several chat rows.
 
@@ -1899,7 +2033,114 @@ def cmd_analyze(con, args):
     print()
 
 
-def main() -> None:
+# Commands reachable on the serve channel: read-only queries only.
+# attachment/avatar stream binary and would park the channel behind a 100 MB
+# photo; watch blocks forever by design; serve would recurse. Those keep the
+# one-shot path, which still works and is what everything falls back to.
+SERVE_ALLOWED = {"recent", "from", "thread", "search", "contacts", "chats", "groups", "analyze"}
+
+
+def cmd_serve(con, args) -> None:
+    """A long-lived request channel: one process, one open chat.db, many queries.
+
+    A one-shot call pays ~87 ms before it reads a single row — blip-dispatch's
+    Python start, imsg's own, and opening a 218 MB chat.db — while the SQL
+    underneath runs in about a millisecond. On this channel that is paid once,
+    at startup, and every later request is just the query.
+
+    Protocol, newline-delimited request, framed response:
+
+        ->  {"argv": ["--json","--rich","thread","--chat","<id>","40"]}
+        <-  {"status":0,"len":N}\n   followed by exactly N bytes
+
+    A request may carry "stdin", which becomes the command's stdin — so
+    message text keeps riding stdin instead of argv (`search --stdin`) exactly
+    as it does one-shot. Length framing rather than escaping keeps a 122 KB
+    JSON payload from being re-encoded into a JSON string.
+
+    Requests are re-dispatched through build_parser(), the SAME parser the CLI
+    uses: a second hand-rolled command table would drift and become a second
+    security surface. A bad request answers with a status and the loop lives —
+    one malformed line must not take the channel down.
+    """
+    parser = build_parser()
+    out = sys.stdout.buffer
+    stdin = sys.stdin           # bound once: commands swap sys.stdin below
+
+    def reply(status: int, payload: bytes) -> None:
+        out.write(json.dumps({"status": status, "len": len(payload)}).encode() + b"\n")
+        out.write(payload)
+        out.flush()
+
+    out.write(b"ready\n")
+    out.flush()
+
+    contacts_gen = _contacts_generation()
+
+    for line in stdin:
+        line = line.strip()
+        if not line:
+            continue
+        # A one-shot run rebuilt the Contacts index every time; this channel
+        # would have answered with the names it started with until it died.
+        # Four stats, so it costs nothing to check per request.
+        gen = _contacts_generation()
+        if gen != contacts_gen:
+            contacts_gen = gen
+            _forget_contacts()
+        try:
+            req = json.loads(line)
+            argv = req["argv"]
+            if not isinstance(argv, list) or not all(isinstance(a, str) for a in argv):
+                raise ValueError("argv must be a list of strings")
+        except Exception as e:
+            reply(64, f"serve: bad request: {e}\n".encode())
+            continue
+
+        # argparse writes usage/errors to stdout or stderr and raises
+        # SystemExit; both must be kept off the wire or they corrupt framing.
+        buf = io.StringIO()
+        real_out, real_err, real_in = sys.stdout, sys.stderr, sys.stdin
+        sys.stdout = sys.stderr = buf
+        try:
+            ns = parser.parse_args(argv)
+        except SystemExit:
+            sys.stdout, sys.stderr, sys.stdin = real_out, real_err, real_in
+            reply(64, ("serve: unusable command: " + buf.getvalue()).encode("utf-8"))
+            continue
+        except Exception as e:
+            sys.stdout, sys.stderr, sys.stdin = real_out, real_err, real_in
+            reply(64, f"serve: unusable command: {e}\n".encode())
+            continue
+
+        if getattr(ns, "cmd", "") not in SERVE_ALLOWED:
+            sys.stdout, sys.stderr, sys.stdin = real_out, real_err, real_in
+            reply(64, f"serve: '{getattr(ns, 'cmd', '?')}' is not available on this channel\n".encode())
+            continue
+
+        buf = io.StringIO()
+        sys.stdout = buf
+        sys.stderr = real_err          # a warning belongs in the ssh log, not the payload
+        sys.stdin = io.StringIO(req.get("stdin") or "")
+        status = 0
+        try:
+            ns.func(con, ns)
+        except BrokenPipeError:
+            raise
+        except Exception as e:
+            # One bad row, one bad request — never the whole channel.
+            buf = io.StringIO()
+            buf.write(f"imsg: {e}\n")
+            status = 1
+        finally:
+            sys.stdout, sys.stderr, sys.stdin = real_out, real_err, real_in
+        reply(status, buf.getvalue().encode("utf-8"))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """The full CLI. Split out of main() so `serve` can re-dispatch requests
+    through the EXACT same parser — a second, hand-rolled command table would
+    drift from this one and become a second security surface."""
     p = argparse.ArgumentParser(prog="imsg", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     # Top-level convenience flags (also added to each subparser via parents=
@@ -1958,8 +2199,15 @@ def main() -> None:
     s = sub.add_parser("watch", parents=[common],
                        help="emit a line whenever chat.db changes (push channel)")
     s.set_defaults(func=cmd_watch)
+    s = sub.add_parser("serve", parents=[common],
+                       help="long-lived request channel: one open chat.db, many queries")
+    s.set_defaults(func=cmd_serve)
 
-    args = p.parse_args()
+    return p
+
+
+def main() -> None:
+    args = build_parser().parse_args()
     with open_db() as con:
         args.func(con, args)
 

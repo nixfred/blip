@@ -52,6 +52,18 @@ export function wantsJpeg(mime: string): boolean {
   return mime === "image/heic" || mime === "image/heif";
 }
 
+/**
+ * Formats whose whole point is that they MOVE.
+ *
+ * The inline preview path asks the Mac to resample with sips, which flattens
+ * an animated GIF to a single frame — a 1.4 MB animation arrived as a 198 KB
+ * still. So these never take that path: they cross as their original bytes,
+ * capped like any other auto-fetch, and land in the shared `orig` cache slot.
+ */
+export function isAnimatedMime(mime: string): boolean {
+  return String(mime || "").toLowerCase() === "image/gif";
+}
+
 /** Anything the panel would draw inline. */
 export function isImageMime(mime: string): boolean {
   return String(mime || "").startsWith("image/");
@@ -125,6 +137,17 @@ function densityRatio(xDpi: number, yDpi: number): number {
 export function imageMetrics(bytes: Buffer, mime: string): ImageMetrics {
   if (!String(mime || "").startsWith("image/") || !bytes || bytes.length < 10)
     return { ...EMPTY_IMAGE_METRICS };
+
+  // GIF: "GIF87a"/"GIF89a" then the logical screen size, u16 little-endian.
+  // Without this an animated GIF reported 0×0 and the bubble had nothing to
+  // size itself from.
+  if (bytes.length >= 10 && bytes.toString("ascii", 0, 3) === "GIF") {
+    return {
+      pixelWidth: bytes.readUInt16LE(6),
+      pixelHeight: bytes.readUInt16LE(8),
+      pixelRatio: 1,                       // GIF carries no density
+    };
+  }
 
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   if (bytes.length >= 24 && bytes.subarray(0, 8).equals(png)) {
@@ -335,7 +358,7 @@ export function fetchAttachment(
   if (!/^[0-9]{1,18}$/.test(id)) return fail("bad attachment id");
   mkdirSync(CACHE_DIR, { recursive: true, mode: 0o700 });
 
-  const preview = maxBytes < FETCH_MAX_BYTES && isImageMime(mime);
+  const preview = maxBytes < FETCH_MAX_BYTES && isImageMime(mime) && !isAnimatedMime(mime);
   const file = join(CACHE_DIR, cacheFileName(id, name, mime, preview));
   try {
     const st = lstatSync(file);

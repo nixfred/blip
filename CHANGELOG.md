@@ -16,6 +16,111 @@
   `watch=` — it was always the message watcher, never read-pushing, and the
   collision is what made this undiagnosable.
 
+- **The conversation list stopped scanning the address book.** With startup
+  amortised, what was left was compute — and `chats` was spending 104 ms of
+  every request resolving names, because a handle with no exact last-ten key
+  fell back to comparing it against all 442 saved numbers. 298 conversations
+  meant 60,112 comparisons. They are bucketed by their last seven digits now,
+  which is sound rather than lucky: the matching rule only ever matches when
+  one number is a suffix of the other with a seven-digit floor, so the last
+  seven always agree. Checked against the old full scan over all 750 distinct
+  handles in a real chat.db: identical answers, zero mismatches.
+  Group clusters and pins are memoised too, against the chat table's shape and
+  the pinning plist's mtime rather than chat.db's — which changes on every
+  message and would have cached nothing during the busy minute that matters.
+  Opening a conversation is 83 ms now (223 ms before any of this), a poll
+  39 ms (160 ms), a deep poll 342 ms (707 ms).
+
+- **A persistent channel to the Mac.** Even with the probe gone, every query
+  still paid ~90 ms before it read a row: ssh, `blip-dispatch`'s Python start,
+  `imsg`'s own, and opening a 218 MB chat.db — for SQL that takes about a
+  millisecond. `imsg serve` now answers many requests on one long-lived
+  process with chat.db already open, and `blip-bridged` on the Linux side
+  keeps two of those channels up (two, because Blip refreshes the list and
+  reloads the open conversation in parallel, and a single channel would queue
+  the reload behind a 259 ms `chats` call). The bar widget starts it, on the
+  leader bar only, exactly as it already runs the push watcher — which is why
+  Blip still needs no daemon of its own.
+  It is an accelerator and never a dependency: no socket, no socat, a daemon
+  that died mid-request, a frame that will not parse — anything at all — and
+  the ordinary one-shot ssh path answers instead. The channel carries
+  read-only queries only; attachments and avatars stream binary and would park
+  it behind a 100 MB photo, and `watch` blocks by design, so those stay
+  one-shot. Message text still rides stdin rather than argv.
+  Measured end to end: opening a conversation 223 → ~105 ms, a poll 160 →
+  ~36 ms, a deep poll 707 → ~370 ms.
+
+- **The bridge stopped paying a toll on every call.** Blip felt subtly laggy
+  rather than slow, and measuring said why: nothing was slow, everything paid
+  startup. A bridge call cost ~133 ms while the SQL underneath ran in about a
+  millisecond — 16 ms ssh, ~25 ms for `blip-dispatch`'s Python start, ~20 ms
+  for `imsg`'s, 27 ms to open a 218 MB chat.db. On top of that the shim fired
+  a *second* full ssh round trip before every call, purely as a connectivity
+  probe: 41 ms, a third of the total, to turn a transport failure into a
+  friendlier sentence. ssh already reports that as 255 and every caller in
+  Blip has always treated 255 exactly like 69, so the probe is gone and the
+  real call carries the news; the `69 → Blip greys out` contract is unchanged.
+  That also retires the trap it came with — the probe had to be `ssh -n` or it
+  ate stdin and silently emptied `--file-stdin` payloads.
+  The push debounce came down from 250 ms to 60 ms. It is paid on every
+  received message *and* on every send (Messages writing the row is itself a
+  chat.db change), and at 250 ms it was more than twice the cost of the 116 ms
+  fetch it was coalescing; a burst still costs one fetch. The post-send reload
+  fell from 600 ms to 250 ms, now a fall-back for when the watcher is down
+  rather than the mechanism.
+  Measured, warm: a bridge call 132 → ~95 ms, opening a conversation 223 →
+  ~185 ms, a poll 160 → ~118 ms, a deep poll 707 → ~590 ms.
+  Two things measurement talked us OUT of: replacing `cmd_chats`' 300-query
+  N+1 with one window function is slower (70 → 107 ms; the per-chat lookups
+  are indexed), and bundling the deep poll's three calls into one would be
+  undone by the persistent channel coming next.
+
+- **A message can carry several files.** Dropping five photos on a
+  conversation attached one and threw the other four away without a word: the
+  drop handler read `urls[0]` and the draft was a single path. Drafts are a
+  list now — drag-and-drop takes every file, `/attach` and Ctrl+V add to it,
+  and each chip has its own ✕. They ship one part per file in the order you
+  queued them, with the caption on the first only (repeating it would post the
+  same sentence five times), and the service is captured when the batch starts
+  so switching threads mid-send cannot push a later part onto a different one.
+  A part that fails stops the batch and leaves the rest attached, saying how
+  many, rather than making you work out which of five went out. Capped at ten
+  files, because a stray drop of a folder should be refused and not become
+  eighty sends. Chips are one per row, like the received ones — a row of N
+  sums its implicit widths and drags the whole column off the panel.
+
+- **GIFs move.** An animated GIF arrived as a still, and did so twice over. The
+  inline-preview path asks the Mac to resample every image with sips, which
+  flattens an animation to a single frame — a 1.4 MB GIF reached Linux as a
+  198 KB JPEG, the motion gone before the panel ever saw it. Animated formats
+  now skip that path and cross as their own bytes, into the same cache slot a
+  click uses. And a QML `Image` paints one frame whatever you hand it, so
+  animated attachments render through `AnimatedImage` instead; stills stay on
+  `Image`, which is what applies `autoTransform` (the EXIF fall-back for
+  anything cached before orientation was baked in at fetch time). Only the
+  active renderer loads, so no photo decodes twice, and the decode is still
+  bounded in both axes. GIF dimensions now come off the header too — they read
+  0×0 before, leaving the bubble nothing to size itself from.
+
+- **Time crosses the bridge as UTC.** Stamps used to arrive as the Mac's naive
+  wall clock ("2026-09-07 14:33:12") and were compared against the Linux
+  clock — the same string only while both machines sat in one timezone. A Mac
+  an hour ahead put every read mark ahead of every message, so nothing ever
+  counted as unread; an hour behind and the backlog re-toasted. And once a
+  year, in the DST fall-back hour, the Mac's own clock repeated itself: two
+  messages an hour apart carried the SAME stamp, so ordering, the watermark
+  and "newer than the mark" all quietly stopped meaning anything for that
+  hour. The bridge now emits ISO-8601 UTC (`2026-09-07T18:33:12Z`), which is
+  monotonic and whose lexical order is chronological order — the property
+  every ledger, sort and watermark in Blip was already assuming. Local time
+  became a display concern: bubbles, day dividers, "Today"/"Yesterday" and
+  read receipts are rendered in the READER's zone, so a day still breaks at
+  your midnight and not at Greenwich's. `imsg`'s own plain-text output keeps
+  the Mac's clock — a person reading `imsg recent` wants the time they
+  remember. Upgrading migrates the marks in `state.json`, and stamps from a
+  Mac still on the old bridge are normalised as they come in, so a
+  half-upgraded pair keeps working instead of silently going quiet.
+
 - **Pinned avatars no longer grow on the first cursor move.** The tiles were
   measured before the grid had its width, and the layout kept that small size
   until the next relayout; the size is now a layout hint, so they render at

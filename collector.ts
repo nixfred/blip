@@ -21,8 +21,8 @@ import { openSync, writeSync, fsyncSync, closeSync } from "node:fs";
 import { homedir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const HOME = process.env.HOME ?? homedir();
 
@@ -53,7 +53,10 @@ export interface ImsgMessage {
   id?: number | string;
   /** Stable Messages GUID when available. */
   guid?: string;
-  ts: string;          // "YYYY-MM-DD HH:MM:SS" — lexically sortable, which we rely on
+  // UTC, ISO-8601, to the second: "2026-09-07T18:33:12Z". Fixed width, so
+  // lexical order IS chronological order — which every ledger, watermark and
+  // sort in this file relies on. Local time is a DISPLAY concern (thread.ts).
+  ts: string;
   from_me: boolean;
   /** True only when the Mac bridge knows this is the configured self chat. */
   self_chat?: boolean;
@@ -213,7 +216,11 @@ export function normalizeGroups(raw: unknown): Record<string, GroupInfo> {
 export function loadState(path = STATE_PATH): BlipState {
   try {
     const s = JSON.parse(readFileSync(path, "utf8")) as Partial<BlipState>;
-    const watermark = typeof s.watermark === "string" ? s.watermark : "";
+    // Every persisted stamp predating the UTC wire format is naive Mac-local
+    // wall clock. Left alone it would sort BELOW every new stamp on the same
+    // day (" " < "T"), so the whole preview window would read as newer than
+    // the mark. toUtcStamp() re-anchors it; see there for the exactness.
+    const watermark = toUtcStamp(typeof s.watermark === "string" ? s.watermark : "");
     const unreadCounts = s.unreadCounts && typeof s.unreadCounts === "object"
       ? Object.fromEntries(
         Object.entries(s.unreadCounts).filter(([, n]) => typeof n === "number" && Number.isFinite(n) && n >= 0),
@@ -221,7 +228,9 @@ export function loadState(path = STATE_PATH): BlipState {
       : {};
     const unreadOldest = s.unreadOldest && typeof s.unreadOldest === "object"
       ? Object.fromEntries(
-        Object.entries(s.unreadOldest).filter(([, ts]) => typeof ts === "string" && ts !== ""),
+        Object.entries(s.unreadOldest)
+          .filter(([, ts]) => typeof ts === "string" && ts !== "")
+          .map(([chat, ts]) => [chat, toUtcStamp(ts as string)]),
       )
       : {};
     // A count-only ledger from an interrupted/experimental build cannot be
@@ -232,14 +241,20 @@ export function loadState(path = STATE_PATH): BlipState {
       watermark,
       // Pre-two-mark state files have no readMark. Inheriting the watermark is
       // the safe migration: it reports zero unread rather than a fake backlog.
-      readMark: typeof s.readMark === "string" ? s.readMark : watermark,
+      readMark: toUtcStamp(typeof s.readMark === "string" ? s.readMark : watermark),
       unreadCounts,
       unreadOldest,
       unreadInitialized: s.unreadInitialized === true && ledgerComplete,
       selfChats: Array.isArray(s.selfChats)
         ? s.selfChats.filter((chat): chat is string => typeof chat === "string")
         : [],
-      readMarks: s.readMarks && typeof s.readMarks === "object" ? { ...s.readMarks } : {},
+      readMarks: s.readMarks && typeof s.readMarks === "object"
+        ? Object.fromEntries(
+          Object.entries(s.readMarks)
+            .filter(([, ts]) => typeof ts === "string" && ts !== "")
+            .map(([chat, ts]) => [chat, toUtcStamp(ts as string)]),
+        )
+        : {},
       // Every cached group goes through the same shape fetchGroups() enforces:
       // a participants OBJECT in state.json threw inside groupName() on every
       // poll until the next deep refresh (Astra B#6).
@@ -944,11 +959,11 @@ export const FAILURE_TOAST_WINDOW_MS = 15 * 60 * 1000;
 export function selectFailures(
   msgs: ImsgMessage[],
   toasted: string[],
-  nowTs = localNowTs(),
+  now = nowTs(),
 ): Toast[] {
   const seen = new Set(toasted);
   const out: Toast[] = [];
-  const cutoff = localNowTs(new Date(Date.parse(nowTs.replace(" ", "T")) - FAILURE_TOAST_WINDOW_MS));
+  const cutoff = nowTs(new Date(Date.parse(now) - FAILURE_TOAST_WINDOW_MS));
   for (const m of msgs) {
     if (!m.from_me || typeof m.error !== "number" || m.error === 0) continue;
     if (m.ts < cutoff) continue;
@@ -1024,11 +1039,92 @@ export function explainBridgeError(status: number | null, stderr: string): strin
   return last || `imsg exit ${status}`;
 }
 
-export function fetchMessages(limit: number, runner = spawnSync): FetchResult {
-  const res = runner(`${HOME}/bin/imsg`, ["--json", "recent", String(limit)], {
-    encoding: "utf8",
-    timeout: 15000, maxBuffer: 64 * 1024 * 1024,
+// ------------------------------------------------- the accelerator channel
+
+/** Where blip-bridged listens, when it is running. */
+export const BRIDGE_SOCK = join(
+  process.env.XDG_RUNTIME_DIR || `/tmp/blip-${typeof process.getuid === "function" ? process.getuid() : ""}`,
+  "blip", "bridge.sock",
+);
+
+/**
+ * Run one bridge command, over the persistent channel when there is one.
+ *
+ * A one-shot `~/bin/imsg` call pays ~90 ms of pure startup before it reads a
+ * row — ssh, blip-dispatch's Python, imsg's own, and opening a 218 MB
+ * chat.db — while the query underneath takes about a millisecond. blip-bridged
+ * holds `imsg serve` channels open so that toll is paid once; `recent 150`
+ * measured 100 ms one-shot against 13 ms here.
+ *
+ * It is an ACCELERATOR, never a dependency. No socket, no socat, a daemon
+ * that died mid-request, a frame that does not parse — anything at all — and
+ * this falls through to the ordinary one-shot path, which is still the only
+ * thing that has to work. That is also what keeps the tests honest: they
+ * inject their own `runner`, and a caller with a custom runner never touches
+ * the socket, so every existing test still exercises the real argv.
+ */
+export function bridgeRun(
+  argv: string[],
+  runner: typeof spawnSync = spawnSync,
+  opts: { input?: string; timeout?: number; maxBuffer?: number } = {},
+): { status: number | null; stdout: string; stderr: string; error?: Error } {
+  const timeout = opts.timeout ?? 15000;
+  const maxBuffer = opts.maxBuffer ?? 64 * 1024 * 1024;
+  if (runner === spawnSync) {
+    const fast = viaBridgeSocket(argv, opts.input, timeout, maxBuffer);
+    if (fast) return fast;
+  }
+  const res = runner(`${HOME}/bin/imsg`, argv, {
+    encoding: "utf8", timeout, maxBuffer,
+    ...(opts.input === undefined ? {} : { input: opts.input }),
   });
+  return {
+    status: res.status,
+    stdout: (res.stdout ?? "") as string,
+    stderr: (res.stderr ?? "") as string,
+    ...(res.error ? { error: res.error as Error } : {}),
+  };
+}
+
+/** One request over the unix socket, or null to mean "use the slow path". */
+function viaBridgeSocket(
+  argv: string[],
+  input: string | undefined,
+  timeout: number,
+  maxBuffer: number,
+): { status: number | null; stdout: string; stderr: string } | null {
+  try {
+    if (!existsSync(BRIDGE_SOCK)) return null;
+    const req = JSON.stringify(input === undefined ? { argv } : { argv, stdin: input });
+    // socat, not a bun/python client: spawning either costs 7-11 ms, which is
+    // most of what the channel just saved. A plain spawn is ~1 ms.
+    // No `encoding`: the default hands back Buffers, and the frame counts
+    // BYTES. Passing "buffer" throws ERR_UNKNOWN_ENCODING in Bun, the catch
+    // below swallowed it, and the fast path silently never ran — every call
+    // quietly took the slow one and the whole channel looked like a no-op.
+    const res = spawnSync("socat", ["-t", String(Math.ceil(timeout / 1000)), "-", `UNIX-CONNECT:${BRIDGE_SOCK}`], {
+      input: req + "\n", timeout, maxBuffer,
+    });
+    if (res.error || res.status !== 0 || !res.stdout) return null;
+    const buf = res.stdout as Buffer;
+    const nl = buf.indexOf(0x0a);
+    if (nl < 0) return null;
+    const meta = JSON.parse(buf.subarray(0, nl).toString("utf8")) as { status: number; len: number };
+    const body = buf.subarray(nl + 1);
+    // A short frame means the channel desynchronised: take the slow path
+    // rather than hand a caller half a JSON document.
+    if (typeof meta.len !== "number" || body.length < meta.len) return null;
+    const out = body.subarray(0, meta.len).toString("utf8");
+    return meta.status === 0
+      ? { status: 0, stdout: out, stderr: "" }
+      : { status: meta.status, stdout: "", stderr: out };
+  } catch {
+    return null;
+  }
+}
+
+export function fetchMessages(limit: number, runner = spawnSync): FetchResult {
+  const res = bridgeRun(["--json", "recent", String(limit)], runner);
 
   if (res.error) {
     // spawn itself failed: ~/bin/imsg missing (run blip-setup) or not executable
@@ -1048,7 +1144,10 @@ export function fetchMessages(limit: number, runner = spawnSync): FetchResult {
   try {
     const parsed = JSON.parse(res.stdout as string);
     if (!Array.isArray(parsed)) throw new Error("not an array");
-    return { ok: true, online: true, error: "", msgs: (parsed as ImsgMessage[]).filter(hasIdentity), fetchedCount: parsed.length };
+    // Normalise stamps HERE, the one door messages come through, so nothing
+    // downstream has to know which bridge version produced them.
+    const msgs = (parsed as ImsgMessage[]).filter(hasIdentity).map(normalizeMsgStamps);
+    return { ok: true, online: true, error: "", msgs, fetchedCount: parsed.length };
   } catch (e) {
     return { ok: false, online: true, error: `bad JSON from imsg: ${e}`, msgs: [], fetchedCount: 0 };
   }
@@ -1090,11 +1189,47 @@ export function fetchMessagesAfter(
  *     impossible).
  * A row without the `read` field (older imsg) falls back to local-only.
  */
-/** Local wall clock as a chat.db-style "YYYY-MM-DD HH:MM:SS" stamp. */
-export function localNowTs(now = new Date()): string {
-  const p = (n: number, w = 2) => String(n).padStart(w, "0");
-  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ` +
-         `${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`;
+/**
+ * Now, in the bridge's wire format: UTC ISO-8601 to the second.
+ *
+ * This used to be the LINUX wall clock compared against MAC wall-clock
+ * stamps — the same numbers only while both machines sat in one timezone.
+ * A Mac an hour ahead put every read mark ahead of every message (nothing
+ * ever unread); an hour behind and the backlog re-toasted. Both clocks are
+ * UTC now, so the comparison means what it reads as.
+ */
+export function nowTs(now = new Date()): string {
+  return now.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+/**
+ * Re-anchor a pre-UTC stamp ("2026-09-07 14:33:12") to the wire format,
+ * reading it as THIS machine's local time. A stamp already in the wire
+ * format is returned untouched; junk becomes "".
+ *
+ * Two callers, one rule — every stamp inside Blip is UTC:
+ *   - loadState(), for marks written by an older release;
+ *   - the fetch boundary, for a Mac still running the pre-UTC bridge.
+ * Both matter TOGETHER: migrating the marks while the bridge still emitted
+ * naive stamps would sort every message below every mark (" " < "T") and
+ * silently empty the badge and the toasts.
+ *
+ * Exact whenever the Mac shares the Linux timezone — every setup in which
+ * the naive format looked correct in the first place. Where they differ a
+ * mark lands off by the offset for one poll; the toast ring keys on message
+ * identity rather than time, so that cannot re-toast a backlog.
+ */
+export function toUtcStamp(ts: string): string {
+  if (!ts || ts.includes("T")) return ts;          // already UTC, or unset
+  const ms = Date.parse(ts.replace(" ", "T"));     // naive → this machine's local
+  return Number.isNaN(ms) ? "" : nowTs(new Date(ms));
+}
+
+/** Every stamp a message carries, normalised to the wire format. */
+export function normalizeMsgStamps<T extends ImsgMessage>(m: T): T {
+  if (typeof m.ts === "string" && !m.ts.includes("T")) m = { ...m, ts: toUtcStamp(m.ts) };
+  if (typeof m.read_at === "string" && !m.read_at.includes("T")) m = { ...m, read_at: toUtcStamp(m.read_at) };
+  return m;
 }
 
 export function isUnread(m: ImsgMessage, mark: string): boolean {
@@ -1168,10 +1303,7 @@ export const CHAT_LIST_LIMIT = 300;
  * widget's memory. Previews are never persisted (no content on disk).
  */
 export function fetchChats(runner = spawnSync): ChatInfo[] | null {
-  const res = runner(`${HOME}/bin/imsg`, ["--json", "chats", String(CHAT_LIST_LIMIT)], {
-    encoding: "utf8",
-    timeout: 20000, maxBuffer: 64 * 1024 * 1024,
-  });
+  const res = bridgeRun(["--json", "chats", String(CHAT_LIST_LIMIT)], runner, { timeout: 20000 });
   if (res.status !== 0) return null;
   try {
     const rows = JSON.parse(res.stdout as string);
@@ -1182,7 +1314,7 @@ export function fetchChats(runner = spawnSync): ChatInfo[] | null {
         id: String(r.id),
         name: typeof r.name === "string" ? r.name : null,
         service: String(r.service ?? ""),
-        last: String(r.last ?? ""),
+        last: toUtcStamp(String(r.last ?? "")),
         last_text: String(r.last_text ?? ""),
         last_from_me: r.last_from_me === true,
         last_handle: String(r.last_handle ?? ""),
@@ -1334,7 +1466,7 @@ export function mergeChats(
 }
 
 export function fetchGroups(runner = spawnSync): Record<string, GroupInfo> | null {
-  const res = runner(`${HOME}/bin/imsg`, ["--json", "groups"], { encoding: "utf8", timeout: 15000, maxBuffer: 64 * 1024 * 1024 });
+  const res = bridgeRun(["--json", "groups"], runner);
   if (res.status !== 0) return null;
   try {
     const rows = JSON.parse(res.stdout as string);
@@ -1359,7 +1491,10 @@ export function fetchGroups(runner = spawnSync): Record<string, GroupInfo> | nul
 // ---------------------------------------------------------------- main
 
 export function collect(deep: boolean, markRead = false, readChat = "", seenTs = ""): BlipOutput {
-  const now = new Date().toISOString();
+  // When this POLL ran — the output's own metadata, not a message stamp.
+  // Distinct from nowTs() below, which is the clock message stamps are
+  // measured against and therefore has to be in the wire format.
+  const producedAt = new Date().toISOString();
   const state = loadState();
   // On migration, seed the ledger all the way back to what the user last read.
   // Thereafter cover both new arrivals and every outstanding unread row. That
@@ -1378,7 +1513,7 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
       ok: false,
       online: fetched.online,
       error: fetched.error,
-      ts: now,
+      ts: producedAt,
       unread: 0,
       threads: [],
       toast: [],
@@ -1405,7 +1540,7 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   // clamped to the local clock, and each chat that reaches past it gets a
   // PER-CHAT mark at its own max — every visible message is covered,
   // nothing beyond now leaks onto other threads.
-  const nowTs = localNowTs();
+  const now = nowTs();
   const chatMax: Record<string, string> = {};
   for (const m of fetched.msgs) {
     const c = chatKey(m);
@@ -1413,7 +1548,7 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   }
   // Badge counts against readMark (what the user has seen); toasts fire against
   // watermark (what the collector has seen). See BlipState.
-  const readMark = markRead ? (highest <= nowTs ? highest : nowTs) : state.readMark;
+  const readMark = markRead ? (highest <= now ? highest : now) : state.readMark;
   // Opening one conversation clears only that thread's dot — marked with
   // THAT chat's newest ts, never the global max.
   const readMarks = { ...state.readMarks };
@@ -1429,7 +1564,7 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
     // ts > seen and stays unread. Fallback without --seen: through now, or
     // the chat's own future row.
     const own = chatMax[readChat] ?? "";
-    readMarks[readChat] = seenTs !== "" ? seenTs : (own > nowTs ? own : nowTs);
+    readMarks[readChat] = seenTs !== "" ? seenTs : (own > now ? own : now);
   }
   const readSeen = readChat ? readMarks[readChat]! : "";
   // Group metadata is ~1000 rows; refresh it only on a deep (panel) fetch and
@@ -1505,7 +1640,7 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   const foldedWindow = foldThreadAliases(windowThreads, chatAliases);
   const threads = chats ? mergeChats(foldedWindow, chats, groups, exactCounts) : applyPins(foldedWindow, pins);
   const toast = selectToasts(msgs, state.watermark, loadAllowlist(), state.toasted);
-  const failures = selectFailures(fetched.msgs, state.toasted, nowTs);
+  const failures = selectFailures(fetched.msgs, state.toasted, now);
   const links = selectIncomingLinks(msgs, state.watermark, state.toasted, selfChats);
   const codes = selectCodes(msgs, state.watermark, state.toasted, selfChats);
   const unread = Object.values(exactCounts).reduce((n, count) => n + count, 0);
@@ -1514,7 +1649,7 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   // swallow the messages that arrived during it.
   // A row dated tomorrow (tz skew) must not become the mark everything is
   // measured against — nothing would badge or toast until "tomorrow" (Astra B#4).
-  const highestNow = highest <= nowTs ? highest : nowTs;
+  const highestNow = highest <= now ? highest : now;
   const persisted = saveState({
     watermark: highestNow,
     // First ever run: adopt the current high-water rather than reporting the
@@ -1544,7 +1679,7 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
     ok: true,
     online: true,
     error: warning,
-    ts: now,
+    ts: producedAt,
     unread,
     threads,
     // Never emit notifications that could not be committed to the dedupe ring.

@@ -52,6 +52,31 @@ what it is handed. Keep it that way.
   can carry a FUTURE timestamp (tz skew); a mark taken from the global max
   once suppressed unrelated threads until "tomorrow". The panel passes the
   newest VISIBLE ts (`--seen`) so mid-round-trip arrivals stay unread.
+- **Every stamp inside Blip is UTC; local time is a DISPLAY concern.** The
+  bridge emits ISO-8601 UTC to the second (`2026-09-07T18:33:12Z`, `fmt_ts`),
+  because fixed-width UTC is the one format whose LEXICAL order is
+  chronological order — which every watermark, ledger, `maxTs` and `a.ts <
+  b.ts` in the collector silently assumes. Naive Mac wall clock broke that
+  twice: against a Linux clock in another zone every mark sat ahead of every
+  message (nothing unread), and in the DST fall-back hour the Mac's own clock
+  repeats, so two messages an hour apart carried the same string. Convert to
+  the reader's zone only when rendering — `localDay()`/`formatStamp()` in
+  thread.ts, `stampMs()`/`localDay()`/`fmtTime()` in BlipView. NEVER slice a
+  date out of a stamp (`ts.slice(0, 10)`) to find its day: that is UTC's day,
+  and the divider belongs at the reader's midnight. `imsg`'s plain-text
+  renders keep `fmt_ts_local` — a human reading `imsg recent` wants the time
+  they remember; every JSON field is `fmt_ts`.
+  **Stamps are normalised at the two fetch doors** (`fetchMessages` in
+  collector.ts, `loadThread` in thread.ts) via `toUtcStamp`, and `loadState`
+  migrates the marks a pre-UTC release wrote. Both halves are load-bearing
+  together: migrating the marks while the bridge still emitted naive stamps
+  would sort every message BELOW every mark (`" "` < `"T"`) and silently
+  empty the badge and the toasts. Legacy stamps are read as Linux-local —
+  exact whenever the Mac shared the zone, which is every setup where the old
+  format looked right. The suite runs pinned to `TZ=UTC` (test-setup.ts),
+  where all of this is invisible; `timezone.test.ts` and
+  `bridge/mac/test_wire_time.py` set their own zones and are what actually
+  cover it.
 - **Reads are optimistic-with-suppression.** Persistent read state moves only
   via collector runs (~1 s), so BarWidget applies reads to the local model
   IMMEDIATELY and remembers them in `localReads[chat]` (thread last_ts at
@@ -138,9 +163,18 @@ what it is handed. Keep it that way.
   them by design; do not persist them. `push-read.log` beside state.json
   records each read-push's exit code and `imsg-read`'s status line — never
   content.
-- **The Linux shims' ssh preflight must use `ssh -n`.** A bare
-  `ssh <mac> true` connectivity probe EATS STDIN, which silently empties
-  `imsg-send --file-stdin` payloads. Fixed 2026-08-31.
+- **There is NO ssh preflight in the shim, and adding one back is a bug.**
+  It cost a full ssh round trip plus a Python start on the Mac — 41 ms
+  measured, on every call, ~31% of a 133 ms query — and bought only a
+  friendlier error string. ssh reports transport failure as 255 itself, every
+  caller already treats 255 exactly like 69 (collector, thread, fetch, avatar,
+  search, send-file, contact-search), and the shim translates it so the
+  documented `69 → Blip greys out` contract is unchanged. This also retires
+  the trap that came with it: the probe HAD to be `ssh -n`, because a bare
+  `ssh <mac> true` EATS STDIN and silently empties `imsg-send --file-stdin`
+  payloads. No probe, no trap. The shim no longer `exec`s ssh (it needs the
+  exit code to translate); stdio is inherited either way, so attachment
+  streaming and `--file-stdin` are untouched — covered by a stub-ssh test.
 - **`bridge.conf` is data, never `source`d.** The shim parses four keys and
   validates them; keep it that way (audit #7). `automation=on` is what lets
   `qs ipc … goto/compose/bubbles` work — off, they return a refusal string.
@@ -293,6 +327,58 @@ what it is handed. Keep it that way.
   Attachment chips are one per row for this reason. Debug trick: log
   `bubbleRow.width` per delegate; 1136 in a 560 panel = this bug.
 
+- **Latency is startup, not work — measure before tuning.** Every bridge call
+  pays a fixed tax while the SQL underneath is ~1 ms: ssh round trip 16 ms,
+  `blip-dispatch` Python start ~25 ms, `imsg` Python start + module parse
+  ~20 ms, sqlite connect (218 MB chat.db) 27 ms. That is why Blip feels
+  subtly laggy rather than slow, and why "make the query faster" is almost
+  always the wrong move. Two measured examples: replacing `cmd_chats`'
+  300-query N+1 with a single window function made it SLOWER (70 ms → 107 ms)
+  — the per-chat lookups are indexed; and in `cmd_chats` name resolution
+  costs ~104 ms, of which 46 ms is 60,112 `_same_number` calls, because a
+  handle that misses the exact last-ten key falls back to a linear scan of
+  every contact. Profile on the Mac with `cProfile` + `runpy` before changing
+  anything (see the war-room note on wheel scrolling for the same lesson).
+
+- **The persistent channel is an ACCELERATOR; the one-shot path is the
+  contract.** `blip-bridged` (Linux, started by the LEADER BarWidget) holds
+  two `imsg serve` channels open over ssh, so a query costs the query instead
+  of ~90 ms of startup. `bridgeRun()` in collector.ts routes through it and
+  falls back to plain `~/bin/imsg` on ANY fault — no socket, no socat, a dead
+  daemon, a frame that will not parse, a short body. Three rules:
+  (1) A caller that passes its own `runner` NEVER touches the socket. That is
+  what keeps the suite honest — every existing test injects a runner and
+  asserts on real argv.
+  (2) `serve` answers read-only queries only (`SERVE_ALLOWED`). `attachment`
+  and `avatar` stream binary and would park the channel behind a 100 MB photo;
+  `watch` blocks forever; `serve` would recurse. Those stay one-shot.
+  (3) A request carries `stdin` separately, so message text still never rides
+  argv. Framing is `{"status","len"}\n` + exactly len BYTES — length-counted,
+  not escaped, or a 122 KB payload gets re-encoded into a JSON string.
+  Channels are POOLED (2): Blip refreshes the list and reloads the open
+  conversation in parallel on every ping, and one channel would queue the
+  reload behind a 259 ms `chats` call. Do not pass `encoding: "buffer"` to
+  Bun's `spawnSync` — it throws `ERR_UNKNOWN_ENCODING`, the catch swallows it,
+  and the fast path silently never runs (cost us a whole debugging round).
+  **"Offline" in a test means clearing HOME *and* XDG_RUNTIME_DIR**, or the
+  socket answers underneath the test.
+
+- **A name lookup that misses must not scan the address book.** `_same_number`
+  only matches when one national number is a SUFFIX of the other with a floor
+  of seven digits, so the last seven digits ALWAYS agree — which is what makes
+  `_PHONE_SUFFIX` (last-seven → cards) sound. Before it, every handle without
+  an exact last-ten key scanned all 442 cards: 298 conversations cost 60,112
+  `_same_number` calls, 46 ms of a 292 ms `chats`. Verified identical against
+  the full scan over all 750 distinct handles in a real chat.db — zero
+  mismatches — and that check is the one to repeat if this is ever touched,
+  because the matching rules have been got wrong twice before.
+  **Caches invalidate on what they DERIVE from, never on chat.db's mtime**,
+  which changes on every message and would cache nothing during exactly the
+  busy minute that matters: group clusters key on the chat table's
+  (count, max ROWID), pins on the pinning plist's mtime, and the Contacts
+  index on the address books' — the last one exists because the serve channel
+  outlives an edit in Contacts.app, where a one-shot run always rebuilt.
+
 ## Working on it
 
 ```
@@ -321,7 +407,22 @@ to whatever has focus otherwise.
 
 ## Things that are not possible
 
-- Tapbacks, edits, typing indicators out. Needs SIP-off code injection; rejected.
+- ~~Tapbacks, edits, typing indicators out — needs SIP-off code injection.~~
+  **Half wrong; do not quote this as settled** (2026-09-07). macOS 26 Messages
+  has real MENU ITEMS for three of them — `Edit ▸ Tapback Message…`,
+  `Edit ▸ Reply to Message…`, `Edit ▸ Edit Last Message…`, plus `Send Later…`
+  — enumerated over System Events on the gateway Mac. A menu item is
+  scriptable, which is exactly how `imsg-read` overturned the old "marking
+  read is impossible" note. Typing indicators have no menu item and stay out.
+  What is NOT yet proved, and what anyone picking this up must establish
+  first: all four read `enabled=false` from the background, which per the
+  read-push note is evidence of NOTHING (AppKit validates menus against the
+  ACTIVE app's responder chain) — so feasibility has to be tested with
+  Messages frontmost. Then the real obstacles: the item acts on the SELECTED
+  message, and selecting an arbitrary bubble from Linux is the unsolved part;
+  the "…" suggests a picker that needs further navigation for the emoji;
+  Messages must come forward, so it steals focus the way `--chat` read-push
+  does; and a GROUP still cannot be addressed at all (next bullet).
 - Selecting a GROUP on the Mac from Linux. `imessage://` addresses a handle;
   a group's `chat<digits>` id has no URL form. So per-conversation read-push
   is DMs only; groups clear through `--all`. NOT closed for good: Bluetooth MAP
