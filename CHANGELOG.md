@@ -47,6 +47,12 @@
 - **Reactions on pictures show.** A message that is only a picture (or a file)
   has no text bubble, and that is where the tapback pill lived, so a reaction
   on a picture was never seen. The pill now sits on the picture or chip itself.
+- **Stickers show.** Messages files stickers (Memoji, Genmoji, sticker packs)
+  under `StickerCache/`, not `Attachments/`, and the bridge's path guard knew
+  only the latter — every sticker anyone sent came back as "attachment path
+  escapes the Messages store". The guard now admits that directory too, with
+  the same resolve-then-check, regular-file and size rules. Re-run
+  `blip-setup` so the Mac `imsg` picks it up.
 
 ## 2.4.0 — 2026-09-08 — read it from the keyboard, send without the wait
 

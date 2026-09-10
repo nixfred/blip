@@ -8,6 +8,7 @@ import io
 import json
 import os
 import sqlite3
+import tempfile
 import unittest
 from types import SimpleNamespace
 
@@ -188,6 +189,39 @@ class ChatProjectionTests(unittest.TestCase):
         self.assertEqual(merged["messages"], 2)
         self.assertEqual(merged["pin_order"], 0)
         self.assertIn("other-group", [row["id"] for row in rows])
+
+
+class AttachmentStoreTests(unittest.TestCase):
+    """`imsg attachment` serves a file only from the directories message media
+    lives in. Stickers are the third one: Messages keeps them in StickerCache,
+    not Attachments, and the old two-root check refused every sticker sent."""
+
+    def test_stickers_are_served_and_everything_outside_the_store_is_not(self):
+        saved = (imsg.ATTACHMENTS_ROOT, imsg.STICKER_ROOT, imsg.SENT_ROOT)
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = {n: os.path.join(tmp, "Messages", n) for n in ("Attachments", "StickerCache")}
+            roots["sent"] = os.path.join(tmp, ".blip", "sent")
+            outside = os.path.join(tmp, "Messages", "chat.db")
+            for d in roots.values():
+                os.makedirs(d)
+                open(os.path.join(d, "file.png"), "w").close()
+            open(outside, "w").close()
+            # a sibling directory that shares StickerCache's name as a prefix
+            os.makedirs(roots["StickerCache"] + "-evil")
+            open(os.path.join(roots["StickerCache"] + "-evil", "file.png"), "w").close()
+            # a link planted inside the sticker store, pointing out of it
+            os.symlink(outside, os.path.join(roots["StickerCache"], "link.png"))
+            try:
+                imsg.ATTACHMENTS_ROOT, imsg.STICKER_ROOT, imsg.SENT_ROOT = (
+                    roots["Attachments"], roots["StickerCache"], roots["sent"])
+                for d in roots.values():
+                    self.assertTrue(imsg._in_message_store(os.path.join(d, "file.png")), d)
+                self.assertFalse(imsg._in_message_store(outside))
+                self.assertFalse(imsg._in_message_store(os.path.join(roots["StickerCache"] + "-evil", "file.png")))
+                self.assertFalse(imsg._in_message_store(os.path.join(roots["StickerCache"], "link.png")))
+                self.assertFalse(imsg._in_message_store(os.path.join(roots["StickerCache"], "..", "chat.db")))
+            finally:
+                imsg.ATTACHMENTS_ROOT, imsg.STICKER_ROOT, imsg.SENT_ROOT = saved
 
 
 if __name__ == "__main__":

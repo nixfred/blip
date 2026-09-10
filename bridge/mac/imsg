@@ -1428,11 +1428,22 @@ def cmd_groups(con, args):
 
 
 ATTACHMENTS_ROOT = os.path.expanduser("~/Library/Messages/Attachments")
+# Stickers (Memoji, Genmoji, sticker packs) are attachment rows like any other,
+# but Messages files them here instead of under Attachments/.
+STICKER_ROOT = os.path.expanduser("~/Library/Messages/StickerCache")
 # Files Blip sent: imsg-send keeps them here because Messages may leave the
 # attachment row pointing at the (deleted) ~/Pictures/.blip-outbox staging path.
 OUTBOX_ROOT = os.path.expanduser("~/Pictures/.blip-outbox")
 SENT_ROOT = os.path.expanduser("~/.blip/sent")
 ATTACH_MAX_BYTES = 100 * 1024 * 1024  # hard ceiling, deliberately no flag
+
+
+def _in_message_store(path: str) -> bool:
+    """`path`, symlinks resolved, sits under a directory message media lives in.
+    commonpath, not startswith: a sibling sharing the name prefix is outside."""
+    path = os.path.realpath(path)
+    roots = (ATTACHMENTS_ROOT, STICKER_ROOT, SENT_ROOT)
+    return any(os.path.commonpath([path, r]) == r for r in map(os.path.realpath, roots))
 
 
 def _sniff_image(head: bytes) -> str:
@@ -1859,8 +1870,7 @@ def cmd_attachment(con, args):
     if os.path.commonpath([os.path.realpath(raw), outbox]) == outbox and not os.path.exists(raw):
         raw = os.path.join(SENT_ROOT, os.path.relpath(os.path.realpath(raw), outbox))
     path = os.path.realpath(raw)
-    roots = [os.path.realpath(ATTACHMENTS_ROOT), os.path.realpath(SENT_ROOT)]
-    if not any(os.path.commonpath([path, r]) == r for r in roots):
+    if not _in_message_store(path):
         sys.exit("error: attachment path escapes the Messages store")
 
     # Ceiling applies to the SOURCE before any conversion — sips must not be
