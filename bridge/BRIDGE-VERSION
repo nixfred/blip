@@ -3,3 +3,4 @@ vendored: imsg imsg-send contacts tcc-check
 blip-only (NOT upstream): imsg-read blip-check blip-dispatch
 blip extensions: Messages pin order; bounded read-only contact review, store-fingerprint audit, and card availability check
 sync: scripts/sync-bridge.sh <sha-or-tag>
+blip draft extensions: gated card compare/edit/delete/consolidation, link handoff, undo, and vCard export

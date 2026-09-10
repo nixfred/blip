@@ -24,6 +24,8 @@ FocusScope {
   visible: opened
   readonly property string helper: decodeURIComponent(Qt.resolvedUrl("contact-review.ts").toString().replace(/^file:\/\//, ""))
   signal closed()
+  property bool detached: false
+  signal manageRequested(string handle)
 
   function close() { opened = false; closed() }
   function textField(value, maximum) { return typeof value === "string" ? value.slice(0, maximum) : "" }
@@ -138,6 +140,15 @@ FocusScope {
       textFormat: Text.PlainText; wrapMode: Text.WordWrap
       color: root.error !== "" ? Color.urgent : root.foreground
       font.family: root.fontFamily; font.pixelSize: root.fontSize
+    }
+    ContactButton {
+      Layout.fillWidth: true
+      foreground: root.foreground; accent: root.accent
+      fontFamily: root.fontFamily; fontSize: root.fontSize
+      visible: root.model !== null && root.model.view === "cards"
+      text: root.detached ? "Manage contact…" : "Manage contact ↗"
+      enabled: !root.busy
+      onClicked: root.manageRequested(root.model.detail)
     }
     PanelSeparator { Layout.fillWidth: true; foreground: root.foreground }
     Flickable {

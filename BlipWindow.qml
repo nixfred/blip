@@ -46,6 +46,7 @@ FloatingWindow {
   readonly property string seenTs: view.seenTs
   readonly property bool peeking: view.peeking
   readonly property string activeLastTs: view.activeLastTs
+  function manageContact(handle) { return view.openContactManagement(handle) }
   function openThread(t) { view.openThread(t) }
   function shareLink(url) { return view.shareLink(url) }
   function pushReload() { view.pushReload() }

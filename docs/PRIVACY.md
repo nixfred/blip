@@ -91,3 +91,13 @@ timestamp when `chat.db` changes; the client then fetches privately.
 
 Send tapbacks, edit or unsend, see typing indicators.
 Those need Apple private APIs that Blip deliberately does not use.
+
+## Optional contact management
+
+Explicit contact management requests can return bounded card fields (including
+notes and addresses) to memory. Exported vCards are owner-only files under
+`$XDG_RUNTIME_DIR/blip/vcards/`; no message text is included. Mutations require
+both write gates and a separate confirmation. Undo receipts remain owner-only
+on the Mac and expire after seven days. Deletion/merge undo recreates text
+fields; original accounts, links, and photos cannot be restored. Apple's own
+Link/Merge handoff has no automatic Blip undo. Nothing edits Contacts SQLite.

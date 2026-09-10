@@ -83,3 +83,16 @@ nonblocking descriptors with owner/type checks. Writes use a private staging
 file and descriptor-relative atomic rename. It holds contact summaries, never
 messages, and requires matching handle-set and live store fingerprints before
 reuse. It is a cache, not user configuration.
+
+## Draft contact write boundary
+
+The optional `contact-management.ts` helper accepts bounded stdin requests.
+Writes require `contact_writes=on` in owner-controlled `bridge.conf` plus an
+independent Mac write gate. Preview/apply uses exact card tokens, content
+revisions and plan hashes; only validated native operations reach Contacts.
+The optional Swift helper performs Contacts-framework mutations. The Apple
+UI handoff pins the selected cards and the exact enabled Link/Merge action,
+requiring Automation and Accessibility. Undo receipts stay private on the Mac.
+
+This draft still needs Mac integration validation of mutation failure and
+recovery behavior before merge. Linux checks use synthetic fixtures only.

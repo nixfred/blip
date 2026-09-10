@@ -525,6 +525,62 @@ Contacts fingerprint still match. The feature adds no settings page or display
 name overrides. Configuration stays in `bridge.conf`. Review requires no Swift
 helper; the optional availability check needs Automation → Contacts on the Mac.
 
+## Contact management (draft)
+
+Quick review stays in the menubar. Management uses the resizable window; one
+matching person opens directly to their cards, while conflicting matches ask
+you to choose. A single card shows its details without comparison controls.
+
+From Contact review, choose **Manage contact ↗** to open the selected contact
+in the detached Blip window and compare, edit, consolidate,
+delete, or link matching source cards. Selecting a person is temporary.
+**Copy vCard** exports a contact file for pasting into a conversation.
+
+The optional compiled helper requires Swift Command Line Tools on the Mac;
+installation skips it when unavailable. To opt into writes explicitly, run
+`BLIP_CONTACT_WRITES=on scripts/blip-setup`. This sets `contact_writes=on` in
+`bridge.conf` and installs the independent owner-only Mac write gate.
+
+Each source card now has an **Edit in Blip…** workspace for names, organization
+and job fields, birthday, notes, labeled phone numbers, email addresses,
+websites, and postal addresses. Edits and whole-card deletions are first shown
+as a read-only change preview. The Mac bridge then re-resolves the opaque card
+token and requires the card's content revision to be unchanged before it
+saves. The card photo is retained on edit but is not editable in Blip.
+
+For duplicates, choose **Merge into card N…** to build an editable combined
+card. The selected card and its account remain authoritative; its scalar
+choices win, blanks are filled from the other cards, and unique collection
+values are combined. After a destructive confirmation, Blip batches the target
+update and same-account source-card deletions in one save through Apple's
+current Contacts framework. When source cards cross account stores, Blip first
+saves the complete surviving card and then deletes sources in account-scoped
+requests; this avoids Contacts' unsupported cross-store save while keeping the
+merged data safe before any source is removed. This deterministic path does not
+depend on Apple's menu item being enabled.
+
+From that comparison Blip can ask Contacts to select the exact cards and report
+Apple's currently enabled **Link Selected Cards** or **Merge Selected Cards**
+action. Nothing happens until a second confirmation names that exact action.
+The action is pinned through the SSH bridge and refused if it changes before
+the click. It changes Contacts and may sync upstream; unlike the narrow
+phone/email repair below, Blip cannot provide an automatic unlink receipt.
+This handoff needs Automation → Contacts and Accessibility for
+`/usr/libexec/sshd-keygen-wrapper` on the Mac.
+
+For a handle attached to the wrong person, Blip can also inspect the exact
+card, show a destructive confirmation, remove only that verified phone/email
+through Contacts.app, and offer an immediate undo; its private receipt expires
+after seven days. Edits, deletions, consolidations, and narrow field removals
+all require `contact_writes=on` plus the
+separate owner-only Mac gate. Whole-card deletion uses Apple's public Contacts
+framework. Blip never writes the private Contacts SQLite database or deletes a
+possibly shared number without confirmation. Edit undo
+restores the exact card fields if the card has not changed again. Delete and
+consolidation undo can recreate the text fields as new cards, but Contacts does
+not expose a supported way to restore their original synced-account placement,
+links, or photos; the confirmation says this explicitly.
+
 ## Keyboard
 
 | where | key | does |

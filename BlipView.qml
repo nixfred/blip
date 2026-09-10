@@ -84,7 +84,7 @@ FocusScope {
   readonly property color dim: Qt.darker(foreground, 1.45)
   /** An editor owns the keyboard — the host's key catcher must stand down. */
   readonly property bool editorActive:
-    contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused
+    contactWorkspace.opened || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused
   readonly property alias composeEditor: composeField
   readonly property real contentHeightHint: listContent.implicitHeight
   /** The view wants keyboard navigation focus back (list mode). */
@@ -364,8 +364,8 @@ FocusScope {
     return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase()
   }
 
-  readonly property bool contactsOpen: contactReview.opened
-  readonly property bool inThread: active !== null && !contactReview.opened
+  readonly property bool contactsOpen: contactReview.opened || contactWorkspace.opened
+  readonly property bool inThread: active !== null && !contactReview.opened && !contactWorkspace.opened
   // last_ts of the open conversation as of its last load — the push watcher
   // refreshes the thread list, and when OUR thread advances, the bubbles
   // reload themselves. The guard makes unchanged refreshes free.
@@ -438,6 +438,7 @@ FocusScope {
     closeShare()
     peekTimer.stop()
     peeking = false
+
     active = null
     bubbles = []
     note = ""
@@ -454,6 +455,7 @@ FocusScope {
   /** Back to the list view, scrolled to top — the host calls this on open. */
   function resetToList() {
     clearThread()
+    contactWorkspace.opened = false
     contactReview.opened = false
     cursor = -1
     composeField.text = ""
@@ -1753,7 +1755,7 @@ FocusScope {
   // press past the last row landing at the top reads as a jump, not a loop
   // (Omarchy's Dropdown clamps the same way).
   function moveCursor(dy) {
-    if (contactReview.opened || !listShowing || threads.length === 0 || dy === 0) return
+    if (contactsOpen || !listShowing || threads.length === 0 || dy === 0) return
     // Up from the first row hands focus to the search field above the list,
     // and Down in an empty field hands it back (Omarchy's SearchableDropdown).
     if (dy < 0 && cursor <= 0) { startSearch(); return }
@@ -1798,7 +1800,7 @@ FocusScope {
     return false
   }
   function catchNavText(text) {
-    if (contactReview.opened) return false
+    if (contactReview.opened || contactWorkspace.opened) return false
     var jump = text === "/" || text === "n" || text === "N"
       || (text >= "1" && text <= "9")
     if (!jump) return false
@@ -1828,6 +1830,7 @@ FocusScope {
   /** Esc semantics for a host without a PanelKeyCatcher (the window): true if
    *  something was unwound, false if the host should close. */
   function unwind() {
+    if (contactWorkspace.opened) { contactWorkspace.close(); return true }
     if (contactReview.opened) { contactReview.back(); return true }
     if (shareUrl !== "") { closeShare(); return true }
     if (catchEscape()) return true
@@ -1835,7 +1838,8 @@ FocusScope {
     return false
   }
   function focusDefault() {
-    if (contactReview.opened) contactReview.forceActiveFocus()
+    if (contactWorkspace.opened) contactWorkspace.forceActiveFocus()
+    else if (contactReview.opened) contactReview.forceActiveFocus()
     else if (inThread) composeField.forceActiveFocus()
     else navigationFocusRequested()
   }
@@ -1848,7 +1852,7 @@ FocusScope {
 
   RowLayout {
     anchors.fill: parent
-    visible: !contactReview.opened
+    visible: !contactReview.opened && !contactWorkspace.opened
     spacing: 0
 
     // ------------------------------------------------------- thread pane
@@ -3417,6 +3421,13 @@ FocusScope {
     }
   }
 
+  // Contact work owns the full detached surface. Refuse replacing an open
+  // workspace so another menubar click cannot discard an editor or preview.
+  function openContactManagement(handle) {
+    if (!root.splitView) return false
+    return contactWorkspace.review(handle)
+  }
+
   property var contactContext: null
   Menu {
     id: contactMenu
@@ -3428,6 +3439,7 @@ FocusScope {
   ContactReview {
     id: contactReview
     objectName: "blipContactReview"
+    visible: opened && !contactWorkspace.opened
     anchors.fill: parent
     threads: root.threads
     foreground: root.foreground
@@ -3435,6 +3447,22 @@ FocusScope {
     fontFamily: root.fontFamily
     fontSize: root.fontBodySmall
     onClosed: root.focusDefault()
+    detached: root.splitView
+    onManageRequested: function(handle) {
+      if (root.splitView) root.openContactManagement(handle)
+      else if (!root.hostWidget || !root.hostWidget.manageContact(handle))
+        contactReview.notice = "Finish the contact already open in the Blip window first."
+    }
+  }
+  ContactWorkspace {
+    id: contactWorkspace
+    objectName: "blipContactWorkspace"
+    anchors.fill: parent
+    foreground: root.foreground; urgent: root.urgent; accent: root.accent
+    fontFamily: root.fontFamily
+    fontScale: root.fontBodySmall / Style.font.bodySmall
+    onClosed: root.focusDefault()
+    onContactsMutated: if (root.hostWidget) root.hostWidget.refresh(true, false)
   }
 
     // drag a file from a file manager onto the open conversation → draft chip

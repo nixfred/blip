@@ -394,3 +394,20 @@ to whatever has focus otherwise.
 - **Attachments out.** `send POSIX file` works on Sequoia IF the file is staged
   in `~/Pictures/` — from anywhere else Messages fails silently (`error=25`,
   "Not Delivered"). Verified delivered for PNG and PDF. See ROADMAP.md.
+
+## Draft contact management
+
+`ContactWorkspace.qml` hosts `ContactManagement.qml` and the existing card
+compare/editor views. `ContactOperations.qml` talks to `contact-management.ts`
+through bounded stdin. There is no settings surface or saved display-name
+override. Each native mutation retains its preview, exact token/revision
+validation, independent local/Mac write gates, and private Mac undo receipt.
+The small read-only contact review and its cache remain independent.
+
+Contact management opens only in the detached window. `BarWidget.manageContact`
+shows the window once, then hands the handle to its view; a second ensure before
+the deferred show can recreate the window and lose that handoff. Existing open
+workspaces refuse a different handle so editors and previews survive. Initial
+access checks queue the handoff. The TypeScript broker supplies `initialToken`
+only for one matching person, opening read-only card details after the worker
+exits. Choosing a person still grants no write authority.

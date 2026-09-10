@@ -210,6 +210,10 @@ BarWidget {
       'for i in 1 2 3 4 5 6 7 8; do a=$(hyprctl clients -j | jq -r \'.[] | select(.title | startswith("Blip")) | .address\' | head -1); [ -n "$a" ] && break; sleep 0.15; done; ' +
       '[ -n "$a" ] && hyprctl dispatch "hl.dsp.focus({ window = \\"address:$a\\" })" >/dev/null'])
   }
+  function manageContact(handle) {
+    showApp()
+    return windowLoader.item !== null && windowLoader.item.manageContact(handle)
+  }
   /** Either surface open → keep the deep (complete) thread list. */
   function anySurfaceOpen() {
     return (panelLoader.item && panelLoader.item.opened === true)
