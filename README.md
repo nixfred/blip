@@ -548,6 +548,14 @@ helper; the optional availability check needs Automation → Contacts on the Mac
 | thread | `Esc` | back to list (or clear a text selection first) |
 | anywhere | `Esc` | close |
 
+Drag the diagonal lines in the menubar panel’s bottom-right corner to resize it.
+Its width and height are remembered across shell restarts in
+`$HOME/.local/state/blip/panel.json`. The panel stays within the current display
+and never exceeds 80% of that display’s logical height, including its border
+and padding. Moving to a smaller display clamps the visible size without
+replacing your saved preference. The separate app window keeps its own size.
+
+
 IPC, for scripts and other plugins:
 
 ```sh

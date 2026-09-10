@@ -39,7 +39,7 @@ break and expensive to rediscover.
 bun test                                   # unit tests, ~70 ms
 bun collector.ts --deep | jq .unread       # live poll through your bridge
 bun thread.ts <chat-id> 40 | jq .bubbles   # one conversation
-cp *.qml *.ts manifest.json ~/.config/omarchy/plugins/nixfred.blip/
+cp *.qml *.ts *.mjs manifest.json ~/.config/omarchy/plugins/nixfred.blip/
 omarchy-restart-shell                      # QML changes need a restart, not a hot-reload (see CLAUDE.md)
 ```
 

@@ -91,3 +91,7 @@ timestamp when `chat.db` changes; the client then fetches privately.
 
 Send tapbacks, edit or unsend, see typing indicators.
 Those need Apple private APIs that Blip deliberately does not use.
+
+The menubar panel saves only its preferred width and height in
+`$HOME/.local/state/blip/panel.json` (0600). No draft or conversation content
+is included. The dimensions are clamped to the current display on use.
