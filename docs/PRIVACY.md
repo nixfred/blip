@@ -95,3 +95,11 @@ Those need Apple private APIs that Blip deliberately does not use.
 The menubar panel saves only its preferred width and height in
 `$HOME/.local/state/blip/panel.json` (0600). No draft or conversation content
 is included. The dimensions are clamped to the current display on use.
+Contact scans include conversation handles and group participants, with up to
+10,000 distinct handles from the bounded conversation list. Mac requests stay
+under 200 handles and 48 KiB; oversized responses are split into smaller
+requests. A scan has a three-minute deadline and rejects changing Contacts
+fingerprints instead of caching a partial result. The owner-only scan cache
+holds at most 16 MiB of contact summaries; QML receives 40 findings per page,
+under its existing 48 KiB response limit. Scan input is metadata only, bounded
+to 4 MiB on stdin. No message bodies enter the scan.

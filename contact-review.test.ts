@@ -306,3 +306,68 @@ describe("cache and streaming boundary", () => {
     } finally { child.kill(); try { child.stdin.end(); } catch { /* closed */ } }
   });
 });
+
+describe('batched contact scans', () => {
+  const handles = Array.from({length: 451}, (_,i) => `+15551${String(i).padStart(6,'0')}`);
+  const fingerprint = 'sha256:' + 'f'.repeat(64);
+  const result = (body: unknown) => ({status:0,stdout:JSON.stringify(body),stderr:''});
+  test('scans beyond 200 and reuses the complete cache on one fingerprint check', () => {
+    const batches: number[] = [];
+    const runner = ((_cmd: string, args: string[], options: any) => {
+      expect(args).toEqual(['--json','resolve']);
+      expect(Buffer.byteLength(options.input)).toBeLessThanOrEqual(MAX_IDENTITY_REQUEST_BYTES);
+      const request = JSON.parse(options.input);
+      if (request.operation === 'fingerprint') return result({ok:true,fingerprint});
+      batches.push(request.handles.length);
+      return result({ok:true,fingerprint,handleCount:request.handles.length,noMatchCount:request.handles.length,singleCards:[],duplicates:[],conflicts:[]});
+    }) as any;
+    expect(scanHandles(handles.map(chat => ({chat})))).toEqual(handles);
+    expect(auditContactsOnMac(handles,runner,cachePath).audit.handleCount).toBe(451);
+    expect(batches).toEqual([200,200,51]);
+    expect(auditContactsOnMac(handles,runner,cachePath).cached).toBe(true);
+    expect(batches).toHaveLength(3);
+  });
+  test('splits an oversized response instead of failing the whole scan', () => {
+    const runner = ((_cmd: string,_args: string[],options:any) => {
+      const hs = JSON.parse(options.input).handles;
+      if (hs.length > 25) return {status:1,stdout:'',error:{code:'ENOBUFS'}};
+      return result({ok:true,handleCount:hs.length,noMatchCount:hs.length,singleCards:[],duplicates:[],conflicts:[]});
+    }) as any;
+    expect(auditContactsOnMac(handles,runner,cachePath).audit.handleCount).toBe(451);
+  });
+  test('does not cache partial results or combine different Contacts snapshots', () => {
+    let calls=0;
+    const runner = ((_cmd: string,_args: string[],options:any) => {
+      const hs=JSON.parse(options.input).handles;
+      return result({ok:true,fingerprint:'sha256:'+(++calls===1?'a':'b').repeat(64),handleCount:hs.length,noMatchCount:hs.length,singleCards:[],duplicates:[],conflicts:[]});
+    }) as any;
+    expect(()=>auditContactsOnMac(handles,runner,cachePath)).toThrow('changed during');
+    expect(readAuditCache(cachePath)).toBeNull();
+  });
+  test('pages every finding without silently dropping later contacts', () => {
+    const duplicate = {token,name:'Example Person',recordCount:2,sourceCount:1,hasPhoto:false,cards:[]};
+    const audit = {handleCount:451,noMatchCount:0,singleCards:[],conflicts:[],duplicates:handles.map(handle=>({handle,candidates:[duplicate]}))};
+    const found = [];
+    for(let page=0;page<12;page++) {
+      const view=auditView(audit,page);
+      expect(view.rows.length).toBeLessThanOrEqual(40);
+      expect(Buffer.byteLength(JSON.stringify(view))).toBeLessThan(MAX_BRIDGE_OUTPUT_BYTES);
+      expect(view.pageCount).toBe(12);
+      found.push(...view.rows.map(r=>r.handle));
+    }
+    expect(found).toEqual(handles);
+    expect(()=>auditView(audit,-1)).toThrow();
+    expect(runReview('audit',{conversations:[]})).toMatchObject({page:0,pageCount:1});
+  });
+});
+
+test('splits the Mac size-contract error and long handle payloads',()=>{
+  const handles=Array.from({length:201},(_,i)=>'p'+i+'x'.repeat(220)+'@example.com');
+  const runner=((_cmd:string,_args:string[],options:any)=>{
+    expect(Buffer.byteLength(options.input)).toBeLessThanOrEqual(MAX_IDENTITY_REQUEST_BYTES);
+    const hs=JSON.parse(options.input).handles;
+    if(hs.length>10) return {status:1,stdout:JSON.stringify({ok:false,error:'identity response exceeded its size contract'})};
+    return {status:0,stdout:JSON.stringify({ok:true,handleCount:hs.length,noMatchCount:hs.length,singleCards:[],duplicates:[],conflicts:[]})};
+  }) as any;
+  expect(auditContactsOnMac(handles,runner,cachePath).audit.handleCount).toBe(201);
+});

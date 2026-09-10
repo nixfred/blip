@@ -21,6 +21,7 @@ FocusScope {
   property string error: ""
   property string notice: ""
   property bool busy: false
+  property var scanConversations: []
   visible: opened
   readonly property string helper: decodeURIComponent(Qt.resolvedUrl("contact-review.ts").toString().replace(/^file:\/\//, ""))
   signal closed()
@@ -42,11 +43,19 @@ FocusScope {
     request("review", { conversation: data })
     forceActiveFocus()
   }
-  function scan() {
+  function scan(page) {
     if (busy) return
     if (threads.length > 1000) { error = "Too many conversations to scan at once"; return }
     overview = null
-    request("audit", { conversations: threads.map(function(thread) { return { chat: textField(thread.chat, 320) } }) })
+    if (page === undefined) {
+      page = 0
+      scanConversations = threads.map(function(thread) {
+        return {chat: textField(thread.chat, 320), participants: (thread.participants || []).slice(0, 64).map(function(p) {
+          return {handle: textField(typeof p === "string" ? p : p.handle, 320)}
+        })}
+      })
+    }
+    request("audit", {conversations: scanConversations, page: page})
   }
   function back() {
     if (busy) return
@@ -57,7 +66,7 @@ FocusScope {
     if (busy) return
     var encoded = JSON.stringify(payload)
     error = ""; notice = ""
-    if (encoded.length > 49152) { error = "Too many contacts in this request"; return }
+    if (encoded.length > (operation === "audit" ? 4194304 : 49152)) { error = "Too many contacts in this request"; return }
     worker.received = false
     worker.command = ["bun", helper, operation]
     busy = true
@@ -83,6 +92,8 @@ FocusScope {
       if (["people", "cards", "scan", "opened"].indexOf(result.view) < 0
           || !validText(result.title, 160) || !validText(result.detail, 480)
           || !Array.isArray(result.rows) || result.rows.length > 200) throw "schema"
+      if (result.view === "scan" && (!Number.isInteger(result.page) || !Number.isInteger(result.pageCount)
+          || result.page < 0 || result.pageCount < 1 || result.pageCount > 250 || result.page >= result.pageCount)) throw "page"
       for (var i = 0; i < result.rows.length; i++) {
         var row = result.rows[i]
         if (!row || !validText(row.name, 320) || !validText(row.detail, 480)
@@ -195,6 +206,25 @@ FocusScope {
             }
           }
         }
+      }
+    }
+    RowLayout {
+      Layout.fillWidth: true
+      visible: root.model !== null && root.model.view === "scan" && root.model.pageCount > 1
+      ContactButton {
+        text: "Previous"; enabled: !root.busy && root.model && root.model.page > 0
+        foreground: root.foreground; accent: root.accent; fontFamily: root.fontFamily; fontSize: root.fontSize
+        onClicked: root.scan(root.model.page - 1)
+      }
+      Text {
+        Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter
+        text: root.model ? (root.model.page + 1) + " / " + root.model.pageCount : ""
+        color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontSize; textFormat: Text.PlainText
+      }
+      ContactButton {
+        text: "Next"; enabled: !root.busy && root.model && root.model.page + 1 < root.model.pageCount
+        foreground: root.foreground; accent: root.accent; fontFamily: root.fontFamily; fontSize: root.fontSize
+        onClicked: root.scan(root.model.page + 1)
       }
     }
     ContactButton {

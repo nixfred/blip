@@ -14,7 +14,10 @@ export const MAX_BRIDGE_OUTPUT_BYTES = 48 * 1024;
 export const MAX_IDENTITY_CANDIDATES = 8;
 export const MAX_IDENTITY_CARDS = 64;
 export const MAX_REPAIR_FIELDS = 8;
-export const MAX_CONTACT_AUDIT_HANDLES = 200;
+export const MAX_CONTACT_AUDIT_HANDLES = 200; // per Mac request
+export const MAX_CONTACT_SCAN_HANDLES = 10000;
+export const MAX_SCAN_REQUEST_BYTES = 4 * 1024 * 1024;
+export const SCAN_PAGE_SIZE = 40;
 export const MAX_HANDLE_CHARS = 320;
 export const MAX_NAME_CHARS = 160;
 export interface IdentityCandidate {
@@ -189,24 +192,24 @@ export function normalizeBridgeCandidates(value: unknown, requestedHandle: strin
   });
 }
 
-export function normalizeContactAudit(value: unknown, expectedHandleCount: number): ContactAudit {
+export function normalizeContactAudit(value: unknown, expectedHandleCount: number, maximum = MAX_CONTACT_AUDIT_HANDLES): ContactAudit {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     throw new Error("Contacts returned an invalid audit");
   if (!Number.isInteger(expectedHandleCount) || expectedHandleCount < 1
-      || expectedHandleCount > MAX_CONTACT_AUDIT_HANDLES)
+      || expectedHandleCount > maximum)
     throw new Error("contact audit handle count is invalid");
   const audit = value as Record<string, unknown>;
   const handleCount = finiteInteger(
-    audit.handleCount, "audit handle count", 1, MAX_CONTACT_AUDIT_HANDLES,
+    audit.handleCount, "audit handle count", 1, maximum,
   );
   if (handleCount !== expectedHandleCount)
     throw new Error("Contacts returned an incomplete audit");
   const noMatchCount = finiteInteger(
-    audit.noMatchCount, "audit no-match count", 0, MAX_CONTACT_AUDIT_HANDLES,
+    audit.noMatchCount, "audit no-match count", 0, maximum,
   );
   const seen = new Set<string>();
   function entries(raw: unknown, kind: "single" | "duplicate" | "conflict"): ContactAuditEntry[] {
-    if (!Array.isArray(raw) || raw.length > MAX_CONTACT_AUDIT_HANDLES)
+    if (!Array.isArray(raw) || raw.length > maximum)
       throw new Error("Contacts returned an invalid audit category");
     return raw.map((item) => {
       if (item === null || typeof item !== "object" || Array.isArray(item))
@@ -236,7 +239,7 @@ export function normalizeContactAudit(value: unknown, expectedHandleCount: numbe
   return { handleCount, noMatchCount, singleCards, duplicates, conflicts };
 }
 
-export const MAX_AUDIT_CACHE_BYTES = 512 * 1024;
+export const MAX_AUDIT_CACHE_BYTES = 16 * 1024 * 1024;
 const FINGERPRINT_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 export function auditCachePath(): string {
@@ -311,7 +314,7 @@ export function readAuditCache(path = auditCachePath()): AuditCacheEntry | null 
     const handleCount = Number(rawAudit?.handleCount);
     if (!Number.isInteger(handleCount)) return null;
     let audit: ContactAudit;
-    try { audit = normalizeContactAudit(entry.audit, handleCount); }
+    try { audit = normalizeContactAudit(entry.audit, handleCount, MAX_CONTACT_SCAN_HANDLES); }
     catch { return null; }
     return { storeFingerprint: entry.storeFingerprint, handleFingerprint: entry.handleFingerprint, audit };
   } finally {
@@ -357,7 +360,8 @@ export function writeAuditCache(entry: AuditCacheEntry, path = auditCachePath())
 export function auditContactsOnMac(
   value: unknown, runner: Runner = spawnSync, cachePath = auditCachePath(),
 ): { audit: ContactAudit; cached: boolean } {
-  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_CONTACT_AUDIT_HANDLES)
+  const deadline = Date.now() + 180000;
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_CONTACT_SCAN_HANDLES)
     throw new Error("contact audit handle list is invalid");
   const seen = new Set<string>();
   const handles = value.map((raw) => {
@@ -374,7 +378,7 @@ export function auditContactsOnMac(
   const handleFingerprint = handleSetFingerprint(handles);
   let cache: AuditCacheEntry | null = null;
   try { cache = readAuditCache(cachePath); } catch { cache = null; }
-  if (cache && cache.handleFingerprint === handleFingerprint) {
+  if (cache && cache.audit.handleCount === handles.length && cache.handleFingerprint === handleFingerprint) {
     try {
       if (storeFingerprintOnMac(runner) === cache.storeFingerprint) {
         const requested = new Set(handles.map(identityKey));
@@ -385,39 +389,62 @@ export function auditContactsOnMac(
     } catch { /* fingerprint unavailable — fall through to a full scan */ }
   }
   const home = process.env.HOME ?? homedir();
-  const result: SpawnSyncReturns<string> = runner(
-    join(home, "bin", "contacts"),
-    ["--json", "resolve"],
-    {
-      encoding: "utf8",
-      input: JSON.stringify({ operation: "audit", handles }),
-      timeout: 35000,
-      maxBuffer: MAX_BRIDGE_OUTPUT_BYTES,
-    },
-  );
-  if (result.error) throw new Error(result.error.message || "Contacts bridge failed");
-  const stdout = String(result.stdout || "");
-  if (Buffer.byteLength(stdout) > MAX_BRIDGE_OUTPUT_BYTES)
-    throw new Error("Contacts returned too much data");
-  let response: unknown;
-  try { response = JSON.parse(stdout); }
-  catch { throw new Error("Contacts returned invalid JSON"); }
-  if (response === null || typeof response !== "object" || Array.isArray(response))
-    throw new Error("Contacts returned an invalid audit response");
-  const body = response as Record<string, unknown>;
-  if (result.status !== 0 || body.ok !== true)
-    throw new Error(safeError(body.error || "Contacts audit failed"));
-  const audit = normalizeContactAudit(body, handles.length);
-  const requestedKeys = new Set(handles.map(identityKey));
-  for (const entry of [...audit.singleCards, ...audit.duplicates, ...audit.conflicts]) {
-    if (!requestedKeys.has(identityKey(entry.handle)))
-      throw new Error("Contacts returned an unrequested audited handle");
+  const audit: ContactAudit = {handleCount: 0, noMatchCount: 0, singleCards: [], duplicates: [], conflicts: []};
+  let fingerprint: string | undefined;
+  let cacheable = true;
+  let retainedBytes = 0;
+  function batch(batchHandles: string[]): void {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("Contact scan timed out; no partial result was saved");
+    const input = JSON.stringify({operation: "audit", handles: batchHandles});
+    if (Buffer.byteLength(input) > MAX_IDENTITY_REQUEST_BYTES) {
+      split(batchHandles); return;
+    }
+    const result: SpawnSyncReturns<string> = runner(join(home, "bin", "contacts"), ["--json", "resolve"], {
+      encoding: "utf8", input, timeout: Math.min(35000, remaining), maxBuffer: MAX_BRIDGE_OUTPUT_BYTES,
+    });
+    const stdout = String(result.stdout || "");
+    if ((result.error as any)?.code === "ENOBUFS" || Buffer.byteLength(stdout) > MAX_BRIDGE_OUTPUT_BYTES) {
+      split(batchHandles); return;
+    }
+    let body: any;
+    try { body = JSON.parse(stdout); } catch { /* report malformed replies below */ }
+    if (body?.ok === false && /too (?:much data|large)|exceeded its size contract/i.test(String(body.error))) {
+      split(batchHandles); return;
+    }
+    if (result.error) throw new Error(result.error.message || "Contacts bridge failed");
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Contacts returned invalid JSON");
+    if (result.status !== 0 || body.ok !== true) throw new Error(safeError(body.error || "Contacts audit failed"));
+    const part = normalizeContactAudit(body, batchHandles.length);
+    const requested = new Set(batchHandles.map(identityKey));
+    for (const entry of [...part.singleCards, ...part.duplicates, ...part.conflicts]) {
+      if (!requested.has(identityKey(entry.handle))) throw new Error("Contacts returned an unrequested audited handle");
+    }
+    if (typeof body.fingerprint === "string" && FINGERPRINT_PATTERN.test(body.fingerprint)) {
+      if (fingerprint && fingerprint !== body.fingerprint)
+        throw new Error("Contacts changed during the scan; please scan again");
+      fingerprint = body.fingerprint;
+    } else cacheable = false;
+    retainedBytes += Buffer.byteLength(JSON.stringify(part));
+    if (retainedBytes > MAX_AUDIT_CACHE_BYTES) throw new Error("Contact scan results exceed the storage limit");
+    audit.handleCount += part.handleCount;
+    audit.noMatchCount += part.noMatchCount;
+    audit.singleCards.push(...part.singleCards);
+    audit.duplicates.push(...part.duplicates);
+    audit.conflicts.push(...part.conflicts);
   }
-  if (typeof body.fingerprint === "string" && FINGERPRINT_PATTERN.test(body.fingerprint)) {
-    try { writeAuditCache({ storeFingerprint: body.fingerprint, handleFingerprint, audit }, cachePath); }
+  function split(part: string[]): void {
+    if (part.length < 2) throw new Error("One contact returned too much data; review it individually");
+    const middle = Math.ceil(part.length / 2);
+    batch(part.slice(0, middle)); batch(part.slice(middle));
+  }
+  for (let offset = 0; offset < handles.length; offset += MAX_CONTACT_AUDIT_HANDLES)
+    batch(handles.slice(offset, offset + MAX_CONTACT_AUDIT_HANDLES));
+  if (cacheable && fingerprint) {
+    try { writeAuditCache({storeFingerprint: fingerprint, handleFingerprint, audit}, cachePath); }
     catch { /* caching is best-effort */ }
   }
-  return { audit, cached: false };
+  return {audit, cached: false};
 }
 
 export function resolveOnMac(
@@ -526,6 +553,8 @@ export interface ReviewRow extends ReviewPerson {
 export interface ReviewView {
   ok: true;
   view: "people" | "cards" | "scan" | "opened";
+  page?: number;
+  pageCount?: number;
   title: string;
   detail: string;
   rows: ReviewRow[];
@@ -573,8 +602,8 @@ export function scanHandles(value: unknown): string[] {
     for (const item of conversationPeople(raw)) {
       const key = identityKey(item.handle);
       if (!found.has(key)) found.set(key, item.handle);
-      if (found.size > MAX_CONTACT_AUDIT_HANDLES)
-        throw new Error("Scan supports up to 200 distinct contacts; review a conversation individually");
+      if (found.size > MAX_CONTACT_SCAN_HANDLES)
+        throw new Error("Contact scan exceeds 10,000 distinct handles");
     }
   }
   return [...found.values()];
@@ -590,17 +619,20 @@ export function cardView(handle: string, candidates: IdentityCandidate[]): Revie
   };
 }
 
-export function auditView(audit: ContactAudit): ReviewView {
+export function auditView(audit: ContactAudit, requestedPage = 0): ReviewView {
   const rows = (entries: ContactAuditEntry[], label: string): ReviewRow[] => entries.map((entry) => ({
     handle: entry.handle,
     name: entry.candidates.map((candidate) => candidate.name).join(" / ").slice(0, 160),
     detail: `${label} · ${entry.candidates.reduce((n, candidate) => n + candidate.recordCount, 0)} cards`,
     action: "candidates", token: "",
   }));
+  const allRows = [...rows(audit.conflicts, "Different names share this handle"), ...rows(audit.duplicates, "Possible duplicate")];
+  const pageCount = Math.max(1, Math.ceil(allRows.length / SCAN_PAGE_SIZE));
+  const page = Math.min(finiteInteger(requestedPage, "scan page", 0, MAX_CONTACT_SCAN_HANDLES), pageCount - 1);
   return {
-    ok: true, view: "scan", title: "Contact scan",
+    ok: true, view: "scan", title: "Contact scan", page, pageCount,
     detail: `${audit.handleCount} checked · ${audit.duplicates.length} possible duplicates · ${audit.conflicts.length} name conflicts · ${audit.singleCards.length} single cards · ${audit.noMatchCount} unmatched`,
-    rows: [...rows(audit.conflicts, "Different names share this handle"), ...rows(audit.duplicates, "Possible duplicate")],
+    rows: allRows.slice(page * SCAN_PAGE_SIZE, (page + 1) * SCAN_PAGE_SIZE),
   };
 }
 
@@ -623,8 +655,8 @@ export function runReview(
   }
   if (operation === "audit") {
     const handles = scanHandles(request.conversations);
-    if (!handles.length) return { ok: true, view: "scan", title: "Contact scan", detail: "No contact handles to scan", rows: [] };
-    return auditView(auditContactsOnMac(handles, runner, cachePath).audit);
+    if (!handles.length) return { ok: true, view: "scan", title: "Contact scan", detail: "No contact handles to scan", rows: [], page: 0, pageCount: 1 };
+    return auditView(auditContactsOnMac(handles, runner, cachePath).audit, Number(request.page ?? 0));
   }
   if (operation === "open") {
     const result = resolveOnMac("open", request.handle, request.token, runner);
@@ -639,7 +671,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }, 5000);
   try {
-    const request = parseRequest(await readStdinBounded());
+    const request = parseRequest(await readStdinBounded(process.stdin as any, process.argv[2] === "audit" ? MAX_SCAN_REQUEST_BYTES : MAX_IDENTITY_REQUEST_BYTES));
     clearTimeout(deadline);
     emit(runReview(process.argv[2] || "", request));
   } catch (error) {
