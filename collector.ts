@@ -419,6 +419,19 @@ export function detectSelfChats(msgs: ImsgMessage[], minTwins = 1): string[] {
   return [...chats].filter(Boolean);
 }
 
+/** The union of two tapback lists (one entry per emoji + sender); undefined when both are empty. */
+export function mergeTapbacks(a?: Tapback[] | null, b?: Tapback[] | null): Tapback[] | undefined {
+  const all = [...(a ?? []), ...(b ?? [])];
+  if (all.length === 0) return undefined;
+  const seen = new Set<string>();
+  return all.filter((t) => {
+    const k = `${t.emoji}\u0000${t.from_me}\u0000${t.by ?? ""}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 export function dedupeSelfEcho(msgs: ImsgMessage[], knownSelfChats: string[] = []): ImsgMessage[] {
   const contextKey = (m: ImsgMessage) => `${chatKey(m)}\u0000${m.handle || ""}\u0000${m.ts}`;
   const contentKey = (m: ImsgMessage) => `${contextKey(m)}\u0000${m.text}`;
@@ -427,6 +440,17 @@ export function dedupeSelfEcho(msgs: ImsgMessage[], knownSelfChats: string[] = [
   const emptySent = new Set(
     msgs.filter((m) => selfChats.has(chatKey(m)) && m.from_me && m.text === "").map(contextKey),
   );
+  // Messages attaches a tapback to ONE of the two rows of a self-thread
+  // message — whichever the reacting device considers the message. Whatever
+  // is dropped below hands its tapbacks to the row that stays, so a reaction
+  // on your own note is seen no matter which twin carried it.
+  const emptySentTapbacks = new Map<string, Tapback[] | undefined>();
+  for (const m of msgs) {
+    if (selfChats.has(chatKey(m)) && m.from_me && m.text === "") {
+      const k = contextKey(m);
+      emptySentTapbacks.set(k, mergeTapbacks(emptySentTapbacks.get(k), m.tapbacks));
+    }
+  }
   const retractedSent = new Set(
     msgs.filter((m) => selfChats.has(chatKey(m)) && m.from_me && m.retracted === true).map(contextKey),
   );
@@ -453,14 +477,15 @@ export function dedupeSelfEcho(msgs: ImsgMessage[], knownSelfChats: string[] = [
       const key = contentKey(m);
       const idx = selfText.get(key);
       if (idx !== undefined && out[idx]!.from_me !== m.from_me) {
-        if (m.from_me) out[idx] = { ...out[idx]!, from_me: true };
+        const kept = out[idx]!;
+        out[idx] = { ...kept, from_me: kept.from_me || m.from_me, tapbacks: mergeTapbacks(kept.tapbacks, m.tapbacks) };
         continue;
       }
       selfText.set(key, out.length);
     }
 
     if (emptySent.has(context) && !m.from_me) {
-      out.push({ ...m, from_me: true });
+      out.push({ ...m, from_me: true, tapbacks: mergeTapbacks(m.tapbacks, emptySentTapbacks.get(context)) });
       continue;
     }
     out.push(m);
