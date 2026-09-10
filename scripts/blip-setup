@@ -49,7 +49,7 @@ if ! [[ "$host" =~ ^([A-Za-z0-9][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9._:-]*$ ]
 fi
 
 # 1. config. Keys the installer does not own — push_read, link_previews,
-# ui_font, ui_font_size, anything set by hand — must survive a re-run; a
+# spell, ui_font, ui_font_size, anything set by hand — must survive a re-run; a
 # wholesale rewrite silently re-enabled what the user had turned off (Astra #18).
 kept=""
 [[ -r "$conf" ]] && kept="$(grep -vE '^[[:space:]]*(#|$|host=|remote_bin=|python=|key=|automation=|country_code=)' "$conf" || true)"
