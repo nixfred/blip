@@ -37,6 +37,9 @@
   message twice, and Messages attaches a tapback to whichever row the reacting
   device considers the message; folding the two rows into one dropped the
   other row's tapbacks. The kept row now carries both.
+- **Reactions on pictures show.** A message that is only a picture (or a file)
+  has no text bubble, and that is where the tapback pill lived, so a reaction
+  on a picture was never seen. The pill now sits on the picture or chip itself.
 
 ## 2.4.0 — 2026-09-08 — read it from the keyboard, send without the wait
 

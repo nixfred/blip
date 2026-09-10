@@ -701,3 +701,11 @@ test("a thread response taken before a local send or failure cannot replace bubb
    expect(panel).toContain('active: root.surfaceOpen && !root.contactsOpen && root.shareUrl === ""');
    expect(panel).toContain('String(root.active.chat) === String(thread.chat)) root.focusDefault()');
  });
+// A picture-only message has no text bubble, so its tapback pill must live on
+// the picture (or file chip) itself, through the one shared TapbackPill.
+test("tapbacks on picture-only messages get a pill on the picture", () => {
+  expect(panel).toContain("component TapbackPill: Rectangle {");
+  expect(panel.split("TapbackPill {").length - 1).toBe(3);   // text bubble, picture, file chip
+  expect(panel).toContain('readonly property bool pillHere: index === 0 && String(bubbleRow.modelData.text || "") === ""');
+  expect(panel).toContain("+ (pillHere ? Style.space(12) : 0)");
+});
