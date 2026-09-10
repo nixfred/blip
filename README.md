@@ -336,7 +336,12 @@ wizard pauses here and re-checks when you press Enter)
 
 - *Full Disk Access* → System Settings → Privacy & Security → Full Disk
   Access → add `/usr/libexec/sshd-keygen-wrapper` (⌘⇧G in the file picker).
-  That is what lets an ssh session read `chat.db`.
+  That is what lets an ssh session read `chat.db` — **any** ssh session: the
+  grant is per `sshd-keygen-wrapper`, not per key, so from here on every key
+  that can open a shell on this account can read your messages. Blip's own
+  key runs only the bridge tools (step 2), and reading messages is their job;
+  keep the other keys few, and see [docs/SECURITY.md](docs/SECURITY.md) for
+  pinning them or closing port 22 one layer down.
 - *Automation → Messages* → the first send from ssh pops an Allow prompt on
   the Mac's screen; click it once — **within about two minutes, at the Mac.**
   An unanswered prompt is recorded by macOS as a *denial* (`auth_reason 9`,
