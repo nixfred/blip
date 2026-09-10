@@ -1416,17 +1416,36 @@ FocusScope {
     sendProc.stdinEnabled = false
   }
 
-  Process { id: copyProc }
+  property string copyFeedback: ""
+  Process {
+    id: copyProc
+    onExited: function(code, status) {
+      copyTimeout.stop()
+      root.copyFeedback = code === 0 && status === 0 ? "Copied to clipboard" : "Could not copy to clipboard"
+      copyFeedbackTimer.restart()
+    }
+  }
+  Timer {
+    id: copyTimeout
+    interval: 5000
+    onTriggered: {
+      copyProc.running = false
+      root.copyFeedback = "Could not copy to clipboard"
+      copyFeedbackTimer.restart()
+    }
+  }
+  Timer { id: copyFeedbackTimer; interval: 2200; onTriggered: root.copyFeedback = "" }
   function copyText(t) {
     if (t === "") return
     // stdin, not argv: message text can be long and can start with "-".
-    copyProc.command = ["sh", "-c", "wl-copy"]
+    copyFeedback = ""
+    copyFeedbackTimer.stop()
+    copyTimeout.restart()
+    copyProc.command = ["/usr/bin/wl-copy"]
     copyProc.stdinEnabled = true
     copyProc.running = true
     copyProc.write(t)
     copyProc.stdinEnabled = false
-    note = "copied"
-    noteTimer.restart()
   }
   Timer { id: noteTimer; interval: 1500; onTriggered: if (root.note === "copied" || root.note === "sent to LocalSend") root.note = "" }
 
@@ -3596,6 +3615,32 @@ FocusScope {
     fontFamily: root.fontFamily
     fontSize: root.fontBodySmall
     onClosed: root.focusDefault()
+    onCopyRequested: function(text) { root.copyText(text) }
+  }
+
+  // Copy feedback must remain visible above contact review and other subviews.
+  // Only fixed status text is shown; copied contents never enter a notification.
+  Rectangle {
+    objectName: "blipCopyFeedback"
+    visible: root.copyFeedback !== ""
+    z: 1000
+    anchors.horizontalCenter: parent.horizontalCenter
+    anchors.bottom: parent.bottom
+    anchors.bottomMargin: Style.space(56)
+    width: Math.max(0, Math.min(parent.width - Style.space(16), copyFeedbackText.implicitWidth + Style.space(24)))
+    height: copyFeedbackText.implicitHeight + Style.space(16)
+    radius: Style.cornerRadius
+    color: Color.background
+    border.width: 1
+    border.color: root.copyFeedback === "Copied to clipboard" ? root.accent : root.urgent
+    Text {
+      id: copyFeedbackText
+      width: Math.max(0, parent.width - Style.space(24))
+      wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter
+      anchors.centerIn: parent
+      text: root.copyFeedback; textFormat: Text.PlainText
+      color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontCaption
+    }
   }
 
     // drag a file from a file manager onto the open conversation → draft chip

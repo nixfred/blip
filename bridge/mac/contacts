@@ -644,6 +644,23 @@ def _cmd_resolve(args):
         emit_resolve({"ok": True, "fingerprint": fingerprint,
                       **audit_contact_handles(request.get("handles"))})
         return
+    if operation == "details":
+        original, _, candidate, record, number, account = selected_card(
+            request.get("handle"), request.get("token"))
+        response = run_contact_repair({"operation": "details", "personUids": [record["uid"]]})
+        fields = response.get("fields")
+        if not isinstance(fields, list) or len(fields) > 160:
+            raise RuntimeError("Contacts returned invalid detail fields")
+        for field in fields:
+            if (not isinstance(field, dict) or not isinstance(field.get("key"), str)
+                    or len(field["key"]) > 40 or not isinstance(field.get("label"), str)
+                    or len(field["label"]) > 80 or not isinstance(field.get("value"), str)
+                    or len(field["value"]) > 4096):
+                raise RuntimeError("Contacts returned an invalid detail field")
+        emit_resolve({"ok": True, "handle": original, "token": request["token"],
+                      "name": candidate["name"], "sourceName": candidate["cards"][number - 1]["sourceName"],
+                      "accountNumber": account, "fields": fields})
+        return
     if operation == "open":
         _, _, selected, selected_record, selected_card_number, selected_account_number = selected_card(
             request.get("handle"), request.get("token")
@@ -666,7 +683,7 @@ def _cmd_resolve(args):
         })
         return
     raise ValueError(
-        "operation must be candidates, fingerprint, audit, or open"
+        "operation must be candidates, fingerprint, audit, details, or open"
     )
 
 

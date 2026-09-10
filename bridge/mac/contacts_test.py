@@ -264,5 +264,30 @@ class SourceOrderTests(unittest.TestCase):
         ])
 
 
+class ContactDetailsTests(unittest.TestCase):
+    def test_details_resolves_exact_card_and_returns_fields(self):
+        token = "sha256:" + "a" * 64
+        fields = [{"key": "firstName", "label": "", "value": "Example"}]
+        selected = ("+15551234567", "key", {"name": "Example Person", "cards": [{"sourceName": "iCloud"}]},
+                    {"uid": "synthetic-card"}, 1, 1)
+        with mock.patch.object(contacts, "read_resolve_request", return_value={"operation": "details", "handle": "+15551234567", "token": token}), \
+             mock.patch.object(contacts, "selected_card", return_value=selected) as resolve, \
+             mock.patch.object(contacts, "run_contact_repair", return_value={"ok": True, "fields": fields}) as describe, \
+             mock.patch.object(contacts, "emit_resolve") as emit:
+            contacts._cmd_resolve(None)
+        resolve.assert_called_once_with("+15551234567", token)
+        describe.assert_called_once_with({"operation": "details", "personUids": ["synthetic-card"]})
+        self.assertEqual(emit.call_args.args[0]["fields"], fields)
+        self.assertEqual(emit.call_args.args[0]["token"], token)
+
+    def test_details_rejects_oversized_fields(self):
+        selected = ("+15551234567", "key", {}, {"uid": "synthetic-card"}, 1, 1)
+        with mock.patch.object(contacts, "read_resolve_request", return_value={"operation": "details"}), \
+             mock.patch.object(contacts, "selected_card", return_value=selected), \
+             mock.patch.object(contacts, "run_contact_repair", return_value={"fields": [{"key": "note", "label": "", "value": "x" * 4097}]}):
+            with self.assertRaisesRegex(RuntimeError, "invalid detail"):
+                contacts._cmd_resolve(None)
+
+
 if __name__ == "__main__":
     unittest.main()
