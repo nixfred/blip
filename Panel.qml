@@ -90,7 +90,7 @@ Panel {
     owner: root.barIdentity
     bar: root.bar
     open: root.opened
-    focusTarget: view.inThread ? view.composeEditor : keyCatcher
+    focusTarget: view.inThread ? view.composeEditor : view.navigationKeys
     readonly property var fittedSize: PanelSize.fitSize(
       root.preferredWidth || Style.space(352),
       root.preferredHeight || panel.fittedContentHeight(
@@ -124,7 +124,7 @@ Panel {
         foreground: root.bar ? root.bar.foreground : Color.foreground
         urgent: root.bar ? root.bar.urgent : Color.urgent
         themeFont: root.bar ? root.bar.fontFamily : Style.font.family
-        onNavigationFocusRequested: keyCatcher.forceActiveFocus()
+        onNavigationFocusRequested: view.navigationKeys.forceActiveFocus()
       }
     }
     MouseArea {

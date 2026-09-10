@@ -289,7 +289,8 @@ describe("QML safety invariants", () => {
       const fn = qmlFunction(name);
       expect(fn).toContain("Math.max(0, Math.min(");
       expect(fn).not.toContain("%");
-      expect(fn).toContain("scrollCursorIntoView()");
+      // the thread cursor goes through cursorMoved() (scroll + split-view preview)
+      expect(fn).toMatch(/scrollCursorIntoView\(\)|cursorMoved\(\)/);
     }
     const scroll = qmlFunction("scrollCursorIntoView");
     expect(scroll).toContain("row.mapToItem(threadFlick.contentItem, 0, 0)");
@@ -359,7 +360,8 @@ describe("QML safety invariants", () => {
     const page = qmlFunction("pageBubbles");
     expect(page.indexOf("if (edge === bubbleCursor && bubbleCursorItem)")).toBeLessThan(page.indexOf("scrollConversation(dy < 0 ?"));
     // only a WHOLLY visible row counts as the edge, else a sliver of the row above turns paging into single steps
-    expect(qmlFunction("edgeVisibleBubble")).toContain("it.y >= top - 1 : it.y + it.height <= bottom + 1");
+    expect(qmlFunction("edgeVisible")).toContain("y >= top - 1 : y + it.height <= bottom + 1");   // shared with the lists
+    expect(page).toContain("edgeVisible(flick, items, dy)");
     expect(page).toContain("leaveBubbles()");
   });
 
@@ -425,11 +427,29 @@ describe("QML safety invariants", () => {
     expect(qmlFunction("peekCursor")).toContain("!cursorShown");
     // The sidebar's spacing must not follow inThread in split view (8px shift).
     expect(panel).toContain("spacing: root.splitView ? Style.space(10) : (root.inThread ? Style.space(2) : Style.space(6))");
-    expect(qmlFunction("moveCursor")).toContain("if (splitView) peekTimer.restart()");
     // one place empties the pane; back() and resetToList() go through it
     expect(qmlFunction("clearThread")).toContain("peekTimer.stop()");
     expect(qmlFunction("clearThread")).toContain("peeking = false");
     for (const name of ["back", "resetToList"]) expect(qmlFunction(name)).toContain("clearThread()");
+    expect(qmlFunction("moveCursor")).toContain("cursorMoved()");
+  });
+
+  test("PgUp/PgDn/Home/End page whichever list is showing, in both hosts", () => {
+    // One edge finder and one pager for all three lists; the panel parks
+    // list-mode focus inside the view so the keys its catcher ignores arrive.
+    expect(qmlFunction("edgeVisible")).toContain("y >= top - 1 : y + it.height <= bottom + 1");
+    const list = qmlFunction("activeList");
+    for (const rep of ["newRepeater", "searchRepeater", "pinnedRepeater", "chronologicalRepeater"]) expect(list).toContain(rep);
+    expect(qmlFunction("catchNavKey")).toContain("return listShowing && catchPagingKey(key)");
+    // paging and Home/End arm the split-view preview exactly like the arrows do
+    expect(qmlFunction("cursorMoved")).toContain("if (splitView) peekTimer.restart()");
+    expect(list).toContain("set: function(i) { cursor = i; cursorMoved() }");
+    expect(list).toContain("indexOf: function(it) { return indexOfChat(it.modelData.chat) }");
+    expect(panel).not.toContain("function edgeVisibleBubble");   // one edge finder for bubbles and lists
+    expect(panel.split("else if (root.catchPagingKey(event.key)) event.accepted = true").length - 1).toBe(2);
+    const panelQml = readFileSync(new URL("./Panel.qml", import.meta.url), "utf8");
+    expect(panelQml).toContain("focusTarget: view.inThread ? view.composeEditor : view.navigationKeys");
+    expect(panelQml).toContain("onNavigationFocusRequested: view.navigationKeys.forceActiveFocus()");
   });
 
   test("an old toast can still reopen its conversation (omarchy-exec-argv)", () => {
