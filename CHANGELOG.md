@@ -47,6 +47,10 @@
 - **Reactions on pictures show.** A message that is only a picture (or a file)
   has no text bubble, and that is where the tapback pill lived, so a reaction
   on a picture was never seen. The pill now sits on the picture or chip itself.
+- **List rows follow the theme's hover colour.** The thread list, pins, search
+  hits and new-message hits highlighted with a hard-coded 8 % foreground; they
+  now take Omarchy's `hover-cursor-fill-alpha` / `hover-cursor-color`, like the
+  conversation's bubble cursor already did. Default themes look the same.
 
 ## 2.4.0 — 2026-09-08 — read it from the keyboard, send without the wait
 
