@@ -264,7 +264,7 @@ describe("self-echo in the thread list", () => {
       "", {},
       { [guid]: { name: "", guid: "any;+;" + guid, participants: ["+15550100004", "+15550100005"] } },
     );
-    expect(threads[0]!.name).toBe("Jordan Blake, +15550100005");
+    expect(threads[0]!.name).toBe("Jordan Blake & +15550100005");
   });
 
   test("group threads expose named participants for explicit contact actions", () => {
@@ -942,6 +942,25 @@ describe("complete conversation list (mergeChats)", () => {
       last_text: "old news", last_from_me: true, last_handle: "+15559990000", last_name: "Quiet Q",
       pinned: false, pin_order: null, aliases: ["+15559990000"], pin_name: null },
   ];
+
+  test("unnamed groups use resolved participants in both list merge paths", () => {
+    const chat = {...chats[1]!, name:null};
+    const info = {name:"", guid:"any;+;"+chat.id,
+      participants:["+15551234567", "+15550001111"],
+      participantNames:{"+15551234567":"Pat", "+15550001111":"Sam"}};
+    const groups = {[chat.id]:info};
+    const quiet = mergeChats([], [chat], groups, {})[0]!;
+    expect(quiet.name).toBe("Pat & Sam");
+    const existing = {...quiet, name:chat.id};
+    expect(mergeChats([existing], [chat], groups, {})[0]!.name).toBe("Pat & Sam");
+    expect(mergeChats([], [{...chat,name:"Custom title"}], groups, {})[0]!.name).toBe("Custom title");
+    expect(mergeChats([], [chat], {[chat.id]:{...info,name:"Group title"}}, {})[0]!.name).toBe("Group title");
+    const aliasChat = {...chat,id:"chat123456",aliases:["chat123456",chat.id]};
+    const aliased = mergeChats([], [aliasChat], groups, {})[0]!;
+    expect(aliased.name).toBe("Pat & Sam");
+    expect(aliased.guid).toBe(info.guid);
+    expect(mergeChats([], [chat], {}, {})[0]!.name).toBe(chat.id);
+  });
 
   test("quiet conversations outside the window appear, newest first", () => {
     const out = mergeChats([windowThread], chats, { ce5a593a78af408282d61461ade89135: { name: "Lunch Crew", guid: "any;+;ce5a", participants: [] } }, { ce5a593a78af408282d61461ade89135: 2 });
@@ -1628,4 +1647,25 @@ describe("blip-setup: the key's from= pin", () => {
     expect(src).not.toContain("five bridge tools");
     expect(src).not.toContain("key_from=");   // no config knob: the pin follows the transport
   });
+});
+
+test("group labels prefer short names while participant details retain full names", () => {
+ const {groupName,groupParticipants,normalizeGroups,fetchGroups} = require('./collector');
+ const info={name:"",guid:"any;+;chat123",participants:["+15551234567"],participantNames:{"+15551234567":"Mary Jane Example"},participantShortNames:{"+15551234567":"Mary Jane"}};
+ expect(groupName('chat123',info,new Map())).toBe('Mary Jane');
+ expect(groupParticipants(info)[0].name).toBe('Mary Jane Example');
+ expect(groupName('chat123',{...info,name:'Custom group'},new Map())).toBe('Custom group');
+ expect(normalizeGroups({chat123:info}).chat123).toEqual(info);
+ const fetched=fetchGroups(()=>({status:0,stdout:JSON.stringify([{chat:'chat123',name:'',guid:info.guid,participants:info.participants,participant_names:info.participantNames,participant_short_names:info.participantShortNames}])}));
+ expect(fetched.chat123).toEqual(info);
+ expect(normalizeGroups({chat123:{...info,participantShortNames:[]}}).chat123.participantShortNames).toBeUndefined();
+});
+
+test("generated group labels join the last short name with an ampersand", () => {
+ const {groupName} = require('./collector');
+ const info={name:"",guid:"",participants:["a","b","c"],participantShortNames:{a:"Pat",b:"Sam",c:"Alex"}};
+ expect(groupName('chat123',info,new Map())).toBe('Pat, Sam & Alex');
+ expect(groupName('chat123',{...info,participants:['a','b']},new Map())).toBe('Pat & Sam');
+ expect(groupName('chat123',{...info,participants:['a']},new Map())).toBe('Pat');
+ expect(groupName('chat123',{...info,name:'Custom, title'},new Map())).toBe('Custom, title');
 });

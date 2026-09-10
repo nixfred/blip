@@ -24,6 +24,23 @@ def load_imsg():
 imsg = load_imsg()
 
 
+class ShortNameTests(unittest.TestCase):
+    def test_structured_short_names_preserve_multiword_names_and_safe_fallbacks(self):
+        original = imsg.name_for
+        saved = imsg._SHORT_NAMES
+        try:
+            imsg.name_for = lambda _: "Mary Jane Example"
+            imsg._SHORT_NAMES = {"Mary Jane Example": {"Mary Jane"}}
+            self.assertEqual(imsg.short_name_for("+15551234567"), "Mary Jane")
+            imsg._SHORT_NAMES = {"Mary Jane Example": {"Mary Jane", "Mary"}}
+            self.assertEqual(imsg.short_name_for("+15551234567"), "Mary Jane Example")
+            imsg._SHORT_NAMES = {}
+            self.assertEqual(imsg.short_name_for("+15551234567"), "Mary Jane Example")
+        finally:
+            imsg.name_for = original
+            imsg._SHORT_NAMES = saved
+
+
 class ChatProjectionTests(unittest.TestCase):
     def test_chat_json_deduplicates_parallel_service_rows(self):
         con = sqlite3.connect(":memory:")

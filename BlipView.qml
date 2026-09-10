@@ -774,6 +774,7 @@ FocusScope {
 
   property var avatarFiles: ({})     // handle → file:// url, "" = no photo
   property var avatarQueue: []
+  property bool avatarBusy: false // hold the request identity until stdout is consumed
   function requestAvatar(handle) {
     handle = String(handle || "")
     if (handle === "") return          // groups are welcome: avatar.ts asks for the group's own photo
@@ -795,7 +796,8 @@ FocusScope {
   }
   onSurfaceOpenChanged: if (surfaceOpen) root.retryBareAvatars()
   function pumpAvatar() {
-    if (avatarProc.running || avatarQueue.length === 0) return
+    if (avatarBusy || avatarProc.running || avatarQueue.length === 0) return
+    avatarBusy = true
     avatarProc.handle = avatarQueue.shift()
     // --retry skips the 24h "no photo" marker so a picture set after the
     // first ask (a new group photo, a Contacts card) shows up this session.
@@ -812,7 +814,8 @@ FocusScope {
         var m = Object.assign({}, root.avatarFiles)
         m[avatarProc.handle] = url
         root.avatarFiles = m
-        root.pumpAvatar()
+        root.avatarBusy = false
+        Qt.callLater(root.pumpAvatar)
       }
     }
     onExited: Qt.callLater(root.pumpAvatar)
@@ -2274,9 +2277,23 @@ FocusScope {
                         maskEnabled: true
                         maskSource: pinnedAvatarMask
                       }
+                      Loader {
+                        id: pinnedAvatarComposite
+                        anchors.fill: parent
+                        active: pinnedAvatarImg.status !== Image.Ready
+                          && root.isGroupId(String(modelData.chat || ""))
+                          && (modelData.participants || []).length > 0
+                        sourceComponent: GroupAvatar {
+                          participants: modelData.participants || []
+                          avatarFiles: root.avatarFiles
+                          foreground: root.foreground
+                          fontFamily: root.fontFamily
+                          onRequestAvatar: handle => root.requestAvatar(handle)
+                        }
+                      }
                       Text {
                         anchors.centerIn: parent
-                        visible: pinnedAvatarImg.status !== Image.Ready
+                        visible: pinnedAvatarImg.status !== Image.Ready && !pinnedAvatarComposite.active
                         text: root.avatarInitials(modelData)
                         color: root.foreground
                         font.family: root.fontFamily
@@ -2506,9 +2523,23 @@ FocusScope {
                         maskEnabled: true
                         maskSource: avatarMask
                       }
+                      Loader {
+                        id: avatarCircleComposite
+                        anchors.fill: parent
+                        active: avatarImg.status !== Image.Ready
+                          && root.isGroupId(String(modelData.chat || ""))
+                          && (modelData.participants || []).length > 0
+                        sourceComponent: GroupAvatar {
+                          participants: modelData.participants || []
+                          avatarFiles: root.avatarFiles
+                          foreground: root.foreground
+                          fontFamily: root.fontFamily
+                          onRequestAvatar: handle => root.requestAvatar(handle)
+                        }
+                      }
                       Text {
                         anchors.centerIn: parent
-                        visible: avatarImg.status !== Image.Ready
+                        visible: avatarImg.status !== Image.Ready && !avatarCircleComposite.active
                         text: root.avatarInitials(modelData)
                         color: root.foreground
                         font.family: root.fontFamily

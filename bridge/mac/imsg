@@ -302,6 +302,9 @@ def _dm_name(handle: str | None, chat_identifier: str | None) -> str | None:
     return name_for(chat_identifier) if _is_dm_id(chat_identifier) else None
 
 
+_SHORT_NAMES: dict[str, set[str]] = {}
+
+
 def name_for(handle: str | None) -> str | None:
     """Resolve a Messages handle (phone or email) to a Contacts display name.
     Lazily builds an in-memory index from all AddressBook source DBs on first
@@ -326,13 +329,17 @@ def name_for(handle: str | None) -> str | None:
             try:
                 con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
                 con.row_factory = sqlite3.Row
-                names = {
-                    r["pk"]: _card_name(r["first"], r["last"], r["org"], r["nick"])
-                    for r in con.execute(
-                        "SELECT Z_PK AS pk, ZFIRSTNAME AS first, ZLASTNAME AS last, "
-                        "ZORGANIZATION AS org, ZNICKNAME AS nick FROM ZABCDRECORD"
-                    )
-                }
+                cards = con.execute(
+                    "SELECT Z_PK AS pk, ZFIRSTNAME AS first, ZLASTNAME AS last, "
+                    "ZORGANIZATION AS org, ZNICKNAME AS nick FROM ZABCDRECORD"
+                ).fetchall()
+                names = {}
+                for card in cards:
+                    full = _card_name(card["first"], card["last"], card["org"], card["nick"])
+                    names[card["pk"]] = full
+                    short = card["first"] or card["nick"] or full
+                    if full and short:
+                        _SHORT_NAMES.setdefault(full, set()).add(short)
                 local: dict[str | Phone, str | None] = {}   # None = ambiguous within this source
                 for r in con.execute(
                     "SELECT ZOWNER AS pk, ZFULLNUMBER AS num FROM ZABCDPHONENUMBER"
@@ -380,6 +387,13 @@ def name_for(handle: str | None) -> str | None:
     parsed = _parse_phone(handle)
     near = {n for card, n in _PHONE_INDEX.items() if parsed and _same_number(parsed, card)}
     return near.pop() if len(near) == 1 else None
+
+
+def short_name_for(handle: str) -> str | None:
+    """Prefer the structured given name; never split a full name on spaces."""
+    full = name_for(handle)
+    choices = _SHORT_NAMES.get(full, set())
+    return next(iter(choices)) if len(choices) == 1 else full
 
 
 def unified_names(handles: list[str]) -> dict[str, dict[str, str]]:
@@ -1389,6 +1403,11 @@ def cmd_groups(con, args):
                                 or name_for(handle)
                                 or handle
                             )
+                            for handle in participant_lists[index]
+                        } if not args.no_names else {},
+                        "participant_short_names": {
+                            handle: contact_names.get(handle, {}).get("short")
+                                or short_name_for(handle) or handle
                             for handle in participant_lists[index]
                         } if not args.no_names else {},
                         "last": fmt_ts(r["last_date"]) if r["last_date"] else None,
