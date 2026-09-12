@@ -1,12 +1,12 @@
 Blip puts iMessage on Linux by treating a Mac you already own as the gateway. It went from a toy to something I use every hour of every day in about ten days, and almost none of that was me.
 
-51 pull requests merged. 11 people wrote them. 5 more filed issues that changed the code. Together they added 12,262 lines and deleted 1,173. More importantly they found the things I could not find, because I was staring at my own code and they were staring at their own Macs.
+51 pull requests merged. 11 people wrote them. 4 more sent PRs that have not landed. 4 more filed issues that changed the code. Together they added 12,262 lines and deleted 1,173. More importantly they found the things I could not find, because I was staring at my own code and they were staring at their own Macs.
 
 Every one of them, and what they actually built.
 
 ━━━━━━━━━━
 
-Fileri — Erik Fillipsveen, Oslo
+ERIK FILLIPSVEEN (github Fileri) — Oslo
 22 merged PRs. +2,503. The largest contributor to this project and it is not close.
 
 Contacts saved without a country code. Blip matched a phone number to a contact card on the last ten digits. That is a whole national number in North America and nothing anywhere else, so a Norwegian card saved as "123 45 678" never matched the handle +4712345678 and that person showed as a bare number. On one Norwegian address book, 99 of 386 numbers were saved that way. Erik found it because it was happening to his own card. He generated a region-to-calling-code table for 245 regions from libphonenumber, left the regeneration one-liner in the header, and implemented SHORT_NSN_MATCH with a floor of seven shared digits plus one refusal Contacts itself does not make: a North American card shorter than ten digits is missing its area code, so he refuses it rather than guessing. The exact key still wins whenever it hits, so nothing that already resolved could change. He understood the danger was not "no match" but "confidently wrong match."
@@ -21,11 +21,9 @@ He also found that Omarchy's own panel hotkeys never worked on Blip at all. The 
 
 He is not finished. He has an open issue arguing, with a measured log of 160 confirmed reactions and latency percentiles, that outbound tapbacks do NOT need SIP disabled, because the Accessibility line we already crossed reaches them. He built it, measured it, listed its failure modes honestly, then asked whether I wanted it before sending a PR. That is how you file a feature request.
 
-Erik has no X account I can find. Send me one and it goes at the top.
-
 ━━━━━━━━━━
 
-@jondkinney — Jon Kinney, De Pere WI
+JON KINNEY @jondkinney — De Pere, WI
 10 merged PRs. +5,332. The most code in the project.
 
 Jon shipped more lines than anyone while being repeatedly told to split things up, including by me, more than once. He never pushed back badly. He just came back with smaller, cleaner, independent PRs based on current main. That is a professional.
@@ -42,20 +40,7 @@ Plus composer accessibility with optional local spellcheck that keeps draft text
 
 ━━━━━━━━━━
 
-@adamgamble — Adam Gamble, Birmingham AL
-5 merged PRs. +816. He finds the bugs where the data model is wrong, which is the hardest kind to see.
-
-Family Sharing was renaming his wife. With Screen Time's Manage Contacts, each child's address book is mirrored onto the parent's Mac as its own CardDAV store. Contacts.app hides those, but Blip globbed every database on disk and let each one vote on a name. With two sons, the number saved in Adam's own contacts as Monica Gamble rendered as "Mom" in every thread, tile and group name. Two votes to one. He found the Accounts database flags those stores as child delegates, and dropped them before building the name index. Unreadable Accounts database falls back to exactly the previous behaviour.
-
-EXIF orientation, fixed at both layers. iPhone photos render sideways because rotation is an EXIF tag, sips preserves it converting HEIC, Qt ignores it by default, and imv — Omarchy's default viewer, what xdg-open launches — has no EXIF support at all. He set autoTransform so Qt applies the transform at decode time and the bubble sizes to the rotated shape, AND baked the orientation into the cached file with a bounds-checked walk of the JPEG markers that reads orientation without decoding pixels, then piped through jpegtran. Lossless, ~50ms on a 12MP photo, keeps the Display P3 profile, drops the EXIF block so nothing double-rotates later. He included a measured before/after table.
-
-Pinned tiles stopped popping in. Pin metadata only arrives on a deep poll, so every shallow poll rebuilt the list unpinned and the widget swapped its model for that. He cached pins (ids only, no content), re-applied them to shallow polls, made the widget overlay rather than replace, and made the first poll after a restart go deep so the pinned list is in memory before you ever open the panel.
-
-Security codes. A detector that requires a trigger word and takes the 4-8 digit token nearest it, so money, percentages and phone numbers never qualify. The code lives in memory five minutes and nowhere else — not in state, not in argv, and deliberately not in the notification daemon's on-disk history. And the typing path is the detail I still think about: he sends the code as key-state events over Hyprland's socket rather than using wtype, because Hyprland merges a virtual keyboard's keys with the modifiers still held from your hotkey, so digits typed while Super+Shift were down fired workspace binds instead. He found that the hard way and wrote it down so nobody reaches for wtype again.
-
-━━━━━━━━━━
-
-jefehoser
+DANNY CECIL (github jefehoser)
 5 merged PRs. +915. Five bugs found by actually living with the software.
 
 Copied files attach instead of pasting a path. File managers put text/uri-list on the clipboard, not image/png, so Ctrl+V on a photo you copied sent the local file path as an iMessage. He made the clipboard helper treat a local file URI as an attachment, exactly like drag-and-drop. Same PR replaced the single-line compose field with a wrapping one, because typing a normal sentence ran off the right edge.
@@ -66,11 +51,22 @@ Re-keyed group pins. Messages can give a group a new chat row after a re-invite 
 
 The app window restores where you left it instead of stealing focus onto your current workspace. He identifies his own window by process ID and a unique temporary title, because title-matching alone has burned this project before — a foreign window called "Blip…" once counted as ours.
 
-jefehoser has no X account published. Send me one.
+━━━━━━━━━━
+
+ADAM GAMBLE @adamgamble — Birmingham, AL
+5 merged PRs. +816. He finds the bugs where the data model is wrong, which is the hardest kind to see.
+
+Family Sharing was renaming his wife. With Screen Time's Manage Contacts, each child's address book is mirrored onto the parent's Mac as its own CardDAV store. Contacts.app hides those, but Blip globbed every database on disk and let each one vote on a name. With two sons, the number saved in Adam's own contacts as Monica Gamble rendered as "Mom" in every thread, tile and group name. Two votes to one. He found the Accounts database flags those stores as child delegates and dropped them before building the name index. An unreadable Accounts database falls back to exactly the previous behaviour.
+
+EXIF orientation, fixed at both layers. iPhone photos render sideways because rotation is an EXIF tag, sips preserves it converting HEIC, Qt ignores it by default, and imv — Omarchy's default viewer, what xdg-open launches — has no EXIF support at all. He set autoTransform so Qt applies the transform at decode time and the bubble sizes to the rotated shape, AND baked the orientation into the cached file with a bounds-checked walk of the JPEG markers that reads orientation without decoding pixels, then piped through jpegtran. Lossless, ~50ms on a 12MP photo, keeps the Display P3 profile, drops the EXIF block so nothing double-rotates later. He included a measured before/after table.
+
+Pinned tiles stopped popping in. Pin metadata only arrives on a deep poll, so every shallow poll rebuilt the list unpinned and the widget swapped its model for that. He cached pins (ids only, no content), re-applied them to shallow polls, made the widget overlay rather than replace, and made the first poll after a restart go deep so the pinned list is in memory before you ever open the panel.
+
+Security codes. A detector that requires a trigger word and takes the 4-8 digit token nearest it, so money, percentages and phone numbers never qualify. The code lives in memory five minutes and nowhere else — not in state, not in argv, and deliberately not in the notification daemon's on-disk history. And the typing path is the detail I still think about: he sends the code as key-state events over Hyprland's socket rather than using wtype, because Hyprland merges a virtual keyboard's keys with the modifiers still held from your hotkey, so digits typed while Super+Shift were down fired workspace binds instead. He found that the hard way and wrote it down so nobody reaches for wtype again.
 
 ━━━━━━━━━━
 
-@jmythoren — Johan Thorén, Manila
+JOHAN THORÉN @jmythoren — Manila
 3 merged PRs. +1,321. He made the full app window feel like an app instead of a bigger popout.
 
 Live search, and a ranking bug underneath it. The window ignored n, / and Esc that the popout already handled, and both searches waited for Enter. He fixed that and made search run as you type. But the real find was underneath: a lowercase query missed newer iMessage bodies entirely, because those live only in attributedBody, so a May hit could outrank an August one. He made the Mac-side search scan lower, upper and title-case needles, then ranked whole-word matches above substrings and then by timestamp. He also discovered the text field's change signal simply does not fire in that window, so it has to be polled — the kind of thing you only learn by fighting it.
@@ -81,18 +77,18 @@ And he read the upstream history. Omarchy 4.x turned off Hyprland's blur in a "S
 
 ━━━━━━━━━━
 
-@zachwilke_1 — Zach, Texas
+ZACH WILKE @zachwilke_1 — Texas
 1 merged PR. +501. Two fixes that changed how Blip feels.
 
 "Mom ❤️" and "Mom❤️" are the same person. The bridge treated two cards in one source sharing a number as ambiguity and named nobody — correct when the names differ, wrong when it is one card saved twice. A heavily used conversation was showing as a bare number because of it. He normalises through NFKC, casefold and whitespace stripping before calling a collision ambiguous, so the first spelling wins and two genuinely different names still resolve to nobody.
 
 Sending became instant. A send used to be ssh, then osascript, then a fixed 1.5 second wait for Messages to write the row, then a reload — about three seconds under an unchanged compose box. He made the bubble appear the moment you press Enter, with the field cleared so you can type the next one. In-flight sends live in memory only and ride every reload on stdin, never argv, and a reconciler keeps each provisional bubble until a real outbound row with the same text lands, one row per send, refusing any row older than the send minus clock skew so an early reload cannot make it blink. He measured it: 81 milliseconds from the call to the bubble being in the model.
 
-He also caught that our own CI was lying. A merged fork PR showed a failed workflow because the approval expired before any job ran — zero jobs, no logs, and an annotation that reads exactly like a test regression to whoever sent the PR. He filed it with run IDs and was careful to say he could not inspect our approval policy with a contributor token, so he would not assume what it was. That is a contributor protecting other contributors.
+He also caught that our own CI was lying. A merged fork PR showed a failed workflow because the approval expired before any job ran — zero jobs, no logs, and an annotation that reads exactly like a test regression to whoever sent the PR. He filed it with run IDs and was careful to say he could not inspect our approval policy with a contributor token, so he would not assume what it was. That is a contributor protecting other contributors. He also has an open PR moving timestamps to UTC across the bridge.
 
 ━━━━━━━━━━
 
-@tlehmanifold — Tobi Lehman, Portland OR
+TOBI LEHMAN @tlehmanifold — Portland, OR
 1 merged PR. +241. He solved political fundraising spam, and the reasoning is better than most design docs I have been paid to read.
 
 The insight: the number is disposable, it will be a different five-digit short code next week, so blocking it is whack-a-mole. What is NOT disposable is the platform's name and the opt-out footer the TCPA legally requires every one of those messages to carry. So the mute list matches phrases as well as handles, and that is the whole reason it works.
@@ -103,7 +99,7 @@ Then he put the cut in exactly the right place: before the unread ledger, the th
 
 ━━━━━━━━━━
 
-@joshuaswarren — Joshua Warren, Dallas
+JOSHUA WARREN @joshuaswarren — Dallas
 1 merged PR. +278. He fixed the case where Blip's badge disagreed with the phone in your pocket.
 
 iPhone Messages files Spam and Filter Unknown Senders as filtered chats, and the phone's badge ignores both. Blip read the same database and counted them, so the bar could show 3 unread while the phone showed 0. The mute list could not help, because that is per sender and per phrase — this is a folder.
@@ -112,14 +108,14 @@ Two config keys, and the thing I want to call out is that both default to off. H
 
 ━━━━━━━━━━
 
-@ezachrisen — Espen Zachrisen, Chicago
+ESPEN ZACHRISEN @ezachrisen — Chicago
 1 merged PR. +304. He built pinned conversations — the Favorites row across the top of the list, mirroring the pins you already set in Messages. It is the first thing anybody notices about the panel and it landed as one clean PR with tests.
 
 The care is in the places that bite. He made the pin-preference parsing tolerant, because that file is Apple's and its shape is not a contract you control. He merged pin metadata with backward-compatible defaults, so an older bridge that knows nothing about pins still works. He split the list into pinned and unpinned sections while preserving keyboard selection by chat identity rather than by row index, which is the detail that keeps the cursor from breaking when the sections reshuffle. And he documented that it is read-only: Blip mirrors your pins, it never writes them back.
 
 ━━━━━━━━━━
 
-tolewis — "Unhook Dev"
+TOLEWIS (github tolewis)
 1 merged PR. +17. Seventeen lines. Read this one anyway — best lines-to-impact ratio in the project.
 
 Group sends were failing with "Can't get chat id (-1728)". Messages was right, that chat does not exist. macOS keeps a separate chat row per service, so a group that has moved between iMessage, SMS and RCS leaves several rows sharing one identifier and differing only by GUID. Exactly one holds messages. The others are empty shells, and AppleScript cannot resolve an empty one.
@@ -128,18 +124,30 @@ Now the part that makes this great. The collector built its map keyed on the bar
 
 He quantified it instead of asserting it. On one Mac with 489 group rows: 28 identifiers had more than one row, and 27 of those resolved to a row with zero messages. Twenty-seven conversations that could not send.
 
-Seventeen lines, one NULL-ordering subtlety, twenty-seven broken conversations. No X account published — send me one, you have earned the tag.
+Seventeen lines, one NULL-ordering subtlety, twenty-seven broken conversations.
 
 ━━━━━━━━━━
 
-jethrojones — Jethro Jones
+JETHRO JONES (github jethrojones)
 1 merged PR. +34. He fixed the setup checker, which matters more than it sounds, because it is the first thing a new user sees and it was lying to them.
 
 The contacts check opened exactly one address book, and glob order is filesystem order, not sorted. Macs accumulate dead CardDAV sources whose database never opens no matter what permissions you grant. When a dead source happened to sort first, the wizard printed a red X and suggested a Full Disk Access fix that did nothing — because Full Disk Access was already granted, the check right above it passed, and contacts and avatars worked fine over the bridge. On his machine: 7 of 16 databases opened, contacts worked, and the checker said failure.
 
 He made it iterate every source, sorted so it is deterministic instead of order-dependent flapping, and fail only when nothing opens, which is the real missing-permission signal. The line now reads like "13950 contacts readable (7/16 sources, 9 stale skipped)". He built a harness with a dead source deliberately sorted ahead of a good one to prove it.
 
-No X account published. Send me one.
+━━━━━━━━━━
+
+THE FOUR WHOSE PRs HAVE NOT LANDED
+
+These arrived in the first week, when Blip was moving faster than I could review. Every one of them is real work and some of it I have since rebuilt by hand, which is my failure, not theirs.
+
+JORDAN WALSH (github jordanpwalsh, Red Hat) found that Blip would not load at all. The browser-focus command nested a single-quoted jq program inside a single-quoted QML string, so BlipView.qml failed to parse and took both the panel and the standalone window down with it. The cruellest part, which he spotted: a stale IPC handler still answered "app shown + focused", so the thing reported success while being completely broken. He passed the filter as a positional argument and added a regression test for the QML and shell quoting contract.
+
+LUKE MORRISON @lukejmorrison found that a new conversation to an Android number fails. Blip already sent SMS or RCS when a thread was already on that service, but a brand new chat starts as iMessage, and AppleScript does not fall back the way the Messages GUI does — it fails with error 22, not registered for iMessage. Worse, the failed bubble kept service iMessage, so pressing Enter again retried iMessage forever. He also pointed out why it matters beyond his own machine: if Omarchy ever vendors Blip, the first hour of texting a non-Apple phone looks broken.
+
+JOHN WASHBURN @washburnello fixed two things and dug properly into both. Double-clicking the bar icon flashed the bar transparent instead of opening the app, because Omarchy's own gesture area was catching the double-click that the widget button never emitted, so it fell through to the bar background. He traced it through WidgetButton, the module pointer and the bar's gesture handler, added a doublePressed signal, and swallowed the pending second click. He also independently found the Android SMS/RCS send path, with the observation that the chat list shows duplicate ids per service for the same number.
+
+STEVE BARRETT (github nova-centauri) sent the notification hardening: all/allow/off modes, skips for the open conversation and the self-thread, a batch cap so a catch-up after sleep cannot dump 150 cards at you, fail-closed parsing, and handle folding so +15550100011 and (555) 010-0011 are one person. It has not merged for one reason: I want a missing allowlist to stay badge-only, because this database is mostly bank alerts and 2FA codes and a fresh install must not fire twenty cards on its first catch-up. Every other idea in it is good and I still want it.
 
 ━━━━━━━━━━
 
@@ -147,15 +155,13 @@ THE PEOPLE WHO FILED THE ISSUES
 
 An issue that comes with real diagnosis is worth as much as a patch, because it points at something the maintainer cannot see from where he is standing.
 
-jacobaross filed the macOS 26.6.2 report where the Messages Automation grant could not be enabled — with the TCC database record attached, which was the whole diagnosis in one line: denied, reason Prompt Timeout. macOS gives that prompt about two minutes; our own checker killed its probe at 25 seconds and told you the prompt was "probably waiting on the Mac's screen." By the time anyone walked to the Mac the window had closed and macOS had written down a denial the Settings switch then refused to undo. He hypothesised exactly that, and he was right. Then he tested the fix, reported back that recovery worked with SIP still enabled, listed what he changed and what he left pinned so it was reproducible, and flagged that the checker had asked for an optional permission he never wanted and could not switch back off. That last note became a code change: Blip no longer fires a consent prompt nobody asked for.
+JACOB ROSS (github jacobaross) filed the macOS 26.6.2 report where the Messages Automation grant could not be enabled — with the TCC database record attached, which was the whole diagnosis in one line: denied, reason Prompt Timeout. macOS gives that prompt about two minutes; our own checker killed its probe at 25 seconds and told you the prompt was "probably waiting on the Mac's screen." By the time anyone walked to the Mac the window had closed and macOS had written down a denial the Settings switch then refused to undo. He hypothesised exactly that, and he was right. Then he tested the fix, reported back that recovery worked with SIP still enabled, listed what he changed and what he left pinned so it was reproducible, and flagged that the checker had asked for an optional permission he never wanted and could not switch back off. That last note became a code change: Blip no longer fires a consent prompt nobody asked for.
 
-dreinecke — David Reinecke, Johannesburg — filed that contact photos never showed, with the detail that the AddressBook stores the JPEG somewhere other than where we were looking. Contact photos are half of what makes Blip look like Messages instead of a terminal.
+DAVID REINECKE (github dreinecke, Johannesburg) filed that contact photos never showed, with the detail that the AddressBook stores the JPEG somewhere other than where we were looking. Contact photos are half of what makes Blip look like Messages instead of a terminal.
 
-znayer — Zain Nayer, San Francisco — filed the case where a DM is labelled with the raw phone number when your own message is the newest in the thread. A naming bug that only appears in threads where you spoke last, which is exactly what a maintainer never trips over in his own testing.
+ZAIN NAYER (github znayer, San Francisco) filed the case where a DM is labelled with the raw phone number when your own message is the newest in the thread. A naming bug that only appears in threads where you spoke last, which is exactly what a maintainer never trips over in his own testing.
 
-apexbenny — Benny — filed that only five lines are visible when composing. He was right, and the cause was good: the compose box caps at five lines and clips, but a Qt text area only scrolls to follow its caret when it lives inside a flickable. Anchored to fill a clipped slot, it kept laying text out below the visible area, so past the fifth line you were typing blind. Fixed.
-
-nova-centauri — Nova — sent the notification hardening PR: all/allow/off modes, skips for the open conversation and the self-thread, a batch cap so a catch-up after sleep cannot dump 150 cards at you, fail-closed parsing, and handle folding so +15550100011 and (555) 010-0011 are one person. It has not merged for one reason: I want a missing allowlist to stay badge-only, because this database is mostly bank alerts and 2FA codes and a fresh install must not fire twenty cards on its first catch-up. Every other idea in it is good and I still want it. Nova, the door is open.
+BENNY (github apexbenny) filed that only five lines are visible when composing. He was right, and the cause was good: the compose box caps at five lines and clips, but a Qt text area only scrolls to follow its caret when it lives inside a flickable. Anchored to fill a clipped slot, it kept laying text out below the visible area, so past the fifth line you were typing blind. Fixed.
 
 ━━━━━━━━━━
 
@@ -167,8 +173,8 @@ There is no chance I find bugs like SQLite sorting NULL last and silently select
 
 And if not for @dhh, Omarchy and AI agents, I would still be designing enterprise storage arrays. Yawn.
 
-51 pull requests. 11 authors. 5 more who filed issues that changed the code. 12,262 lines I did not write.
+51 pull requests. 15 contributors. 4 more who filed issues that changed the code. 12,262 lines I did not write.
 
 Thank you, all of you.
 
-A note on handles: an @ here is a verified X account, taken from that person's own GitHub profile or their own site and checked. A bare name is their GitHub handle, because I could not find an X account for them and I will not @ a name I have not verified — that tags a stranger. If you are in here without a tag, send me your handle and I will add it.
+A note on names and handles: every name here comes from the commit author on that person's own pull requests, not from a display name. An @ means an X account that person published on their own GitHub profile or their own site, which I then checked resolves to them. Ten of you I could not find an account for, so you are named without a tag rather than tagged wrongly. Send me your handle and I will add it.
