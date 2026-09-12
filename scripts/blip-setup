@@ -44,6 +44,39 @@ for dep in ffmpeg mpv; do command -v "$dep" >/dev/null 2>&1 || optional+=("$dep"
 if (( ${#optional[@]} )); then
   echo "• optional, for voice messages: sudo pacman -S --needed ${optional[*]}"
 fi
+
+# 0b. bun must be resolvable by the BAR, not just by this shell. Quickshell
+# inherits the graphical session environment, which never sources ~/.zshrc or
+# ~/.bashrc — so a bun installed by bun's own script into ~/.bun/bin is present
+# here and invisible there. Every widget action then fails to start, and since a
+# process that cannot start returns no useful status, the icon simply reads
+# "Mac unreachable" over a perfectly healthy bridge. Catch it here instead.
+bar_path=""
+# `|| true`: under pipefail a probe that finds nothing would end setup here.
+bar_pid="$(pgrep -x quickshell 2>/dev/null | head -1)" || true
+if [[ -n "$bar_pid" && -r "/proc/$bar_pid/environ" ]]; then
+  bar_path="$(tr '\0' '\n' < "/proc/$bar_pid/environ" | sed -n 's/^PATH=//p' | head -1)"
+fi
+[[ -n "$bar_path" ]] || bar_path="$(systemctl --user show-environment 2>/dev/null | sed -n 's/^PATH=//p' | head -1)" || true
+if [[ -n "$bar_path" ]] && ! (PATH="$bar_path"; command -v bun >/dev/null 2>&1); then
+  bun_real="$(command -v bun)"
+  # link target: the first entry of the bar's PATH that lives under $HOME
+  link_dir=""; IFS=: read -r -a bar_dirs <<< "$bar_path"
+  for d in "${bar_dirs[@]}"; do
+    case "$d" in "$HOME"/*) link_dir="$d"; break ;; esac
+  done
+  echo "✗ bun runs in this shell ($bun_real) but is NOT on the bar's PATH." >&2
+  echo "  Quickshell inherits the graphical session environment, which does not read your" >&2
+  echo "  shell rc, so every Blip action would fail to start and the icon would claim the" >&2
+  echo "  Mac is unreachable. Link it somewhere already on that PATH, then restart the shell:" >&2
+  if [[ -n "$link_dir" ]]; then
+    echo "    mkdir -p $link_dir && ln -sfn $bun_real $link_dir/bun" >&2
+  else
+    echo "    sudo ln -sfn $bun_real /usr/local/bin/bun" >&2
+  fi
+  echo "  Prefer a symlink over a second install: two copies drift to different versions." >&2
+  exit 69
+fi
 conf_dir="$HOME/.config/blip"
 conf="$conf_dir/bridge.conf"
 
