@@ -205,8 +205,13 @@ if ssh -n -o ConnectTimeout=6 -o BatchMode=yes -- "$host" true 2>/dev/null; then
     grep -vF -- '$pub' ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.blip.tmp || true; \
     printf '%s\n' '${from_opt}restrict,command=\"\$HOME/.blip/bin/blip-dispatch\" $pub' >> ~/.ssh/authorized_keys.blip.tmp; \
     mv ~/.ssh/authorized_keys.blip.tmp ~/.ssh/authorized_keys"
-  if [[ "$(ssh -n -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o ControlPath=none "$host" ping 2>/dev/null)" == pong ]] \
-     && ! ssh -n -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o ControlPath=none "$host" true >/dev/null 2>&1; then
+  # IdentityAgent=none is load-bearing: ssh offers agent-held keys BEFORE on-disk
+  # ones regardless of list order, and IdentitiesOnly only limits which keys may
+  # be offered, not the order they are tried in. So if the user's ssh_config pins
+  # an agent key for this host, that key wins, sshd hands back a normal shell, and
+  # this test reports "not confined" while authorized_keys on the Mac is correct.
+  if [[ "$(ssh -n -i "$key" -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o ControlPath=none "$host" ping 2>/dev/null)" == pong ]] \
+     && ! ssh -n -i "$key" -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o ControlPath=none "$host" true >/dev/null 2>&1; then
     if [[ -n "$from_opt" ]]; then
       from_list="${from_opt#from=\"}"; from_list="${from_list%\",}"
       echo "✓ dedicated key enrolled: $key can run only the Blip tools on $host, and only from ${from_list//,/ and }"
