@@ -112,9 +112,8 @@ describe("QML safety invariants", () => {
     expect(widget).toContain("root.windowVisible");                   // or the app window
   });
 
-  test("a link you SEND opens the sheet too, and the app button asks the host", () => {
-    expect(panel).toContain("var sentUrls = root.allUrls(completedText)");   // every link of the message
-    expect(panel).toContain("root.openShare(sentUrls, true)");
+  test("sending a link does not open the share sheet, and the app button asks the host", () => {
+    expect(panel).not.toContain("root.openShare(sentUrls, true)");
     expect(panel).toContain("function openApp()");
     expect(panel).toContain('hostWidget.showApp()');
     // the popout gets out of the way, and closes BEFORE the window is shown —
@@ -668,7 +667,7 @@ test("a selected link opens the share sheet, and the sheet has keys", () => {
   // send must not be opened by that Enter.
   expect(qmlFunction("shareKey")).toContain("if (Date.now() < shareKeysFrom) return false");
   expect(qmlFunction("openShare")).toContain("shareKeysFrom = Date.now() + (auto === true ? 700 : 0)");
-  expect(panel).toContain("root.openShare(sentUrls, true)");
+  expect(panel).not.toContain("root.openShare(sentUrls, true)");
   expect(qmlFunction("shareLink")).toContain("openShare(u, true)");
   const compose = panel.slice(panel.indexOf("id: composeField"));
   expect(compose.indexOf("if (root.shareKey(event.key)) { event.accepted = true; return }")).toBeLessThan(compose.indexOf("root.send()"));

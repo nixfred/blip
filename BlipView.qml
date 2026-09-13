@@ -207,7 +207,7 @@ FocusScope {
   property int shareCursor: 0      // highlighted action (mouse and keys agree)
   property real shareKeysFrom: 0   // Enter and digits act from this time on
   /** Open the sheet on one URL or a list (a message's links, first showing).
-   *  `auto`: it opened by itself — a link you sent, a link that arrived, IPC.
+   *  `auto`: it opened by itself — a link that arrived, IPC.
    *  The sheet is the warning either way (host, full URL, a button that says
    *  what Enter does), but for 700 ms after an auto sheet appears Enter and
    *  digits still belong to the draft, so a link landing as Enter is pressed
@@ -1561,10 +1561,6 @@ FocusScope {
       root.sendStamp = ""
       root.sendLocalId = ""
       if (code === 0) {
-        // A URL you just SHARED opens the sheet too (Fred, 2.3.0): send it,
-        // then offer the QR / LocalSend / copy for the same link.
-        var sentUrls = root.allUrls(completedText)
-        if (belongsHere && sentUrls.length > 0) Qt.callLater(function() { root.openShare(sentUrls, true) })
         // The bubble is already up; reload to swap it for the real row.
         root.reloadChat = completedChat
         reloadTimer.restart()

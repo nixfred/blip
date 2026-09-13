@@ -197,7 +197,7 @@ Linux side. If the Mac is asleep, the widget dims and says so.
 </p>
 
 <p align="center">
-  <sub>Right-click any link — or just send or receive one — and the share sheet comes up on it.</sub>
+  <sub>Right-click any link to open its share sheet. Incoming links can also open it automatically; sending a link does not.</sub>
 </p>
 
 ## Privacy
