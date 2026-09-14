@@ -69,7 +69,7 @@ export function normalizeHandle(value: unknown): string {
       throw new Error("handle is not a valid email address");
     return handle;
   }
-  if (!/^\+?[0-9][0-9 ()./-]{2,39}$/.test(handle))
+  if (!/^\+?[0-9(][0-9 ()./-]{2,39}$/.test(handle))
     throw new Error("handle is not a valid phone number");
   const digits = handle.replace(/\D/g, "");
   if (digits.length < 5) throw new Error("phone handle is too short");

@@ -100,7 +100,7 @@ FocusScope {
   readonly property color dim: Qt.alpha(foreground, 0.66)
   /** An editor owns the keyboard — the host's key catcher must stand down. */
   readonly property bool editorActive:
-    contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused
+    deleteLoader.active || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused
   readonly property alias composeEditor: composeField
   readonly property real contentHeightHint: listContent.implicitHeight
   /** The view wants keyboard navigation focus back (list mode). */
@@ -565,6 +565,7 @@ FocusScope {
     threadRunningChat = pendingThreadChat
     pendingThreadChat = ""
     root.threadPendingRevision = root.pendingRevision
+    root.threadDeleteRevision = root.deleteRevision
     var pending = root.pendingSends.filter(function(p) { return p.chat === threadRunningChat })
     threadProc.command = ["bun", root.threadScript, threadRunningChat, "80",
                           "--time-format", root.timeFormat,
@@ -1500,7 +1501,7 @@ FocusScope {
         if (!belongsHere) return
         // A send or failure happened after this request took its snapshot.
         // Keep the current bubbles and request a fresh snapshot on exit.
-        if (root.threadPendingRevision !== root.pendingRevision) {
+        if (root.threadPendingRevision !== root.pendingRevision || root.threadDeleteRevision !== root.deleteRevision) {
           root.requestThreadLoad(root.threadRunningChat)
           return
         }
@@ -2020,6 +2021,7 @@ FocusScope {
   /** Esc semantics for a host without a PanelKeyCatcher (the window): true if
    *  something was unwound, false if the host should close. */
   function unwind() {
+    if (deleteLoader.active) { if (!deleteLoader.item.busy) closeDelete(); return true }
     if (contactReview.opened) { contactReview.back(); return true }
     if (shareUrl !== "") { closeShare(); return true }
     if (catchEscape()) return true
@@ -2027,7 +2029,8 @@ FocusScope {
     return false
   }
   function focusDefault() {
-    if (contactReview.opened) contactReview.forceActiveFocus()
+    if (deleteLoader.active) deleteLoader.item.forceActiveFocus()
+    else if (contactReview.opened) contactReview.forceActiveFocus()
     else if (inThread) composeField.forceActiveFocus()
     else navigationFocusRequested()
   }
@@ -2040,7 +2043,7 @@ FocusScope {
 
   RowLayout {
     anchors.fill: parent
-    visible: !contactReview.opened
+    visible: !contactReview.opened && !deleteLoader.active
     spacing: 0
 
     // ------------------------------------------------------- thread pane
@@ -3065,6 +3068,10 @@ FocusScope {
                     id: chipRow
                     required property var modelData
                     required property int index
+                    TapHandler {
+                      acceptedButtons: Qt.RightButton
+                      onTapped: root.openMessageMenu(bubbleRow.modelData)
+                    }
                     // THE scroll killer (Fred: "each scroll gets smaller and
                     // smaller until it stops"): while reading history, image
                     // fetches complete and each chip ABOVE the viewport grows
@@ -3375,14 +3382,14 @@ FocusScope {
                       }
                     }
 
-                    // right-click on a LINK = share sheet; anywhere else = copy the whole message
+                    // Links keep their share sheet; message actions use a menu.
                     TapHandler {
                       acceptedButtons: Qt.RightButton
                       onTapped: function(eventPoint) {
                         var p = bubbleText.mapFromItem(bubble, eventPoint.position.x, eventPoint.position.y)
                         var l = bubbleText.hasLink ? bubbleText.linkAt(p.x, p.y) : ""
                         if (l && l !== "") root.openShare(String(l))
-                        else root.copyText(String(modelData.text || ""))
+                        else root.openMessageMenu(bubbleRow.modelData)
                       }
                     }
 
@@ -3704,6 +3711,60 @@ FocusScope {
     }
   }
 
+  property var messageContext: null
+  property var deletingMessage: null
+  property int deleteRevision: 0
+  property int threadDeleteRevision: 0
+  function openMessageMenu(message) {
+    if (deleteLoader.active) return
+    messageContext = Object.assign({}, message)
+    messageMenu.popup()
+  }
+  function closeDelete() {
+    var attempted = !!deleteLoader.item && deleteLoader.item.attempted
+    deletingMessage = null
+    if (attempted && active) requestThreadLoad(String(active.chat))
+    if (attempted && hostWidget) hostWidget.refresh(true)
+    focusDefault()
+  }
+  Menu {
+    id: messageMenu
+    MenuItem {
+      text: "Copy message"
+      enabled: !!root.messageContext && !!root.messageContext.text
+      onTriggered: root.copyText(String(root.messageContext.text || ""))
+    }
+    MenuItem {
+      text: "Delete message…"
+      enabled: !!root.messageContext && !!root.messageContext.messageId &&
+        !!root.messageContext.messageGuid && !!root.messageContext.messageChat &&
+        !root.messageContext.pending && !root.messageContext.failed && !root.messageContext.retracted
+      onTriggered: root.deletingMessage = Object.assign({}, root.messageContext)
+    }
+  }
+  Loader {
+    id: deleteLoader
+    objectName: "blipMessageDelete"
+    anchors.fill: parent
+    active: root.deletingMessage !== null
+    sourceComponent: Component {
+      MessageDelete {
+        message: root.deletingMessage
+        foreground: root.foreground; accent: root.accent
+        fontFamily: root.fontFamily; fontSize: root.fontBodySmall
+        onClosed: root.closeDelete()
+        onDeleted: {
+          root.deleteRevision++
+          root.bubbles = root.bubbles.filter(function(b) {
+            return b.messageGuid !== root.deletingMessage.messageGuid || b.messageId !== root.deletingMessage.messageId
+          })
+          root.bubblesJson = JSON.stringify(root.bubbles)
+          Qt.callLater(root.closeDelete)
+        }
+      }
+    }
+  }
+
   property var contactContext: null
   Menu {
     id: contactMenu
@@ -3723,6 +3784,7 @@ FocusScope {
     fontSize: root.fontBodySmall
     onClosed: root.focusDefault()
     onCopyRequested: function(text) { root.copyText(text) }
+    onContactSaved: if (root.hostWidget) root.hostWidget.refresh(true)
   }
 
   // Copy feedback must remain visible above contact review and other subviews.

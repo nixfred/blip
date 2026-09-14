@@ -19,7 +19,7 @@ inventory of what lands on disk.
 | `~/.cache/blip/linkpreview/` (0700, files 0600, 7-day TTL) | title, description and picture of pages linked in your messages, for links Messages did not decorate | anything from a page nobody linked you to |
 | `~/.cache/blip/avatars/` (0700, files 0600, 7-day TTL) | contact photos for people in your thread list, named by a hash of the handle; an empty `.none` marker for contacts without one | names, numbers |
 | `$XDG_RUNTIME_DIR/blip/` (tmpfs, 0700) | images pasted into the compose box; a 60s AddressBook dump (`contacts-dump.json`, names, phones, emails) for live new-message search; swept after an hour and gone at logout | message bodies |
-| `~/bin/imsg`, `~/bin/imsg-send`, `~/bin/contacts` | the bridge shim (a bash script) | — |
+| `~/bin/imsg`, `~/bin/imsg-send`, `~/bin/imsg-read`, `~/bin/imsg-delete`, `~/bin/contacts`, `~/bin/contact-save` | the bridge shim (a bash script) | — |
 
 **Marking a conversation read is visible to the sender.** Blip can now tell
 Messages on the Mac that you have read something (`push_read=` in
@@ -53,14 +53,20 @@ Threat model and the audit findings behind these notes: [SECURITY.md](SECURITY.m
 
 | Path | Contains |
 |---|---|
-| `~/.blip/bin/` | the bridge tools (`imsg`, `imsg-send`, `contacts`, `tcc-check`, `blip-check`) |
+| `~/.blip/bin/` | the bridge tools, including `contact-save` and `imsg-delete` |
+| `~/.blip/contact-save.lock`, `~/.blip/message-delete.lock` | empty files that serialize each kind of action; no contact or message data |
 | `~/.blip/src/` | the installer's copy of the same files |
 | `~/Pictures/.blip-outbox/<id>/` | a file you are sending, for the seconds until Messages copies it into its own store; then moved to `~/.blip/sent` (leftovers older than an hour are swept) |
 | `~/.blip/sent/<id>/` (200 MB LRU) | files Blip sent — kept because Messages often leaves the attachment record pointing at the staging path instead of copying it, and Blip would otherwise never be able to show your own photo again |
 
 The tools read `~/Library/Messages/chat.db`, the AddressBook database, and
 Messages' pinning preferences read-only, and drive Messages.app through
-AppleScript. They write nothing else. Messages.app itself keeps your
+AppleScript and Accessibility. Contact creation writes a new card through the
+native address book API. Message deletion is performed by Messages itself;
+the bridge verifies the result through a read-only database connection.
+Contact drafts stay in memory and cross bounded stdin. Deletion sends only
+the message identity from Linux; its text stays on the Mac during verification.
+Messages.app itself keeps your
 conversation history exactly as it always has.
 
 Contact review reads bounded names, account labels, matching-field counts,

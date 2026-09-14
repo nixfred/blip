@@ -226,7 +226,7 @@ def normalize_resolve_handle(value: object) -> tuple[str, str, bool]:
         if len(key) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+", key):
             raise ValueError("handle is not a valid email address")
         return handle, key, True
-    if not re.fullmatch(r"\+?[0-9][0-9 ()./-]{2,39}", handle):
+    if not re.fullmatch(r"\+?[0-9(][0-9 ()./-]{2,39}", handle):
         raise ValueError("handle is not a valid phone number")
     key = normalize_phone(handle)
     if len(key) < 5:

@@ -18,7 +18,7 @@ import sys
 # tcc-check is deliberately NOT reachable through the confined key: it drives
 # Mail/Calendar/Notes/Reminders and pops four Automation prompts on the Mac.
 # blip-check covers what Blip needs.
-TOOLS = {"imsg", "imsg-send", "imsg-read", "contacts", "blip-check"}
+TOOLS = {"imsg", "imsg-send", "imsg-read", "imsg-delete", "contacts", "contact-save", "blip-check"}
 
 
 def refuse(msg: str) -> None:

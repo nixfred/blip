@@ -23,12 +23,14 @@ FocusScope {
   property bool busy: false
   property var scanConversations: []
   property var selectedCard: null
+  property string savingHandle: ""
   visible: opened
   readonly property string helper: decodeURIComponent(Qt.resolvedUrl("contact-review.ts").toString().replace(/^file:\/\//, ""))
   signal closed()
   signal copyRequested(string text)
+  signal contactSaved()
 
-  function close() { selectedCard = null; opened = false; closed() }
+  function close() { selectedCard = null; savingHandle = ""; opened = false; closed() }
   function textField(value, maximum) { return typeof value === "string" ? value.slice(0, maximum) : "" }
   function metadata(thread) {
     return { chat: textField(thread.chat, 320), name: textField(thread.name, 160) }
@@ -60,6 +62,10 @@ FocusScope {
     request("audit", {conversations: scanConversations, page: page})
   }
   function back() {
+    if (savingHandle !== "") {
+      if (!saveLoader.item || !saveLoader.item.busy) savingHandle = ""
+      return
+    }
     if (selectedCard) { selectedCard = null; return }
     if (busy) return
     if (overview) { model = overview; overview = null; error = ""; notice = "" }
@@ -123,6 +129,21 @@ FocusScope {
   }
 
   Loader {
+    id: saveLoader
+    anchors.fill: parent
+    active: root.savingHandle !== ""
+    sourceComponent: ContactSave {
+      handle: root.savingHandle
+      foreground: root.foreground; accent: root.accent; fontFamily: root.fontFamily; fontSize: root.fontSize
+      onClosed: {
+        var handle = root.savingHandle
+        root.savingHandle = ""
+        root.request("candidates", {handle: handle})
+      }
+      onSaved: root.contactSaved()
+    }
+  }
+  Loader {
     anchors.fill: parent
     active: root.selectedCard !== null
     sourceComponent: ContactDetails {
@@ -138,7 +159,7 @@ FocusScope {
     }
   }
   ColumnLayout {
-    visible: root.selectedCard === null
+    visible: root.selectedCard === null && root.savingHandle === ""
     anchors.fill: parent
     spacing: Style.space(10)
     RowLayout {
@@ -274,6 +295,15 @@ FocusScope {
         foreground: root.foreground; accent: root.accent; fontFamily: root.fontFamily; fontSize: root.fontSize
         onClicked: root.scan(root.model.page + 1)
       }
+    }
+    ContactButton {
+      Layout.fillWidth: true
+      text: "Save new contact"
+      visible: root.model !== null && root.model.view === "cards" && root.model.rows.length === 0
+      enabled: !root.busy && root.error === ""
+      foreground: root.foreground; accent: root.accent
+      fontFamily: root.fontFamily; fontSize: root.fontSize
+      onClicked: root.savingHandle = root.model.detail
     }
     ContactButton {
       Layout.fillWidth: true

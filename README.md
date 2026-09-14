@@ -84,7 +84,7 @@ people who showed up with pull requests. What is in it now:
 - **Search** conversations by name, then messages; **new conversation** from a
   contact search; **reply from a toast**; failed-delivery flags.
 - **One source.** The Mac-side tools ship in this repo; `blip-setup` installs
-  everything including a dedicated ssh key the Mac confines to the five
+  everything including a dedicated ssh key the Mac confines to the
   bridge tools.
 - **Audited.** A full security + privacy audit, every finding fixed or
   documented — [docs/SECURITY.md](docs/SECURITY.md), [docs/PRIVACY.md](docs/PRIVACY.md).
@@ -321,7 +321,8 @@ omarchy plugin add https://github.com/nixfred/blip.git --enable
 
 It writes `~/.config/blip/bridge.conf`, adds an ssh ControlMaster block
 (polling costs ~50 ms instead of a handshake), installs the bridge shim as
-`~/bin/imsg`, `~/bin/imsg-send`, `~/bin/contacts`, copies the Mac tools to
+`~/bin/imsg`, `~/bin/imsg-send`, `~/bin/imsg-read`, `~/bin/imsg-delete`,
+`~/bin/contacts`, `~/bin/contact-save`, copies the Mac tools to
 `~/.blip/bin` on the Mac and runs `install.sh` there, generates a
 **dedicated ssh key** (`~/.ssh/blip_ed25519`) that the Mac confines to the
 bridge tools and nothing else, then smoke-tests the bridge without printing
@@ -529,11 +530,11 @@ omarchy-restart-shell
 (`omarchy plugin disable nixfred.blip` instead, to take it off the bar but keep
 the checkout.)
 
-**2. The shims.** `blip-setup` installs `blip-shim` as four tools in `~/bin`,
+**2. The shims.** `blip-setup` installs `blip-shim` as six tools in `~/bin`,
 backing up anything it displaced as `<tool>.pre-blip.<epoch>`:
 
 ```bash
-rm -f ~/bin/imsg ~/bin/imsg-send ~/bin/imsg-read ~/bin/contacts
+rm -f ~/bin/imsg ~/bin/imsg-send ~/bin/imsg-read ~/bin/imsg-delete ~/bin/contacts ~/bin/contact-save
 ls ~/bin/*.pre-blip.* 2>/dev/null        # restore any of these you want back
 ```
 
@@ -575,7 +576,7 @@ them, and they belong to `/usr/libexec/sshd-keygen-wrapper` rather than to
 Blip — anything else you reach over ssh may depend on them, which is why they
 are not part of the steps above. To revoke anyway: System Settings ▸ Privacy &
 Security ▸ **Full Disk Access**, **Automation**, **Contacts** and, if you
-enabled mark-read on the Mac, **Accessibility**, removing the
+enabled mark-read or message deletion on the Mac, **Accessibility**, removing the
 `sshd-keygen-wrapper` entry from each. See [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Contact review
@@ -599,6 +600,19 @@ The scan cache is private and reused only when both the handle set and the Mac
 Contacts fingerprint still match. The feature adds no settings page or display
 name overrides. Configuration stays in `bridge.conf`. Review requires no Swift
 helper; the optional availability check needs Automation → Contacts on the Mac.
+
+If no card matches a sender, **Save new contact** lets you enter a name, review
+the fields, and save a new card to the Mac. To remove an individual message,
+right-click its bubble or attachment and choose **Delete message…**. Deletion
+requires confirmation and moves the message to Messages' Recently Deleted;
+it does not unsend it. See the [Mac action setup guide](docs/MAC-ACTIONS.md)
+for automated helper installation, permission checks, and the one-time macOS
+approval steps.
+
+Message deletion currently supports **English Messages only** and requires an
+awake, unlocked Mac with Messages open. A Mac without a monitor works, but use
+Screen Sharing to unlock its desktop first. Deletion brings Messages forward;
+see [using a Mac without a monitor](docs/MAC-ACTIONS.md#a-mac-without-a-monitor).
 
 ## Keyboard
 

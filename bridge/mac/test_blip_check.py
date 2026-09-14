@@ -45,6 +45,21 @@ class OptInMarkread(unittest.TestCase):
             return False, "Accessibility not granted"
 
         self.mod.check_markread = counted
+        self.mutation_calls = 0
+        def mutations():
+            self.mutation_calls += 1
+            return {"message_delete": (False, "missing"), "contact_save": (True, "ready")}
+        self.mod.check_mutations = mutations
+
+    def test_action_checks_are_explicit_and_missing_permissions_fail_when_requested(self):
+        _, code = self.run_main(["--json"])
+        self.assertEqual(self.mutation_calls, 0)
+        self.assertEqual(code, 0)
+        out, code = self.run_main(["--json", "--mutations"])
+        self.assertEqual(self.mutation_calls, 1)
+        self.assertEqual(self.markread_calls, 0)
+        self.assertEqual(code, 1)
+        self.assertIn("Accessibility", json.loads(out)["message_delete"]["fix"])
 
     def run_main(self, argv: list[str]) -> tuple[str, int]:
         self.mod.sys.argv = ["blip-check", *argv]

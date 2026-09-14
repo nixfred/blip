@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# blip-shim — the Linux side of Blip's Mac bridge. Installed under three
-# names (imsg, imsg-send, contacts); dispatches on its own basename and execs
-# the matching tool on the Mac over ssh.
+# blip-shim — the Linux side of Blip's Mac bridge. blip-setup installs it as
+# imsg, imsg-send, imsg-read, imsg-delete, contacts, and contact-save. It
+# dispatches on its own basename and execs the matching Mac tool over ssh.
 #
 # iMessage is macOS-only: chat.db is TCC-protected and AppleScript send needs
 # Messages.app, so every query and send proxies to the Mac. sshd on macOS
@@ -55,8 +55,8 @@ fi
 
 tool="$(basename "$0")"
 case "$tool" in
-  imsg|imsg-send|imsg-read|contacts|tcc-check|blip-check) ;;
-  *) echo "blip-shim: unknown tool name '$tool' (install as imsg, imsg-send, or contacts)" >&2; exit 64 ;;
+  imsg|imsg-send|imsg-read|imsg-delete|contacts|contact-save|tcc-check|blip-check) ;;
+  *) echo "blip-shim: unknown tool name '$tool' (install as imsg, imsg-send, imsg-read, imsg-delete, contacts, or contact-save)" >&2; exit 64 ;;
 esac
 
 # With the dedicated key (blip-setup enrolls it as restrict,command=blip-dispatch)
