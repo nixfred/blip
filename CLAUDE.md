@@ -163,8 +163,11 @@ what it is handed. Keep it that way.
   exit code to translate); stdio is inherited either way, so attachment
   streaming and `--file-stdin` are untouched — covered by a stub-ssh test.
 - **`bridge.conf` is data, never `source`d.** The shim parses four keys and
-  validates them; keep it that way (audit #7). `automation=on` is what lets
-  `qs ipc … goto/compose/bubbles` work — off, they return a refusal string.
+  validates them; keep it that way (audit #7). `blip-bridged` applies the
+  same allowlist before it interpolates `python`/`remote_bin` into a remote
+  command (the general-key path); a hostile value exits 78 and no channel
+  starts. `automation=on` is what lets `qs ipc … goto/compose/bubbles` work
+  — off, they return a refusal string.
 - **Opening a link = `xdg-open` THEN focus the browser window.** Omarchy runs
   `focus_on_activate=false`, so a new tab in a browser on another workspace
   is invisible; `openLink()` finds the default handler's window by class and
@@ -340,7 +343,14 @@ what it is handed. Keep it that way.
 - **The persistent channel is an ACCELERATOR; the one-shot path is the
   contract.** `blip-bridged` (Linux, started by the LEADER BarWidget) holds
   two `imsg serve` channels open over ssh, so a query costs the query instead
-  of ~90 ms of startup. `bridgeRun()` in collector.ts routes through it and
+  of ~90 ms of startup. The dedicated key still runs a bare `imsg serve`
+  (dispatch's forced-command gate is unchanged) on its own ControlMaster
+  socket — sharing the general key's master would silently bypass the gate.
+  When that key is absent, `python`/`remote_bin` are interpolated into the
+  remote command only after the shim's path allowlist accepts them. There is
+  still no `ssh -n` preflight on this path either (a probe without `-n` would
+  eat stdin; a probe at all would pay the toll this channel exists to avoid).
+  `bridgeRun()` in collector.ts routes through it and
   falls back to plain `~/bin/imsg` on ANY fault — no socket, no socat, a dead
   daemon, a frame that will not parse, a short body. Three rules:
   (1) A caller that passes its own `runner` NEVER touches the socket. That is

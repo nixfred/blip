@@ -35,6 +35,8 @@ jobs:
         run: python3 bridge/mac/imsg_test.py
       - name: the serve channel exposes only read-only queries (no macOS needed)
         run: python3 bridge/mac/test_serve.py
+      - name: blip-bridged validates bridge.conf like the shim (no macOS needed)
+        run: python3 bridge/linux/test_bridged_conf.py
       - name: shell scripts (bash -n + shellcheck)
         run: |
           bash -n bridge/linux/blip-shim scripts/blip-setup scripts/sync-bridge.sh scripts/demo/blip-shots bridge/mac/install.sh

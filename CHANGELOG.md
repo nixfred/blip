@@ -17,6 +17,13 @@
   Opening a conversation is 83 ms now (223 ms before any of this), a poll
   39 ms (160 ms), a deep poll 342 ms (707 ms).
 
+- **`blip-bridged` applies the shim's path allowlist before it starts a
+  channel.** When the dedicated key is absent it interpolates `python` and
+  `remote_bin` into a remote shell command, the same way the shim does. A
+  malformed or hostile `bridge.conf` is now refused (exit 78) instead of
+  reaching that string — the same regexes, the same threat the parsed shim
+  was meant to close.
+
 - **A persistent channel to the Mac.** Even with the probe gone, every query
   still paid ~90 ms before it read a row: ssh, `blip-dispatch`'s Python start,
   `imsg`'s own, and opening a 218 MB chat.db — for SQL that takes about a

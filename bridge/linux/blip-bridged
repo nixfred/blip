@@ -41,11 +41,20 @@ from __future__ import annotations
 import errno
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
 import threading
 import time
+
+# Same allowlists the shim applies (audit #7): bridge.conf is DATA, and
+# python/remote_bin are interpolated into a remote shell command when the
+# dedicated key is absent. A hostile value would execute on the Mac.
+_HOST_RE = re.compile(r"^([A-Za-z0-9._-]+@)?[A-Za-z0-9._:-]+$")
+_PYTHON_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+_REMOTE_BIN_RE = re.compile(r"^[A-Za-z0-9._/\$-]+$")
+_KEY_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 
 POOL_SIZE = 2
 IDLE_EXIT_SECONDS = 15 * 60
@@ -61,6 +70,19 @@ def runtime_dir() -> str:
 
 def socket_path() -> str:
     return os.path.join(runtime_dir(), "bridge.sock")
+
+
+def validate_conf(conf: dict) -> None:
+    """Refuse values the shim would refuse, before any channel interpolates
+    them into a remote shell command. Exit 78 matches the shim (EX_CONFIG)."""
+    host = conf.get("host") or ""
+    if host and not _HOST_RE.match(host):
+        sys.exit("blip-bridged: refusing host — expected [user@]hostname")
+    python = conf.get("python") or ""
+    remote_bin = conf.get("remote_bin") or ""
+    key = conf.get("key") or ""
+    if not (_PYTHON_RE.match(python) and _REMOTE_BIN_RE.match(remote_bin) and _KEY_RE.match(key)):
+        sys.exit("blip-bridged: refusing python/remote_bin/key — plain paths only")
 
 
 def read_conf() -> dict:
@@ -82,6 +104,7 @@ def read_conf() -> dict:
                     conf[k] = v
     except OSError:
         pass
+    validate_conf(conf)
     return conf
 
 
@@ -94,6 +117,7 @@ class Channel:
         self.proc: subprocess.Popen | None = None
 
     def _spawn(self) -> None:
+        validate_conf(self.conf)
         conf = self.conf
         key = conf["key"]
         if os.access(key, os.R_OK):
