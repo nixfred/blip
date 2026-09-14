@@ -711,7 +711,10 @@ describe("pending sends (the bubble drawn before the Mac writes the row)", () =>
   test("loadThread --pending-stdin runs end to end through the CLI", async () => {
     const proc = Bun.spawn(["bun", "thread.ts", "+15550100001", "5", "--pending-stdin"], {
       stdin: new TextEncoder().encode(JSON.stringify([{ chat: "+15550100001", text: "hi", ts: localToday() + " 00:00:00" }])),
-      env: { ...process.env, HOME: "/nonexistent-blip-home" },   // no ~/bin/imsg: offline, pending echoed back
+      // Offline means offline: no ~/bin/imsg (HOME) AND no accelerator socket
+      // (XDG_RUNTIME_DIR). blip-bridged's socket is found under the latter, so
+      // clearing only HOME left a real, working bridge underneath the test.
+      env: { ...process.env, HOME: "/nonexistent-blip-home", XDG_RUNTIME_DIR: "/nonexistent-blip-runtime" },
       stdout: "pipe",
     });
     const out = JSON.parse(await new Response(proc.stdout).text());

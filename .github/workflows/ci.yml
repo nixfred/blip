@@ -14,7 +14,7 @@ jobs:
       - name: unit tests (collector, thread, tier2, ui invariants)
         run: bun test
       - name: Mac tools compile (python3 syntax, no macOS needed)
-        run: python3 -m py_compile bridge/mac/imsg bridge/mac/imsg-send bridge/mac/contacts bridge/mac/tcc-check bridge/mac/blip-check bridge/mac/blip-dispatch bridge/mac/imsg-read bridge/mac/calling_codes.py
+        run: python3 -m py_compile bridge/linux/blip-bridged bridge/mac/imsg bridge/mac/imsg-send bridge/mac/contacts bridge/mac/tcc-check bridge/mac/blip-check bridge/mac/blip-dispatch bridge/mac/imsg-read bridge/mac/calling_codes.py
       - name: group-photo lookup (no macOS needed)
         run: python3 bridge/mac/test_group_photo.py
       - name: phone matching, the way Contacts does it (no macOS needed)
@@ -33,6 +33,10 @@ jobs:
         run: python3 bridge/mac/contacts_test.py
       - name: imsg chat metadata (no macOS needed)
         run: python3 bridge/mac/imsg_test.py
+      - name: the serve channel exposes only read-only queries (no macOS needed)
+        run: python3 bridge/mac/test_serve.py
+      - name: blip-bridged validates bridge.conf like the shim (no macOS needed)
+        run: python3 bridge/linux/test_bridged_conf.py
       - name: shell scripts (bash -n + shellcheck)
         run: |
           bash -n bridge/linux/blip-shim scripts/blip-setup scripts/sync-bridge.sh scripts/demo/blip-shots bridge/mac/install.sh
