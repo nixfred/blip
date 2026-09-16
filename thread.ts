@@ -54,6 +54,10 @@ export function linkHost(url: string): string {
 export const GROUP_GAP_MINUTES = 15;
 
 export interface Bubble {
+  /** Exact bridge identity; absent for provisional sends and older bridges. */
+  messageId?: string;
+  messageGuid?: string;
+  messageChat?: string;
   ts: string;
   from_me: boolean;
   name: string;
@@ -297,6 +301,13 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
       minutesBetween(m.ts, next.ts) > GROUP_GAP_MINUTES;
 
     out.push({
+      messageId: (typeof m.id === "string" && /^[1-9][0-9]{0,18}$/.test(m.id)
+        && BigInt(m.id) <= 9223372036854775807n) ? m.id
+        : typeof m.id === "number" && Number.isSafeInteger(m.id) && m.id > 0 ? String(m.id) : "",
+      messageGuid: typeof m.guid === "string"
+        && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(m.guid) ? m.guid : "",
+      messageChat: typeof m.chat === "string" && m.chat.length <= 320
+        && !/[\x00-\x1f\x7f]/.test(m.chat) ? m.chat : "",
       ts: m.ts,
       from_me: m.from_me,
       name: m.name ?? m.handle ?? "",

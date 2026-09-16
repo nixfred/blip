@@ -14,7 +14,7 @@ jobs:
       - name: unit tests (collector, thread, tier2, ui invariants)
         run: bun test
       - name: Mac tools compile (python3 syntax, no macOS needed)
-        run: python3 -m py_compile bridge/mac/imsg bridge/mac/imsg-send bridge/mac/contacts bridge/mac/tcc-check bridge/mac/blip-check bridge/mac/blip-dispatch bridge/mac/imsg-read bridge/mac/calling_codes.py
+        run: python3 -m py_compile bridge/mac/imsg bridge/mac/imsg-send bridge/mac/contacts bridge/mac/tcc-check bridge/mac/blip-check bridge/mac/blip-dispatch bridge/mac/imsg-read bridge/mac/calling_codes.py bridge/mac/imsg-delete
       - name: group-photo lookup (no macOS needed)
         run: python3 bridge/mac/test_group_photo.py
       - name: phone matching, the way Contacts does it (no macOS needed)
@@ -35,8 +35,18 @@ jobs:
         run: python3 bridge/mac/imsg_test.py
       - name: stamps cross the bridge as UTC (no macOS needed)
         run: python3 bridge/mac/test_wire_time.py
+      - name: exact message deletion (synthetic fixtures)
+        run: python3 bridge/mac/test_message_delete.py
       - name: shell scripts (bash -n + shellcheck)
         run: |
           bash -n bridge/linux/blip-shim scripts/blip-setup scripts/sync-bridge.sh scripts/demo/blip-shots bridge/mac/install.sh
           sudo apt-get install -y -q shellcheck >/dev/null
           shellcheck -S warning bridge/linux/blip-shim scripts/blip-setup scripts/sync-bridge.sh bridge/mac/install.sh
+  mac-syntax:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: public Accessibility helper typecheck
+        run: swiftc -typecheck bridge/mac/message-delete.swift
+      - name: Accessibility regressions (synthetic fixtures)
+        run: python3 bridge/mac/test_message_delete_swift.py

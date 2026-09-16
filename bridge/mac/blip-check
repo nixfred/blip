@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-blip-check: the three Mac permissions Blip needs, checked the way Blip uses them.
+blip-check: core Mac permissions, plus opt-in checks for optional actions.
 
   python3 ~/.blip/bin/blip-check             # human lines, exit 0 when all pass
   python3 ~/.blip/bin/blip-check --json      # {"chatdb", "automation", "contacts", "markread": bool, ...}
   python3 ~/.blip/bin/blip-check --markread  # ALSO test the optional read-push grant
+  python3 ~/.blip/bin/blip-check --mutations # ALSO check deletion prerequisites
 
 --markread is opt-in because that probe is consent-triggering in its own right:
 it talks to System Events, which pops a second Automation prompt, and on
@@ -39,8 +40,10 @@ FIX = {
                   "`tccutil reset AppleEvents` on the Mac, re-run, and click Allow in time.",
     "contacts": "Same Full Disk Access grant as chat.db (names/avatars come from the AddressBook DB).",
     "markread": "System Settings → Privacy & Security → Accessibility → add "
-                "/usr/libexec/sshd-keygen-wrapper. OPTIONAL: without it everything works "
-                "except telling the Mac a conversation has been read.",
+                "/usr/libexec/sshd-keygen-wrapper. Read-push and message deletion need this grant.",
+    "message_delete": "Enable Accessibility for /usr/libexec/sshd-keygen-wrapper "
+                      "(⌘⇧G in the file picker), install Xcode Command Line Tools, "
+                      "and keep Messages open in an unlocked Mac desktop. See docs/DELETE-MESSAGE.md.",
 }
 
 
@@ -181,10 +184,25 @@ def check_markread() -> tuple[bool, str]:
         return True, "can mark conversations read on this Mac"
     err = (r.stderr or b"").decode("utf-8", "replace").strip()
     if "not allowed assistive" in err or "1002" in err:
-        return False, "Accessibility not granted (optional — only mark-as-read needs it)"
+        return False, "Accessibility not granted (needed for optional read-push and message deletion)"
     if "Messages" in err and "-1728" in err:
         return True, "Messages is not running; grant looks present"
     return False, err.splitlines()[0] if err else "System Events could not reach Messages"
+
+
+def check_mutations() -> dict:
+    """Read permission status only: no UI actions, contact reads, or prompts."""
+    script = ('ObjC.import("ApplicationServices"); '
+              'JSON.stringify({accessibility:!!$.AXIsProcessTrusted()})')
+    try:
+        result = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", "-e", script],
+                                capture_output=True, text=True, timeout=10)
+        status = json.loads(result.stdout) if result.returncode == 0 else {}
+        developer = subprocess.run(["/usr/bin/xcode-select", "-p"], capture_output=True, timeout=10)
+        ready = status.get("accessibility") is True and developer.returncode == 0
+        return {"message_delete": (ready, "Accessibility and developer tools ready" if ready else "Accessibility or developer tools missing")}
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return {"message_delete": (False, "could not read permission status")}
 
 
 def main() -> None:
@@ -195,10 +213,14 @@ def main() -> None:
     # grant nobody wanted could not be switched back off in System Settings
     # afterwards (#36, 26.6.2). Asking for consent the user did not request is
     # the exact failure this file exists to warn about, so it must not do it
-    # uninvited. Read-push is the only thing that needs it.
+    # uninvited. This System Events probe is for read-push; deletion has the
+    # separate status-only --mutations check.
     want_markread = "--markread" in sys.argv
     optional = {"markread": check_markread() if want_markread else
-                (False, "not checked — only read-push needs it; re-run with --markread to test it")}
+                (False, "read-push not checked; re-run with --markread to test it; use --mutations for deletion prerequisites")}
+    want_mutations = "--mutations" in sys.argv
+    if want_mutations:
+        optional.update(check_mutations())
 
     def fix_for(key: str, ok: bool) -> str:
         """No fix line for a probe that never ran: nothing is wrong with it."""
@@ -218,7 +240,10 @@ def main() -> None:
             print(f"  {'✅' if ok else '➖'}  {k:<10} {detail}")
             if fix_for(k, ok):
                 print(f"      fix: {FIX[k]}")
-    sys.exit(0 if all(v[0] for v in results.values()) else 1)
+    ready = all(v[0] for v in results.values())
+    if want_mutations:
+        ready = ready and optional["message_delete"][0]
+    sys.exit(0 if ready else 1)
 
 
 if __name__ == "__main__":

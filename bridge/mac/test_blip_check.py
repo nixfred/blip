@@ -12,6 +12,8 @@ import io
 import json
 import sys
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 from contextlib import redirect_stdout
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
@@ -45,6 +47,39 @@ class OptInMarkread(unittest.TestCase):
             return False, "Accessibility not granted"
 
         self.mod.check_markread = counted
+        self.mutation_calls = 0
+        def mutations():
+            self.mutation_calls += 1
+            return {"message_delete": (False, "missing")}
+        self.mod.check_mutations = mutations
+
+    def test_action_checks_are_explicit_and_missing_permissions_fail_when_requested(self):
+        _, code = self.run_main(["--json"])
+        self.assertEqual(self.mutation_calls, 0)
+        self.assertEqual(code, 0)
+        out, code = self.run_main(["--json", "--mutations"])
+        self.assertEqual(self.mutation_calls, 1)
+        self.assertEqual(self.markread_calls, 0)
+        self.assertEqual(code, 1)
+        self.assertIn("Accessibility", json.loads(out)["message_delete"]["fix"])
+
+    def test_deletion_probe_reads_status_without_prompting_or_contacts_permission(self):
+        mod = load_check()
+        for trusted, tools_ready, expected in [(True, True, True), (False, True, False), (True, False, False)]:
+            calls = []
+            def run(argv, **kwargs):
+                calls.append(argv)
+                if argv[0] == "/usr/bin/osascript":
+                    return SimpleNamespace(returncode=0, stdout=json.dumps({"accessibility": trusted}))
+                return SimpleNamespace(returncode=0 if tools_ready else 1)
+            with patch.object(mod.subprocess, "run", side_effect=run):
+                result = mod.check_mutations()
+            self.assertEqual(set(result), {"message_delete"})
+            self.assertEqual(result["message_delete"][0], expected)
+            script = calls[0][-1]
+            self.assertIn("AXIsProcessTrusted()", script)
+            for forbidden in ["AXIsProcessTrustedWithOptions", "requestAccess", "System Events", "CNContactStore", 'import("Contacts")']:
+                self.assertNotIn(forbidden, script)
 
     def run_main(self, argv: list[str]) -> tuple[str, int]:
         self.mod.sys.argv = ["blip-check", *argv]
