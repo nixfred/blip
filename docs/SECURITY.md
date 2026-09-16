@@ -53,6 +53,22 @@ Still open and honest about it: drafts in `$XDG_RUNTIME_DIR/blip` are swept
 lazily rather than deleted on cancel; cache file names include the Mac
 attachment ROWID.
 
+## Optional message deletion
+
+The confined key can invoke `imsg-delete`, which deletes one stored message
+through Messages. UI confirmation is not a separate security boundary against
+someone who already has the key. Requests use bounded stdin, operations are
+serialized, and the exact message is verified through a read-only database
+connection. Accessibility grants the SSH process UI control; only grant it to
+a bridge account you trust.
+
+Exact-message selection uses `sms://open?message-guid=`, an undocumented Apple
+URL interface. The helper clears the old selection, checks the new selection
+and its content, and refuses ambiguous or unsupported layouts. An unlocked
+graphical session with English Messages open is required. The helper does not
+bypass the lock screen. The optional `blip-check --mutations` probe reads
+Accessibility status without prompting and never performs deletion.
+
 ## Hardening by hand
 
 - **Pin the Blip key on a LAN.** `blip-setup` pins the key (`from=`) only when

@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Delete one exact message through Messages, then verify its removal read-only."""
+import fcntl
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import sqlite3
+import stat
+import subprocess
+import sys
+import time
+
+MAX_INPUT = 8192
+GUID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\Z")
+
+
+def target(value):
+    if not isinstance(value, dict) or value.get("confirmed") is not True:
+        raise ValueError("invalid")
+    rowid, guid, chat = value.get("id"), value.get("guid"), value.get("chat")
+    if not isinstance(rowid, str) or not re.fullmatch(r"[1-9][0-9]{0,18}", rowid) or int(rowid) > 2**63-1:
+        raise ValueError("invalid")
+    if not isinstance(guid, str) or not GUID.fullmatch(guid):
+        raise ValueError("invalid")
+    if not isinstance(chat, str) or not 1 <= len(chat) <= 320 or any(ord(c) < 32 or ord(c) == 127 for c in chat):
+        raise ValueError("invalid")
+    return {"id": rowid, "guid": guid, "chat": chat}
+
+
+def lookup(con, item):
+    return con.execute("""SELECT DISTINCT m.ROWID AS id,m.guid,m.text,m.attributedBody,
+        m.is_from_me, m.item_type, m.associated_message_type,
+        (SELECT COUNT(*) FROM message_attachment_join a WHERE a.message_id=m.ROWID) AS attachments
+        FROM message m JOIN chat_message_join j ON j.message_id=m.ROWID
+        JOIN chat c ON c.ROWID=j.chat_id
+        WHERE m.ROWID=? AND lower(m.guid)=lower(?) AND (c.chat_identifier=? OR c.room_name=?)
+        AND m.ROWID NOT IN (SELECT message_id FROM chat_recoverable_message_join)""",
+        (int(item["id"]), item["guid"], item["chat"], item["chat"])).fetchone()
+
+
+def decoded_text(row, directory):
+    if row["text"]:
+        return row["text"]
+    # Keep imsg import-safe: its command entry point must stay behind __main__,
+    # and module initialization must not read conversations or perform actions.
+    loader = importlib.machinery.SourceFileLoader("blip_delete_reader", str(directory / "imsg"))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module.decode_attributed_body(row["attributedBody"]) or ""
+
+
+def remove_message(value, con, native, decode, pause=time.sleep):
+    item = target(value)
+    row = lookup(con, item)
+    if row is None:
+        return {"ok": False, "code": "not-found"}
+    if row["item_type"] != 0 or (row["associated_message_type"] or 0) != 0:
+        return {"ok": False, "code": "unsupported"}
+    text = decode(row)
+    if not isinstance(text, str) or len(text.encode("utf-8")) > 96 * 1024:
+        return {"ok": False, "code": "unsupported"}
+    result = native({"guid": item["guid"], "text": text, "attachments": row["attachments"]})
+    if result.get("ok") is not True and result.get("code") != "unverified":
+        return result
+    # A successful accessibility action is not proof that Messages deleted it.
+    for _ in range(20):
+        if lookup(con, item) is None:
+            return {"ok": True, "deleted": True, **item}
+        pause(0.25)
+    return {"ok": False, "code": "unverified"}
+
+
+def native_delete(payload, directory):
+    try:
+        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(encoded) > 128 * 1024:
+            return {"ok": False, "code": "unsupported"}
+        result = subprocess.run(["/usr/bin/swift", str(directory / "message-delete.swift")],
+            input=encoded, capture_output=True, timeout=40)
+        if result.returncode or len(result.stdout) > MAX_INPUT:
+            return {"ok": False, "code": "unverified"}
+        value = json.loads(result.stdout)
+        return value if isinstance(value, dict) else {"ok": False, "code": "unverified"}
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return {"ok": False, "code": "unverified"}
+
+
+def main():
+    raw = sys.stdin.buffer.read(MAX_INPUT+1)
+    try:
+        if len(raw) > MAX_INPUT:
+            raise ValueError("invalid")
+        value = json.loads(raw)
+        target(value)
+    except (ValueError, UnicodeError):
+        return {"ok": False, "code": "invalid"}
+    directory = Path(__file__).resolve().parent
+    try:
+        fd = os.open(directory.parent / "message-delete.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "rb") as lock:
+            info = os.fstat(lock.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1:
+                return {"ok": False, "code": "unavailable"}
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return {"ok": False, "code": "busy"}
+            con = sqlite3.connect("file:"+os.path.expanduser("~/Library/Messages/chat.db")+"?mode=ro", uri=True, timeout=5)
+            con.row_factory = sqlite3.Row
+            try:
+                return remove_message(value, con, lambda p: native_delete(p, directory), lambda r: decoded_text(r, directory))
+            finally:
+                con.close()
+    except (OSError, sqlite3.Error):
+        return {"ok": False, "code": "unavailable"}
+    except Exception:
+        return {"ok": False, "code": "unverified"}
+
+
+if __name__ == "__main__":
+    answer = main()
+    print(json.dumps(answer, separators=(",", ":")))
+    sys.exit(0 if answer.get("ok") is True else 1)
