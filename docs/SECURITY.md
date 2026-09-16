@@ -53,6 +53,16 @@ Still open and honest about it: drafts in `$XDG_RUNTIME_DIR/blip` are swept
 lazily rather than deleted on cancel; cache file names include the Mac
 attachment ROWID.
 
+## Optional contact saving
+
+The confined key can invoke `contact-save`, which creates a new contact through
+the Mac's native address book API. UI confirmation is not a separate security
+boundary against someone who already has the key. Requests use bounded stdin,
+operations are serialized, duplicates are checked, and the saved card is read
+back before success. The helper never writes Contacts databases directly and
+does not edit, merge, or delete existing cards. Contacts write permission is
+separate from Full Disk Access and may prompt on first save.
+
 ## Hardening by hand
 
 - **Pin the Blip key on a LAN.** `blip-setup` pins the key (`from=`) only when

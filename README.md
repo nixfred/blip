@@ -84,7 +84,7 @@ people who showed up with pull requests. What is in it now:
 - **Search** conversations by name, then messages; **new conversation** from a
   contact search; **reply from a toast**; failed-delivery flags.
 - **One source.** The Mac-side tools ship in this repo; `blip-setup` installs
-  everything including a dedicated ssh key the Mac confines to the five
+  everything including a dedicated ssh key the Mac confines to the six
   bridge tools.
 - **Audited.** A full security + privacy audit, every finding fixed or
   documented — [docs/SECURITY.md](docs/SECURITY.md), [docs/PRIVACY.md](docs/PRIVACY.md).
@@ -321,7 +321,8 @@ omarchy plugin add https://github.com/nixfred/blip.git --enable
 
 It writes `~/.config/blip/bridge.conf`, adds an ssh ControlMaster block
 (polling costs ~50 ms instead of a handshake), installs the bridge shim as
-`~/bin/imsg`, `~/bin/imsg-send`, `~/bin/contacts`, copies the Mac tools to
+`~/bin/imsg`, `~/bin/imsg-send`, `~/bin/imsg-read`, `~/bin/contacts`,
+`~/bin/contact-save`, copies the Mac tools to
 `~/.blip/bin` on the Mac and runs `install.sh` there, generates a
 **dedicated ssh key** (`~/.ssh/blip_ed25519`) that the Mac confines to the
 bridge tools and nothing else, then smoke-tests the bridge without printing
@@ -539,11 +540,11 @@ omarchy-restart-shell
 (`omarchy plugin disable nixfred.blip` instead, to take it off the bar but keep
 the checkout.)
 
-**2. The shims.** `blip-setup` installs `blip-shim` as four tools in `~/bin`,
+**2. The shims.** `blip-setup` installs `blip-shim` as five tools in `~/bin`,
 backing up anything it displaced as `<tool>.pre-blip.<epoch>`:
 
 ```bash
-rm -f ~/bin/imsg ~/bin/imsg-send ~/bin/imsg-read ~/bin/contacts
+rm -f ~/bin/imsg ~/bin/imsg-send ~/bin/imsg-read ~/bin/contacts ~/bin/contact-save
 ls ~/bin/*.pre-blip.* 2>/dev/null        # restore any of these you want back
 ```
 
@@ -609,6 +610,13 @@ The scan cache is private and reused only when both the handle set and the Mac
 Contacts fingerprint still match. The feature adds no settings page or display
 name overrides. Configuration stays in `bridge.conf`. Review requires no Swift
 helper; the optional availability check needs Automation → Contacts on the Mac.
+
+## Save a new contact
+
+When **Review contact** finds no card for a sender, choose **Save new contact**,
+enter a name, review the fields, and confirm **Save to Contacts**. Blip checks
+for duplicates and reads the new card back before reporting success. Existing
+cards are not edited or merged. See [contact saving setup](docs/SAVE-CONTACT.md).
 
 ## Keyboard
 
