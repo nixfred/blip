@@ -31,6 +31,8 @@ class ContactResolverTests(unittest.TestCase):
     def test_handle_normalization(self):
         self.assertEqual(contacts.normalize_resolve_handle("+1 (555) 010-0001")[1], "5550100001")
         self.assertEqual(contacts.normalize_resolve_handle("Person@Example.COM")[1], "person@example.com")
+        self.assertEqual(contacts.normalize_resolve_handle("(555) 123-4567"),
+                         ("(555) 123-4567", "5551234567", False))
         with self.assertRaisesRegex(ValueError, "valid phone"):
             contacts.normalize_resolve_handle("--not-a-phone")
 

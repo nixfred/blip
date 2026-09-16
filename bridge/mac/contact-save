@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""Bounded transport for creating one contact through the native Contacts layer."""
+import fcntl
+import json
+import importlib.machinery
+import importlib.util
+import os
+import stat
+import pathlib
+import re
+import selectors
+import time
+import subprocess
+import sys
+
+MAX_BYTES = 8192
+
+
+def valid_request(request):
+    if not isinstance(request, dict) or request.get("operation") != "create" or request.get("confirmed") is not True:
+        raise ValueError("invalid")
+    limits = {"handle": 320, "firstName": 160, "lastName": 160, "phone": 80, "email": 254}
+    normalized = {"operation": "create", "confirmed": True}
+    for key, maximum in limits.items():
+        value = request.get(key)
+        if not isinstance(value, str) or len(value.encode("utf-16-le")) // 2 > maximum or re.search(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]", value):
+            raise ValueError("invalid")
+        normalized[key] = value.strip()
+    def identity(value):
+        if "@" in value:
+            if len(value) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+", value):
+                raise ValueError("invalid")
+            return "email:" + value.lower()
+        digits = re.sub(r"\D", "", value)
+        if not re.fullmatch(r"\+?[0-9(][0-9 ()./-]{2,39}", value) or not 5 <= len(digits) <= 15:
+            raise ValueError("invalid")
+        return "phone:" + digits
+    if not normalized["firstName"] and not normalized["lastName"]:
+        raise ValueError("invalid")
+    values = []
+    for key in ("phone", "email"):
+        if normalized[key]:
+            value = identity(normalized[key])
+            if not value.startswith(key + ":"):
+                raise ValueError("invalid")
+            values.append(value)
+    if identity(normalized["handle"]) not in values:
+        raise ValueError("invalid")
+    return normalized
+
+
+def bounded_process(args, payload, maximum, timeout):
+    """Drain both pipes with a shared deadline and bounded memory."""
+    process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    selector = selectors.DefaultSelector()
+    try:
+        process.stdin.write(payload)
+        process.stdin.close()
+        selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+        selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+        output = {"stdout": bytearray(), "stderr": bytearray()}
+        deadline = time.monotonic() + timeout
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("timeout")
+            for key, _ in selector.select(min(0.25, remaining)):
+                chunk = os.read(key.fd, 4096)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                output[key.data].extend(chunk)
+                if len(output[key.data]) > maximum:
+                    raise ValueError("oversized")
+        status = process.wait(timeout=max(0.001, deadline - time.monotonic()))
+        return status, bytes(output["stdout"])
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        selector.close()
+        for pipe in (process.stdin, process.stdout, process.stderr):
+            if not pipe.closed:
+                pipe.close()
+
+
+def invoke(payload, helper):
+    try:
+        status, output = bounded_process(["/usr/bin/osascript", "-l", "JavaScript", str(helper)],
+                                         payload, MAX_BYTES, 155)
+        if status:
+            return {"ok": False, "code": "unknown"}
+        result = json.loads(output)
+        return result if isinstance(result, dict) else {"ok": False, "code": "unknown"}
+    except (OSError, ValueError, TimeoutError, subprocess.TimeoutExpired):
+        return {"ok": False, "code": "unknown"}
+
+
+def phone_matcher(helper):
+    # Reuse the bridge's tested region and calling-code comparison, without
+    # opening Messages or reading conversation data.
+    source = str(helper.with_name("imsg"))
+    loader = importlib.machinery.SourceFileLoader("blip_contact_phone_match", source)
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module._parse_phone, module._same_number
+
+
+def check_duplicates(request, helper):
+    payload = json.dumps({**request, "phase": "inspect"}, ensure_ascii=False, separators=(",", ":")).encode()
+    response = invoke(payload, helper)
+    if response.get("ok") is not True:
+        return {"ok": False, "code": "permission" if response.get("code") == "permission" else "unavailable"}
+    phones = response.get("phones")
+    if (type(response.get("duplicate")) is not bool or not isinstance(phones, list) or len(phones) > 64
+            or any(not isinstance(phone, str) or len(phone) > 80 for phone in phones)):
+        return {"ok": False, "code": "unavailable"}
+    if response["duplicate"]:
+        return {"ok": False, "code": "duplicate"}
+    if request["phone"] and phones:
+        try:
+            parse, matches = phone_matcher(helper)
+            handle = parse(request["phone"])
+            for phone in phones:
+                card = parse(phone)
+                if not handle or not card:
+                    return {"ok": False, "code": "unavailable"}
+                if matches(handle, card):
+                    return {"ok": False, "code": "duplicate"}
+        except (OSError, ImportError, AttributeError, ValueError):
+            return {"ok": False, "code": "unavailable"}
+    return None
+
+
+def main():
+    payload = sys.stdin.buffer.read(MAX_BYTES + 1)
+    if len(payload) > MAX_BYTES:
+        return {"ok": False, "code": "invalid"}
+    try:
+        request = valid_request(json.loads(payload))
+        payload = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode()
+    except (UnicodeError, ValueError):
+        return {"ok": False, "code": "invalid"}
+    helper = pathlib.Path(__file__).resolve().with_name("contact-save.js")
+    if not helper.is_file():
+        return {"ok": False, "code": "unavailable"}
+    # Serialize duplicate lookup plus creation across windows and SSH sessions.
+    # This file stores no contact information.
+    lock_path = helper.parent.parent / "contact-save.lock"
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "rb") as lock:
+            info = os.fstat(lock.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1:
+                return {"ok": False, "code": "unavailable"}
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return {"ok": False, "code": "busy"}
+            refusal = check_duplicates(request, helper)
+            if refusal:
+                return refusal
+            return invoke(payload, helper)
+    except OSError:
+        return {"ok": False, "code": "unavailable"}
+
+
+if __name__ == "__main__":
+    result = main()
+    print(json.dumps(result, separators=(",", ":")))
+    sys.exit(0 if result.get("ok") is True else 1)

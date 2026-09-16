@@ -3,8 +3,7 @@
 # blip-setup, or run it from a checkout). Idempotent.
 #
 # What it does:
-#   1. copies the bridge tools into ~/.blip/bin (imsg, imsg-send, imsg-read, contacts,
-#      tcc-check, blip-check) — read-only sqlite over chat.db, AppleScript
+#   1. copies the bridge tools into ~/.blip/bin — read-only sqlite over chat.db, AppleScript
 #      send, Contacts — plus blip-dispatch, the forced-command gate that
 #      confines Blip's dedicated ssh key to exactly those tools;
 #   2. makes sure Remote Login (sshd) is on, since Blip talks over ssh;
@@ -22,7 +21,7 @@ dest="$HOME/.blip/bin"
 # denial (#36, Astra #11).
 check=1; for a in "$@"; do [[ $a == --no-check ]] && check=0; done
 mkdir -p "$dest"
-for t in imsg imsg-send imsg-read contacts contact-repair.js tcc-check blip-check blip-dispatch calling_codes.py; do
+for t in imsg imsg-send imsg-read contacts contact-repair.js contact-save contact-save.js tcc-check blip-check blip-dispatch calling_codes.py; do
   if [[ -f "$here/$t" ]]; then
     install -m 0755 "$here/$t" "$dest/$t"
   else
@@ -54,7 +53,12 @@ Two permissions must be granted by hand (macOS will not let a script do it):
 
   2. Automation → Messages: the first send from an ssh session pops a prompt on
      THIS Mac's screen: "sshd-keygen-wrapper wants to control Messages" — click
-     Allow once. (blip-setup triggers this with a dry-run-free self-send.)
+     Allow once. (blip-setup checks Messages without sending a message.)
+
+Optional contact saving:
+  Allow Contacts access on the Mac when first saving a contact.
+  Full Disk Access alone does not grant Contacts write access.
+  See docs/SAVE-CONTACT.md for setup and recovery after a lost response.
 
 Then check:
 EOF
