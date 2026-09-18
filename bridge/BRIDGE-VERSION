@@ -3,4 +3,4 @@ vendored: imsg imsg-send contacts tcc-check
 blip-only (NOT upstream): imsg-read blip-check blip-dispatch
 blip extensions: Messages pin order; bounded read-only contact review, store-fingerprint audit, and card availability check
 sync: scripts/sync-bridge.sh <sha-or-tag>
-blip deviations from upstream v2.0.0: imsg-send consent banner prints body LENGTH only and only on a TTY (stderr lands in journald); imsg CONTACT_HELPER path; Blip wording in comments
+blip deviations from upstream v2.0.0: imsg-send consent banner prints body LENGTH only and only on a TTY (stderr lands in journald); imsg CONTACT_HELPER path; Blip wording in comments; imsg exposes chat_cluster_ids() as a supported entry point (was _group_photo_chat_ids, alias kept) so imsg-read can scope a read push to the cluster

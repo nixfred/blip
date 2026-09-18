@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A read push now counts the whole conversation, not one chat row.**
+  `imsg-read --chat` verified itself against a single `chat_identifier`, so
+  when Messages had split a conversation across rows — a re-keyed group keeps
+  its retired row, a merged 1:1 keeps a phone row beside an email row — an
+  unread on an alias made the count read zero. The push then printed
+  `nothing unread` and exited 0 without touching Messages, and a partly
+  cleared cluster reported success. It now scopes the count to the cluster
+  through `imsg`'s `chat_cluster_ids()`, the same rule the sidebar, pins and
+  `thread --chat` already follow. Hit `push_read=thread` hardest, where it
+  looked like a push that simply never arrived.
 - **Save an unknown sender as a contact.** Review the sender, type a name,
   confirm the fields, and a new card is created in Contacts on the Mac. It only
   ever creates: there is no edit and no delete. It refuses when a matching

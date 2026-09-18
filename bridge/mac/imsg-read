@@ -38,6 +38,8 @@ import subprocess
 import sys
 import time
 import fcntl
+import importlib.machinery
+import importlib.util
 import stat
 from contextlib import contextmanager
 from urllib.parse import urlencode
@@ -107,16 +109,57 @@ SELECT count(DISTINCT c.ROWID)
 """
 
 
+IMSG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "imsg")
+_IMSG_MODULE = None
+
+
+def imsg_module():
+    """The vendored imsg beside us, loaded once. It owns conversation
+    clustering; we ask it rather than keeping a second copy of the rules that
+    would drift from the bridge's own."""
+    global _IMSG_MODULE
+    if _IMSG_MODULE is None:
+        loader = importlib.machinery.SourceFileLoader("blip_imsg_for_read", IMSG)
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        _IMSG_MODULE = module
+    return _IMSG_MODULE
+
+
+def cluster_ids(con, handle):
+    """Every chat_identifier that IS this conversation, the argument included.
+
+    Messages keeps a re-keyed group's retired chat rows, and merges a 1:1's
+    phone row with its email row while both keep their own chat_identifier.
+    Counting only the identifier Blip pushed says "nothing unread" whenever
+    the unread landed on an alias, and --chat then exits 0 without pushing
+    anything. Falls back to the identifier alone, which is no worse than not
+    asking, when the cluster cannot be resolved."""
+    try:
+        ids = [c for c in imsg_module().chat_cluster_ids(con, handle) if c]
+    except Exception:
+        return [handle]
+    return ids or [handle]
+
+
 def unread_on_mac(handle=None):
     """Conversations Messages still counts as unread (see UNREAD_SQL), or None
-    when chat.db cannot be read — a guess would be worse than not knowing."""
-    sql, args = UNREAD_SQL, ()
-    if handle:
-        sql += " AND c.chat_identifier = ?"
-        args = (handle,)
+    when chat.db cannot be read — a guess would be worse than not knowing.
+
+    A handle is scoped to its whole conversation cluster, never to one chat
+    row: the count is the referee for the push, so it has to cover every row
+    the push can clear."""
     try:
         con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
+        # imsg's cluster queries read their columns by name.
+        con.row_factory = sqlite3.Row
         try:
+            sql, args = UNREAD_SQL, ()
+            if handle:
+                ids = cluster_ids(con, handle)
+                sql += f" AND c.chat_identifier IN ({', '.join('?' * len(ids))})"
+                args = tuple(ids)
             return int(con.execute(sql, args).fetchone()[0])
         finally:
             con.close()

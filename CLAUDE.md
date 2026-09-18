@@ -296,6 +296,12 @@ what it is handed. Keep it that way.
   Likewise `thread.ts` keeps every group row the bridge returns for a
   `thread --chat` — the bridge scoped it to the cluster, and the alias rows
   keep their own ids (9 rows from the Mac, 6 bubbles shown, until 2.3.4).
+  **On the Mac too.** `imsg-read --chat` counts unread over the cluster
+  (`cluster_ids` → `imsg.chat_cluster_ids`), never over one `chat_identifier`.
+  That count is the referee for the whole push: scoped to the pushed row
+  alone, an unread sitting on an alias read as `nothing unread`, and `--chat`
+  exited 0 having done nothing — silently, and most often for exactly the
+  re-keyed groups and merged phone/email DMs the rest of this bullet is about.
 - **Pins and merged 1:1s use the whole conversation cluster.** A re-keyed
   group's pin stays on a retired row's `group_id`; matching only the live
   row drops it from Favorites. Messages also merges a phone SMS row with an

@@ -1616,10 +1616,22 @@ def _group_cluster_map(con) -> dict:
     return out
 
 
-def _group_photo_chat_ids(con, chat_identifier: str) -> tuple[str, ...]:
+def chat_cluster_ids(con, chat_identifier: str) -> tuple[str, ...]:
+    """Every chat_identifier Messages treats as the SAME conversation as this
+    one, the argument included.
+
+    A supported entry point, not a private helper: a client that scopes
+    anything to one conversation — a group photo here, a read push in Blip's
+    imsg-read — has to ask over the whole cluster, or a re-keyed group's
+    retired row and a merged 1:1's other handle answer for nothing. Renaming
+    it breaks an importer loudly at load time, which is the point.
+    """
     clusters = _group_cluster_map(con)
     canon = clusters.get(chat_identifier, chat_identifier)
     return tuple(sorted({c for c, k in clusters.items() if k == canon} | {chat_identifier, canon}))
+
+
+_group_photo_chat_ids = chat_cluster_ids
 
 
 def _cluster_pin_candidates(con, clusters: dict) -> dict:
