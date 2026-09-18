@@ -17,7 +17,7 @@ set -euo pipefail
 REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 SANDBOX=${BLIP_DEMO_HOME:-/tmp/blip-demo-home}
 SHELLDIR=${BLIP_DEMO_SHELL:-/tmp/blip-demo-shell}
-OUT="$REPO/docs/img"
+OUT="${BLIP_DEMO_OUT:-$REPO/docs/img}"
 KEEP=0
 [[ ${1:-} == "--keep" ]] && KEEP=1
 
@@ -75,6 +75,7 @@ echo "· shell copy $SHELLDIR"
 cp -r /usr/share/omarchy/shell "$SHELLDIR"
 touch "$SHELLDIR/.blip-demo-scratch"
 cp "$REPO"/*.qml "$REPO"/*.ts "$REPO"/*.mjs "$REPO/otp-desktop.py" "$REPO/manifest.json" "$SHELLDIR/"   # manifest: the header's version (Astra D#7)
+cp -r "$REPO/icons" "$SHELLDIR/"
 cp "$REPO/scripts/demo/DemoShell.qml" "$SHELLDIR/shell.qml"
 
 echo "· launching"
@@ -121,6 +122,8 @@ ipc open "$CONV" >/dev/null;              shoot panel-conversation 3.0
 mode wide; GEOM="$WIDE"
 ipc open "$CONV" >/dev/null;              shoot app 3.0
 ipc share https://oatlug.org >/dev/null;  shoot share-sheet 2.5
+
+ipc menu >/dev/null;                     shoot conversation-menu 1.0
 
 if [[ $KEEP == 1 ]]; then
   echo "· window left up (pid $DEMO_PID) — kill it when you are done"

@@ -13,18 +13,22 @@ jobs:
           bun-version: latest
       - name: unit tests (collector, thread, tier2, ui invariants)
         run: bun test
-      - name: QML badge regression (synthetic data, no desktop needed)
+      - name: QML read-state regression and generated module
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -q qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript
           python3 scripts/test-read-ui.py
+          bun build read-sync-qml.ts --target browser --format esm --outfile /tmp/ReadSync.mjs
+          cmp ReadSync.mjs /tmp/ReadSync.mjs
       - name: OTP desktop adapter (no desktop needed)
         run: |
           python3 -m py_compile otp-desktop.py
           python3 test_otp_desktop.py
       - name: Mac tools compile (python3 syntax, no macOS needed)
         run: python3 -m py_compile bridge/mac/imsg bridge/mac/imsg-send bridge/mac/contacts bridge/mac/tcc-check bridge/mac/blip-check bridge/mac/blip-dispatch bridge/mac/imsg-read bridge/mac/calling_codes.py
-      - name: read pushes require verified completion (no macOS needed)
+      - name: read state and action verification (synthetic SQLite, no macOS needed)
+        run: python3 bridge/mac/test_read_sync.py
+      - name: read-push completion
         run: python3 bridge/mac/test_read_verification.py
       - name: group-photo lookup (no macOS needed)
         run: python3 bridge/mac/test_group_photo.py

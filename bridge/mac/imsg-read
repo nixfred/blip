@@ -15,6 +15,11 @@ Going through Messages means the change syncs the way any read does.
 
     imsg-read --all              mark every conversation read
     imsg-read --chat <handle>    mark ONE conversation read (DMs only)
+    imsg-read --unread <handle>  mark ONE conversation unread (DMs only)
+    imsg-read --pin <handle>     pin a DM
+    imsg-read --unpin <handle>   unpin a DM
+    imsg-read --mute <handle>    Hide Alerts
+    imsg-read --unmute <handle>  Show Alerts
     imsg-read --status           report whether this Mac can do it at all
 
 --all leaves the Mac alone: no window is raised, no selection changes, and
@@ -23,8 +28,9 @@ way to aim the menu at one conversation is to open it, and opening it brings
 Messages to the front. That is why Blip's default only pushes the explicit
 mark-all-read gesture.
 
-Exit 0 when there was nothing to do — the menu item is disabled when nothing
-is unread, which is a free guard against pointless clicks.
+Exit 0 only after the database confirms the requested state. A disabled menu
+alone is not success. --chat accepts --through <UTC stamp> to reject a stale
+read when a newer inbound has arrived.
 
 Needs Accessibility for whatever runs it. Over Blip's ssh key that is
 /usr/libexec/sshd-keygen-wrapper, the same binary that already needs Full Disk
@@ -32,13 +38,26 @@ Access; `blip-check` reports it. Without the grant this exits 77 and says so,
 rather than failing silently.
 """
 import os
+import fcntl
+import plistlib
 import re
 import sqlite3
 import subprocess
 import sys
 import time
+from typing import Optional
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from read_state import read_state
 
 MENU = 'menu 1 of menu bar item "Conversation" of menu bar 1'
+PINNING_PLIST_PATHS = (
+    os.path.expanduser("~/Library/Preferences/com.apple.messages.pinning.plist"),
+    os.path.expanduser(
+        "~/Library/Containers/com.apple.MobileSMS/Data/Library/Preferences/"
+        "com.apple.messages.pinning.plist"
+    ),
+)
 TIMEOUT = 150   # the first System Events call can be a consent prompt; give it the ~2 minutes macOS gives it (Astra C#8)
 
 
@@ -52,36 +71,31 @@ def osa(script: str) -> tuple[int, str]:
 
 DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
 
-# What Messages ITSELF still counts as unread: an inbound, non-tapback,
-# non-announcement row newer than its chat's own read cursor. That cursor
-# (chat.last_read_message_timestamp) is what "Mark All as Read" advances and
-# what the Dock badge follows; message.is_read alone carries ghosts.
-UNREAD_SQL = """
-SELECT count(DISTINCT c.ROWID)
-  FROM message m
-  JOIN chat_message_join j ON j.message_id = m.ROWID
-  JOIN chat c ON c.ROWID = j.chat_id
- WHERE m.is_from_me = 0 AND m.is_read = 0 AND m.item_type = 0
-   AND (m.associated_message_type IS NULL OR m.associated_message_type = 0)
-   AND m.date > c.last_read_message_timestamp
-"""
-
-
 def unread_on_mac(handle=None):
-    """Conversations Messages still counts as unread (see UNREAD_SQL), or None
-    when chat.db cannot be read — a guess would be worse than not knowing."""
-    sql, args = UNREAD_SQL, ()
-    if handle:
-        sql += " AND c.chat_identifier = ?"
-        args = (handle,)
+    """Same metadata-only definition as imsg read-state; None is unverified."""
     try:
         con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
         try:
-            return int(con.execute(sql, args).fetchone()[0])
+            rows = read_state(con)
+            return sum(1 for row in rows if row["unread"] > 0
+                       and (not handle or row["chat"] == handle or handle in row["aliases"]))
         finally:
             con.close()
     except Exception:
         return None
+
+
+def newer_than_seen(handle, seen):
+    """Recheck on the Mac immediately before selecting a chat for a read."""
+    from datetime import datetime, timezone
+    try:
+        boundary = int(datetime.fromisoformat(seen.replace("Z", "+00:00")).timestamp() - 978307200) * 1000000000
+        # Wire stamps have second precision; include the whole visible second.
+        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5) as con:
+            return any(row["latest"] >= boundary + 1000000000 for row in read_state(con)
+                       if not handle or row["chat"] == handle or handle in row["aliases"])
+    except Exception:
+        return True  # cannot safely apply a stale read
 
 
 def settle(before, handle=None, tries=8, pause=0.4):
@@ -97,6 +111,34 @@ def settle(before, handle=None, tries=8, pause=0.4):
         if after == 0:
             return after
     return after
+
+
+def settle_unread(handle=None, tries=8, pause=0.4):
+    """Wait until Messages counts this chat (or any chat) as unread."""
+    after = unread_on_mac(handle)
+    for _ in range(tries):
+        if after is None or after > 0:
+            return after
+        time.sleep(pause)
+        after = unread_on_mac(handle)
+    return after
+
+
+def report_unread(before, after, ok):
+    """Exit 0 when the chat is unread on the Mac, including already-unread."""
+    if before is None or after is None:
+        sys.stderr.write("imsg-read: cannot verify read state in chat.db\n")
+        sys.exit(75)
+    if after > (before or 0):
+        print(f"marked ({before} -> {after} unread)")
+        return
+    if after > 0:
+        print("already unread")
+        return
+    why = ("Mark as Unread stayed disabled even after waking Messages, so the click could not land"
+           if not ok else "Mark as Unread was clicked but the chat is still read")
+    sys.stderr.write(f"imsg-read: {why}\n")
+    sys.exit(75)
 
 
 def report(before, after, ok, what):
@@ -152,8 +194,8 @@ def accessibility() -> str:
     return out or "System Events could not reach Messages"
 
 
-def click(item: str) -> tuple[bool, str]:
-    """Click one Conversation-menu item. Returns (did_something, error).
+def click(item: str, menu: str = MENU) -> tuple[bool, str]:
+    """Click one menu item. Returns (did_something, error).
 
     Two ways of saying "there is nothing to do", both success:
       * the item is present but DISABLED — nothing is unread;
@@ -163,7 +205,7 @@ def click(item: str) -> tuple[bool, str]:
     """
     code, out = osa(
         f'tell application "System Events" to tell process "Messages" to '
-        f'enabled of menu item "{item}" of {MENU}'
+        f'enabled of menu item "{item}" of {menu}'
     )
     if code != 0:
         return (False, "") if "-1728" in out else (False, out)
@@ -171,9 +213,83 @@ def click(item: str) -> tuple[bool, str]:
         return False, ""
     code, out = osa(
         f'tell application "System Events" to tell process "Messages" to '
-        f'click menu item "{item}" of {MENU}'
+        f'click menu item "{item}" of {menu}'
     )
     return (code == 0), ("" if code == 0 else out)
+
+
+def chat_muted(handle: str) -> Optional[bool]:
+    try:
+        con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
+        try:
+            row = con.execute(
+                "SELECT properties FROM chat WHERE chat_identifier = ?", (handle,)
+            ).fetchone()
+        finally:
+            con.close()
+    except Exception:
+        return None
+    if not row or row[0] is None:
+        return False
+    try:
+        props = plistlib.loads(row[0])
+    except Exception:
+        return False
+    return bool(props.get("ignoreAlertsFlag")) if isinstance(props, dict) else False
+
+
+def chat_pinned(handle: str) -> bool:
+    needle = str(handle or "").strip().lower()
+    if not needle:
+        return False
+    for path in PINNING_PLIST_PATHS:
+        try:
+            with open(path, "rb") as fh:
+                data = plistlib.load(fh)
+        except (OSError, plistlib.InvalidFileException, ValueError, TypeError):
+            continue
+        stack = [data]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, str) and item.strip().lower() == needle:
+                return True
+            if isinstance(item, dict):
+                stack.extend(item.values())
+            elif isinstance(item, (list, tuple)):
+                stack.extend(item)
+    return False
+
+
+def click_conversation_item(item: str, handle: str) -> None:
+    """Select a DM and click a Conversation-menu item while Messages is awake."""
+    prev = frontmost()
+    try:
+        why = select_chat(handle)
+        if why:
+            sys.stderr.write(f"imsg-read: {why}\n")
+            sys.exit(64)
+        wake_messages()
+        ok, err = click(item)
+        if not ok and not err:
+            ok, err = click(item)
+        if err:
+            sys.stderr.write(f"imsg-read: {err}\n")
+            sys.exit(1)
+        if not ok:
+            sys.stderr.write(f"imsg-read: {item!r} was not available\n")
+            sys.exit(1)
+    finally:
+        restore_front(prev)
+
+
+def settle_flag(fn, want: bool, tries: int = 8, pause: float = 0.4) -> Optional[bool]:
+    got = fn()
+    for _ in range(tries):
+        if got is want:
+            return got
+        time.sleep(pause)
+        got = fn()
+    return got
 
 
 def frontmost() -> str:
@@ -256,48 +372,118 @@ def main() -> None:
         sys.exit(77)
 
     if argv[0] == "--all":
+        def guard():
+            if "--through" in argv:
+                i = argv.index("--through")
+                if i + 1 >= len(argv) or newer_than_seen(None, argv[i + 1]):
+                    sys.stderr.write("imsg-read: newer inbound arrived; global read cancelled\n")
+                    sys.exit(76)  # terminal stale intent, not a retryable failure
+            if "--through-row" in argv:
+                try:
+                    limit = int(argv[argv.index("--through-row") + 1])
+                    con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
+                    try:
+                        newer = any(row["max_id"] > limit for row in read_state(con))
+                    finally:
+                        con.close()
+                    if limit < 0 or newer:
+                        raise ValueError("newer inbound")
+                except Exception:
+                    sys.stderr.write("imsg-read: newer or unverified inbound; global read cancelled\n")
+                    sys.exit(76)
         before = unread_on_mac()
         if before == 0:
             print("nothing unread")
             return
+        guard()
         ok, err = click("Mark All as Read")
         if not ok and not err and before:
             # Disabled, yet chat.db says unread: the menu is dormant, not empty.
             prev = wake_messages()
-            ok, err = click("Mark All as Read")
-            restore_front(prev)
+            try:
+                guard()
+                ok, err = click("Mark All as Read")
+            finally:
+                restore_front(prev)
         if err:
             sys.stderr.write(f"imsg-read: {err}\n")
             sys.exit(1)
         report(before, settle(before) if ok else before, ok, "Mark All as Read")
         return
 
-    if argv[0] == "--chat":
+    if argv[0] in ("--chat", "--unread"):
         if len(argv) < 2:
-            sys.stderr.write("imsg-read: --chat needs a handle\n")
+            sys.stderr.write("imsg-read: action needs a handle\n")
             sys.exit(64)
-        before = unread_on_mac(argv[1])
-        if before == 0:
-            print("nothing unread")     # and no reason to pull Messages forward
+        handle = argv[1]
+        want_unread = argv[0] == "--unread"
+        before = unread_on_mac(handle)
+        # Idempotency avoids opening an already-unread chat (which reads it)
+        # and prevents polling from repeatedly stealing focus.
+        if before is not None and ((before > 0) == want_unread):
+            print("already unread" if want_unread else "nothing unread")
             return
-        why = select_chat(argv[1])
-        if why:
-            sys.stderr.write(f"imsg-read: {why}\n")
-            sys.exit(64)
-        # The per-conversation item is literally named for what it will do:
-        # "Mark as Unread" when the chat is read, "Mark as Read" when it is not.
-        ok, err = click("Mark as Read")
-        if err:
-            sys.stderr.write(f"imsg-read: {err}\n")
-            sys.exit(1)
-        # Opening the conversation marks it read on its own, so settle even
-        # when the item was absent or disabled.
-        report(before, settle(before, argv[1]), ok, "Mark as Read")
+        if not want_unread and "--through" in argv:
+            i = argv.index("--through")
+            if i + 1 >= len(argv) or newer_than_seen(handle, argv[i + 1]):
+                sys.stderr.write("imsg-read: newer inbound arrived; leaving it unread\n")
+                sys.exit(76)
+        prev = frontmost()
+        try:
+            why = select_chat(handle)
+            if why:
+                sys.stderr.write(f"imsg-read: {why}\n")
+                sys.exit(64)
+            wake_messages()
+            item = "Mark as Unread" if want_unread else "Mark as Read"
+            ok, err = click(item)
+            if err:
+                sys.stderr.write(f"imsg-read: {err}\n")
+                sys.exit(1)
+            # Opening can itself read the chat. Always check the database,
+            # even when the menu was absent, disabled, or the count unknown.
+            after = settle_unread(handle) if want_unread else settle(before, handle)
+            if want_unread:
+                report_unread(before, after, ok)
+            else:
+                report(before, after, ok, item)
+        finally:
+            restore_front(prev)
         return
+
+    acts = {
+        "--pin": ("Pin", lambda h: chat_pinned(h), True, "pinned"),
+        "--unpin": ("Unpin", lambda h: chat_pinned(h), False, "unpinned"),
+        "--mute": ("Hide Alerts", lambda h: chat_muted(h), True, "muted"),
+        "--unmute": ("Show Alerts", lambda h: chat_muted(h), False, "unmuted"),
+    }
+    if argv[0] in acts:
+        if len(argv) < 2:
+            sys.stderr.write(f"imsg-read: {argv[0]} needs a handle\n")
+            sys.exit(64)
+        item, probe, want, word = acts[argv[0]]
+        handle = argv[1]
+        if probe(handle) is want:
+            print(word)
+            return
+        click_conversation_item(item, handle)
+        got = settle_flag(lambda: probe(handle), want)
+        if got is want:
+            print(word)
+            return
+        sys.stderr.write(f"imsg-read: {item} was clicked but the conversation is not {word}\n")
+        sys.exit(75)
 
     sys.stderr.write(f"imsg-read: unknown option {argv[0]!r}\n")
     sys.exit(64)
 
 
 if __name__ == "__main__":
-    main()
+    # All actions share Messages' selection. Serialize concurrent ssh callers
+    # so a read and an unread cannot click the other caller's conversation.
+    lock_path = os.path.expanduser("~/.blip/read-action.lock")
+    os.makedirs(os.path.dirname(lock_path), mode=0o700, exist_ok=True)
+    with open(lock_path, "a") as lock:
+        os.chmod(lock_path, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        main()

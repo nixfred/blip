@@ -288,6 +288,31 @@ describe("QML safety invariants", () => {
     expect(nav).toContain("Qt.ShiftModifier");
   });
 
+  test("Delete is excluded until Mac targeting is verified", () => {
+    expect(panel).not.toContain('text: "Delete"');
+    expect(widget).not.toContain("--delete-chat");
+  });
+
+  test("the conversation menu matches Messages: pin, read/unread, alerts", () => {
+    expect(panel).toContain('text: root.contactContext && root.contactContext.pinned ? "Unpin" : "Pin"');
+    expect(panel).toContain('text: "Mark as Unread"');
+    expect(panel).toContain('text: "Mark as Read"');
+    expect(panel).toContain('text: root.contactContext && root.contactContext.muted ? "Show Alerts" : "Hide Alerts"');
+    expect(panel).not.toContain("Open in New Window");
+    expect(widget).toContain("function conversationAct");
+    expect(widget).toContain("--act");
+  });
+
+  test("mark as unread is a list action, not a compose jump that eats the letter u", () => {
+    expect(panel).toContain('text: "Mark as Unread"');
+    expect(qmlFunction("markUnread")).toContain("hostWidget.markThreadUnread");
+    expect(widget).toContain("function markThreadUnread");
+    expect(widget).toContain('--mark-unread');
+    const fn = handleTextKeySource();
+    expect(fn).toContain('text === "u"');
+    expect(fn.indexOf('text === "u"')).toBeLessThan(fn.indexOf("inThread"));
+  });
+
   test("handleTextKey runs slash, n, and 1-9 before the inThread return", () => {
     const fn = handleTextKeySource();
     expect(fn.indexOf('text === "/"')).toBeLessThan(fn.indexOf("inThread"));
@@ -472,7 +497,7 @@ describe("QML safety invariants", () => {
     // Three read paths, all gated on `peeking`: the two post-load marks in
     // BlipView and readingSurface() in BarWidget (what the collector is told
     // is being read). Focus entering the compose field is the commit.
-    expect(qmlFunction("markRead")).toContain("if (hostWidget && readActive && !peeking) hostWidget.markThreadRead(chat, seen)");
+    expect(qmlFunction("markRead")).toContain("if (hostWidget && readActive && !peeking) hostWidget.markThreadRead(chat, seen, act)");
     expect(panel.split("root.markRead(root.threadRunningChat, seen)").length - 1).toBe(2);
     expect(panel).not.toContain("root.hostWidget.markThreadRead(");
     expect(panel).toContain("onActiveFocusChanged: if (activeFocus) root.commitPeek()");
@@ -603,6 +628,12 @@ test("no source file carries a merge conflict marker", () => {
 // pinned conversation's only unread signal — one unread in a pinned group
 // showed badge 1 and "nothing new in the app". The tile carries the same blue
 // dot the list rows do.
+test("the header unread count is conversations with a blue dot, not inbound rows", () => {
+  expect(widget).toContain("function unreadChatCount");
+  expect(widget).toContain("if ((Number(list[i].unread) || 0) > 0) n++");
+  expect(widget).toContain("root.unread = root.unreadChatCount(root.threads)");
+});
+
 test("a pinned tile shows the unread dot", () => {
   expect(panel).toContain("id: pinnedUnreadDot");
   const dot = panel.slice(panel.indexOf("id: pinnedUnreadDot"), panel.indexOf("id: pinnedUnreadDot") + 700);
@@ -689,7 +720,8 @@ test("a long draft scrolls with the wheel, a short one passes it on", () => {
 
 // A follower bar must never start a collector of its own.
 test("follower bars forward right/middle clicks to the leader", () => {
-  expect(widget).toContain('code === Qt.RightButton ? "read" : "refresh"');
+  expect(widget).toContain('!root.leader && code !== Qt.LeftButton');
+  expect(widget).toContain('"refresh"');
 });
 
 // QsWindow.window is null while a freshly built bar completes its widgets, so
@@ -732,7 +764,7 @@ test("reads require a rendered snapshot and carry its own timestamp", () => {
   expect(panel).toContain("root.markRead(root.threadRunningChat, seen)");   // through the peek gate, same `seen`
   expect(widget).toContain("s.rendered === true");
   expect(widget).toContain('return s ? String(s.seenTs || "") : ""');
-  expect(widget).toContain("function markThreadRead(chat, seen)");
+  expect(widget).toContain("function markThreadRead(chat, seen, act)");
   for (const host of ["./Panel.qml", "./BlipWindow.qml"]) {
     const src = readFileSync(new URL(host, import.meta.url), "utf8");
     expect(src).toContain("readonly property bool rendered: view.rendered");
@@ -972,4 +1004,28 @@ describe("a multi-part send is pinned to the thread it started in", () => {
     const pump = panel.slice(panel.indexOf("function pumpFileSend"), panel.indexOf("function copyText"));
     expect(pump).not.toContain("root.active.service");
   });
+});
+
+// Poll no-op detection must follow optimistic reads and unreads too.
+// A cache assigned only by polls lets a stale result change the count without
+// updating the actual list, producing a badge with more entries than its tooltip.
+test("poll snapshots compare against the current rendered list", () => {
+  expect(widget).toContain("readonly property string threadsJson: JSON.stringify(threads)");
+  expect(widget).not.toContain("root.threadsJson =");
+  expect(widget).toContain("root.unread = root.unreadChatCount(root.threads)");
+});
+
+test("rendered reactions advance the visible read boundary", () => {
+  expect(panel).toContain('String(list[k].seen_ts || list[k].ts || "")');
+  expect(panel).toContain("if (list[k].pending === true || list[k].scheduled === true) continue");
+});
+
+ test("the port preserves upstream mark-all controls and contextual menus", () => {
+  expect(panel).toContain('id: markAllBtn');
+  expect(panel).toContain('if (text === "a" || text === "A") { markAllRead(); return true }');
+  expect(widget).toContain('code === Qt.RightButton ? "read" : "refresh"');
+  expect(widget).toContain('else if (code === Qt.RightButton) root.markAllRead()');
+  expect(panel).toContain('id: messageMenu');
+  expect(panel).toContain('function openMessageMenu(message, url)');
+  expect(panel).toContain('text: "Review contact"');
 });

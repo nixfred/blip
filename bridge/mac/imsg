@@ -37,6 +37,7 @@ import unicodedata
 from glob import glob
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from read_state import read_state
 from calling_codes import REGION_TO_CALLING_CODE, split_calling_code  # noqa: E402  (sibling module)
 
 DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
@@ -863,6 +864,11 @@ def enrich(con, rows, with_names: bool):
         if key not in latest or r["date"] > latest[key]["date"]:
             latest[key] = r
     for (who, tg), r in latest.items():
+        # A rendered reaction (or its removal) is newer activity than the
+        # target bubble. Preserve its timestamp for the client's read boundary.
+        e = extras[targets[tg]]
+        activity = fmt_ts(r["date"])
+        e["activity_ts"] = max(e.get("activity_ts", ""), activity)
         if not (2000 <= r["t"] < 3000):
             continue  # net-removed
         kind = r["t"] - 2000
@@ -966,9 +972,10 @@ def render(rows, as_json: bool, with_names: bool = True, con=None, rich: bool = 
                 "service": r["service"],
                 "chat": r["room_name"] or r["chat_identifier"],
                 "text": message_text(r),
-                # The APPLE-side read state — is_read syncs from the iPhone
-                # via Messages in iCloud, so a client can mirror the phone's
-                # badge. Own messages are trivially "read".
+                # Apple-side read: message.is_read, synced from the iPhone.
+                # Do NOT fold in chat.last_read_message_timestamp — Mark as
+                # Unread leaves the cursor ahead of the row while is_read=0,
+                # which is exactly the blue-dot state Messages shows.
                 "read": bool(r["is_from_me"]) or bool(r["is_read"]),
                 # edited / retracted ride the plain rows as well: the collector
                 # polls without --rich, and its self-thread unsend handling
@@ -1096,6 +1103,11 @@ def base_select(con) -> str:
             if _has_col(con, "schedule_type")
             else "0 AS schedule_type, 0 AS schedule_state,"
         )
+        last_read_col = (
+            "c.last_read_message_timestamp"
+            if _chat_has_col(con, "last_read_message_timestamp")
+            else "NULL AS last_read_message_timestamp"
+        )
         _BASE_SELECT_CACHE = f"""
             SELECT m.ROWID, m.date, m.is_from_me, m.text, m.attributedBody,
                    m.service, h.id AS handle, c.chat_identifier, c.room_name,
@@ -1104,7 +1116,8 @@ def base_select(con) -> str:
                    m.thread_originator_guid AS orig_guid,
                    m.expressive_send_style_id AS style_id,
                    m.is_audio_message,
-                   m.balloon_bundle_id, m.payload_data
+                   m.balloon_bundle_id, m.payload_data,
+                   {last_read_col}
             FROM {MESSAGE_SRC} m
             LEFT JOIN handle h ON h.ROWID = m.handle_id
             LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
@@ -1237,6 +1250,24 @@ def cmd_contacts(con, args):
         print(f"{fmt_ts_local(r['last_date'])}  {r['n']:>6}  {r['service']:>8}  {r['handle']}{suffix}")
 
 
+def _chat_muted(blob) -> bool:
+    """Hide Alerts is chat.properties.ignoreAlertsFlag."""
+    if not blob:
+        return False
+    try:
+        props = plistlib.loads(blob)
+    except (plistlib.InvalidFileException, ValueError, TypeError, OSError):
+        return False
+    return bool(props.get("ignoreAlertsFlag")) if isinstance(props, dict) else False
+
+
+def conversation_window(rows, limit, read_rows):
+    unread_ids = {cid for r in read_rows if r["unread"] > 0
+                  for cid in [r["chat"], *r.get("aliases", [])]}
+    return [r for i, r in enumerate(rows)
+            if i < max(0, limit) or r["chat_identifier"] in unread_ids]
+
+
 def cmd_chats(con, args):
     # Every conversation, newest activity first — the COMPLETE list a client
     # should build its sidebar from (deriving it from a window of recent
@@ -1245,13 +1276,14 @@ def cmd_chats(con, args):
     # original_group_id is absent on older chat.db schemas; probe once.
     chat_cols = {row[1] for row in con.execute("PRAGMA table_info(chat)")}
     orig_col = "c.original_group_id" if "original_group_id" in chat_cols else "NULL"
+    properties_col = "c.properties" if "properties" in chat_cols else "NULL"
     filt = chat_filter_sql(con, args, already_where=False)
     pending = pending_schedule_sql(con)
     rows = con.execute(
         f"""
         SELECT c.ROWID AS cid, c.chat_identifier, c.guid, c.group_id,
                {orig_col} AS original_group_id, c.display_name, c.room_name, c.style,
-               c.service_name,
+               c.service_name, {properties_col} AS properties,
                COALESCE(MAX(CASE WHEN {pending} THEN NULL ELSE m.date END), MAX(m.date)) AS last_date,
                COUNT(m.ROWID) AS n
         FROM chat c
@@ -1260,10 +1292,15 @@ def cmd_chats(con, args):
         {filt}
         GROUP BY c.ROWID
         HAVING n > 0
-        ORDER BY last_date DESC
-        LIMIT ?""",
-        (args.n,),
+        ORDER BY last_date DESC"""
     ).fetchall()
+    # Metadata selection is cheap; only selected rows resolve names/previews.
+    # A quiet unread must not disappear behind the normal sidebar row limit.
+    try:
+        unread_rows = read_state(con)
+    except sqlite3.OperationalError:
+        unread_rows = []  # legacy/minimal schemas retain the bounded list
+    rows = conversation_window(rows, args.n, unread_rows)
     if args.json:
         pin_ids = pinned_chat_identifiers()
         # One entry per CONVERSATION: a group re-keyed by Messages leaves
@@ -1385,6 +1422,7 @@ def cmd_chats(con, args):
                 "pinned": pin_order is not None,
                 "pin_order": pin_order,
                 "pin_name": pin_name or None,
+                "muted": _chat_muted(r["properties"]),
                 # Other chat rows of this same conversation. A client must fold
                 # any thread carrying one of these onto this id.
                 "aliases": [c for c, k in clusters.items()
@@ -2001,6 +2039,17 @@ def cmd_attachment(con, args):
                 pass
 
 
+def cmd_read_state(con, args):
+    predicate = filtered_chat_predicate(
+        bool(getattr(args, "hide_spam", False)),
+        bool(getattr(args, "hide_unknown", False)), _chat_has_col(con, "is_filtered"))
+    rows = read_state(con, predicate, include_deleted=not HIDE_DELETED)
+    for row in rows:
+        row["oldest"] = fmt_ts(row["oldest"]) if row["oldest"] is not None else ""
+        row["latest"] = fmt_ts(row["latest"]) if row["latest"] is not None else ""
+    print(json.dumps({"version": 1, "chats": rows}))
+
+
 def cmd_watch(con, args):
     """Block forever, emitting one line whenever chat.db changes — a push
     channel for remote clients (Blip) that otherwise poll.
@@ -2220,6 +2269,8 @@ def main() -> None:
     s.add_argument("handle", nargs="?", default="")
     s.add_argument("--chat", default="", help="group chat_identifier (32-hex / chat<digits>): stream its GroupPhotoImage")
     s.set_defaults(func=cmd_avatar)
+    s = sub.add_parser("read-state", parents=[common], help="complete metadata-only unread snapshot")
+    s.set_defaults(func=cmd_read_state)
     s = sub.add_parser("watch", parents=[common],
                        help="emit a line whenever chat.db changes (push channel)")
     s.set_defaults(func=cmd_watch)
