@@ -50,6 +50,13 @@
   `bridge.conf`. A successful iMessage anywhere in the loaded window wins, a
   never-iMessage green thread stays green, and a failed iMessage to a phone
   still flips to SMS. Off by default. Groups still send by chat id.
+- **Read/unread synchronization.** Persist pending actions across
+  restarts, process actions separately from polling, cancel global retries on
+  newer inbound rows or superseding gestures, reconcile complete Mac metadata, preserve rapid gesture order and
+  reaction activity timestamps, include old unread conversations, and display
+  failures. Per-thread Mac pushes remain opt-in; group unread marks stay local.
+  Update both Mac helpers and their shared `read_state.py` module together.
+
 
 - **A Send Later message shows as Scheduled, not sent.** Messages writes a
   scheduled message into chat.db the moment you queue it, dated at the time it
@@ -89,6 +96,28 @@
   The badge already ignored those (`isUnread` honours Apple's read flag);
   `selectToasts` now does too. A bridge too old to report `read` toasts as
   before. Reported by @mwhuss (#89), fixed by @ianswope (#95).
+- **Blue dots follow Messages' is_read, not the read cursor.** Mark as
+  Unread (and some iCloud sync) leaves `last_read_message_timestamp` ahead
+  of a row that still has `is_read=0` — the state Messages shows as unread.
+  Folding the cursor into `read` hid those threads. The blue dot now follows
+  the newest inbound `is_read=0`. Older ghost unread rows under a read tip
+  still do not badge.
+
+- **The header counts conversations, not messages.** Two dotted threads
+  with two unread rows each said "4 UNREAD". It now matches the blue dots,
+  and the bar badge uses the same figure.
+
+- **Conversation menu matches Messages.** Right-click is Pin / Unpin, Mark
+  as Unread or Mark as Read, Hide Alerts / Show Alerts, with
+  icons. Pin, alerts, and read-state click Messages' own menu (DMs only).
+
+- **Mark as Unread.** Right-click a conversation (or press `U` in the list)
+  to put the blue dot back. Blip cannot lower the global read floor without
+  resurrecting every other thread, so it stores a per-chat override and, for
+  DMs, clicks Messages' own **Mark as Unread** on the Mac so the iPhone
+  badge can follow. Groups have no `imessage://` form, so those stay local
+  to this machine. Opening the thread clears it again.
+
 - **The app window stays on its workspace after idle.** Walking away used to
   remap Blip onto whichever workspace was on screen. A user move is still the
   new home; a screensaver or display-off remap is sent back quietly.

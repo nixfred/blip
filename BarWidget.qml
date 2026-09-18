@@ -1,4 +1,5 @@
 import QtQuick
+import "ReadSync.mjs" as ReadSync
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -17,7 +18,7 @@ import "BinDir.mjs" as BinDir
 // (~/.config/blip/allowlist.json) — chat.db is mostly bank alerts and 2FA codes,
 // and none of that deserves an interruption.
 //
-// Left-click = panel · double-click = the app window · middle-click = refresh · right-click = mark all read.
+// Left-click = panel · double-click = the app window · middle-click = refresh.
 BarWidget {
   id: root
   moduleName: "nixfred.blip"
@@ -40,7 +41,7 @@ BarWidget {
 
   // ---- collector state
   property var threads: []           // [{chat,name,handle,service,last_ts,last_text,last_from_me,count,unread,pinned,pin_order}]
-  readonly property string threadsJson: JSON.stringify(threads) // includes optimistic reads
+  readonly property string threadsJson: JSON.stringify(threads) // includes optimistic edits
   property int unread: 0
   property bool online: false        // the Mac is reachable
   property bool healthy: false       // last collector run parsed cleanly
@@ -86,7 +87,7 @@ BarWidget {
         var st = JSON.parse(text())
         var counts = st.unreadCounts || {}
         var n = 0
-        for (var k in counts) n += Number(counts[k]) || 0
+        for (var k in counts) if ((Number(counts[k]) || 0) > 0) n++
         root.unread = n; root.online = true; root.healthy = true
       } catch (e) {}
     }
@@ -257,6 +258,11 @@ BarWidget {
   // run (`imsg chats`); a shallow poll returns the window's rows. Kept so a
   // shallow result can be overlaid rather than replacing the model.
   property var deepThreads: []
+  function unreadChatCount(list) {
+    var n = 0
+    for (var i = 0; i < list.length; i++) if ((Number(list[i].unread) || 0) > 0) n++
+    return n
+  }
   function overlayThreads(deep, shallow) {
     var byChat = {}
     for (var i = 0; i < shallow.length; i++) byChat[String(shallow[i].chat)] = shallow[i]
@@ -288,36 +294,24 @@ BarWidget {
   }
   property bool collectorReserved: false // a queued run owns the next event-loop turn
 
-  function refresh(deep, markRead, readChat, seen) {
+  function refresh(deep, markRead, readChat, seen, unreadChat, act, actTarget) {
     var req = { deep: deep === true, markRead: markRead === true,
-                readChat: String(readChat || ""), seen: String(seen || "") }
+                readChat: String(readChat || ""), seen: String(seen || ""),
+                unreadChat: String(unreadChat || ""),
+                act: String(act || ""), actTarget: String(actTarget || "") }
     if (collector.running || collectorReserved) { enqueueRefresh(req); return }
     runRefresh(req)
   }
   function enqueueRefresh(req) {
-    var q = refreshQueue.slice()
-    // Coalesce identical state transitions: plain refreshes merge with plain
-    // refreshes, and same-chat read refreshes merge too (viewing a thread
-    // makes every ping carry its readChat — without this the queue grows one
-    // entry per ping). mark-all stays FIFO and is never overwritten.
-    if (!req.markRead) {
-      for (var i = 0; i < q.length; i++) {
-        if (!q[i].markRead && q[i].readChat === req.readChat) {
-          q[i] = { deep: q[i].deep || req.deep, markRead: false, readChat: req.readChat,
-                   seen: req.seen > q[i].seen ? req.seen : q[i].seen }
-          refreshQueue = q
-          return
-        }
-      }
-    }
-    q.push(req)
-    refreshQueue = q
+    refreshQueue = ReadSync.enqueueRefresh(refreshQueue, req)
   }
   function runRefresh(req) {
     var args = ["bun", collectorPath]
     if (req.deep) args.push("--deep")
     if (req.markRead) args.push("--mark-read")
-    if (req.readChat !== "") {
+    if (req.unreadChat) args.push("--mark-unread", req.unreadChat)
+    if (req.act) { args.push("--act", req.act); if (req.actTarget) args.push("--target", req.actTarget) }
+    if (req.readChat !== "" && req.readChat !== req.unreadChat) {
       args.push("--read", req.readChat)
       if (req.seen !== "") args.push("--seen", req.seen)
     }
@@ -335,19 +329,38 @@ BarWidget {
   // genuinely NEWER inbound message exists. Entries expire once persisted
   // state has caught up (or after 60s, whichever first).
   property var localReads: ({})
+  property var localUnreads: ({})
 
   function noteLocalRead(chat, lastTs) {
     var m = Object.assign({}, localReads)
     m[String(chat)] = { ts: String(lastTs || ""), at: Date.now() }
     localReads = m
+    var u = Object.assign({}, localUnreads)
+    if (u[String(chat)]) { delete u[String(chat)]; localUnreads = u }
+  }
+
+  function noteLocalUnread(chat) {
+    var u = Object.assign({}, localUnreads)
+    u[String(chat)] = { at: Date.now() }
+    localUnreads = u
+    var m = Object.assign({}, localReads)
+    if (m[String(chat)]) { delete m[String(chat)]; localReads = m }
   }
 
   function applyLocalReads(list) {
     var now = Date.now()
     var m = Object.assign({}, localReads)
+    var u = Object.assign({}, localUnreads)
     var dirty = false
     var out = list.map(function(t) {
-      var r = m[String(t.chat)]
+      var id = String(t.chat)
+      var forced = u[id]
+      if (forced) {
+        if (now - forced.at > 60000) { delete u[id]; dirty = true }
+        else if (Number(t.unread) > 0) { delete u[id]; dirty = true; return t }
+        else return Object.assign({}, t, { unread: 1 })
+      }
+      var r = m[id]
       if (!r) return t
       // persistence caught up (or nothing left) — retire the entry so stale
       // suppression rules can't linger for the TTL (Codex #5)
@@ -359,14 +372,14 @@ BarWidget {
       if (String(t.last_ts) > r.ts) return t
       return Object.assign({}, t, { unread: 0 })
     })
-    if (dirty) localReads = m
+    if (dirty) { localReads = m; localUnreads = u }
     return out
   }
 
   /** `seen` = the newest ts the surface actually rendered. Without it the
    *  mark went through the sidebar's last_ts, which can be a message that
    *  arrived after the snapshot the user is looking at (Astra A#3). */
-  function markThreadRead(chat, seen) {
+  function markThreadRead(chat, seen, act) {
     var c = String(chat)
     var lastTs = seen ? String(seen) : ""
     var list = threads.map(function(t) {
@@ -376,11 +389,43 @@ BarWidget {
     })
     noteLocalRead(c, lastTs)
     threads = list
-    unread = list.reduce(function(n, t) { return n + (Number(t.unread) || 0) }, 0)
-    refresh(true, false, c, lastTs)
+    unread = unreadChatCount(list)
+    refresh(true, false, c, lastTs, "", act || "", act ? c : "")
+  }
+
+  function markThreadUnread(chat) {
+    var c = String(chat)
+    var list = threads.map(function(t) {
+      if (String(t.chat) !== c) return t
+      return Number(t.unread) > 0 ? t : Object.assign({}, t, { unread: 1 })
+    })
+    noteLocalUnread(c)
+    threads = list
+    unread = unreadChatCount(list)
+    refresh(true, false, "", "", c)
+  }
+
+  function conversationAct(kind, chat) {
+    var c = String(chat)
+    var k = String(kind)
+    if (k === "pin" || k === "unpin") {
+      var nextOrder = 0
+      threads.forEach(function(t) { if (t.pinned && t.pin_order != null && t.pin_order >= nextOrder) nextOrder = Number(t.pin_order) + 1 })
+      threads = threads.map(function(t) {
+        if (String(t.chat) !== c) return t
+        return Object.assign({}, t, { pinned: k === "pin", pin_order: k === "pin" ? nextOrder : null })
+      }).sort(root.compareThreads)
+    } else if (k === "mute" || k === "unmute") {
+      threads = threads.map(function(t) {
+        if (String(t.chat) !== c) return t
+        return Object.assign({}, t, { muted: k === "mute" })
+      })
+    }
+    refresh(true, false, "", "", "", k, c)
   }
 
   function markAllRead() {
+    localUnreads = ({})
     for (var i = 0; i < threads.length; i++)
       noteLocalRead(String(threads[i].chat), String(threads[i].last_ts || ""))
     threads = threads.map(function(t) {
@@ -450,12 +495,16 @@ BarWidget {
             // Filter through the optimistic-read ledger: a poll that was
             // already in flight when the user opened a thread must not
             // resurrect its dot for one round-trip (the double-flash).
-            var list = root.applyLocalReads(Array.isArray(d.threads) ? d.threads : [])
+            var list = Array.isArray(d.threads) ? d.threads : []
             // A shallow poll carries only the message window's rows. Overlay
             // it on the last complete list so the panel never opens onto a
             // dozen rows that grow (and re-pin) a deep run later.
             if (d.deep === true) root.deepThreads = list
             else if (root.deepThreads.length > 0) list = root.overlayThreads(root.deepThreads, list)
+            if (d.unreadCounts) list = list.map(function(t) {
+              return Object.assign({}, t, { unread: Number(d.unreadCounts[String(t.chat)]) || 0 })
+            })
+            list = root.applyLocalReads(list)
             // Reassigning `threads` rebuilds the panel's list Repeater and
             // resets its scroll — with push, that was every few seconds.
             // Skip the assignment when nothing actually changed.
@@ -463,8 +512,8 @@ BarWidget {
             if (j !== root.threadsJson) {
               root.threads = list
             }
-            root.unread = root.threads.reduce(function(n, t) { return n + (Number(t.unread) || 0) }, 0)
-            root.healthy = d.persisted !== false
+            root.unread = root.unreadChatCount(root.threads)
+            root.healthy = d.persisted !== false && root.lastError === ""
             // A message that carries a security code gets the code toast only:
             // its ordinary preview would put the digits into the daemon's
             // on-disk history like any other body (Astra #1).
@@ -515,7 +564,7 @@ BarWidget {
     // (Mac down, watcher restarting) it is the old 6 s poll.
     // offline: back off to 30 s — a Mac that is off for the night must not
     // eat a bun + ssh probe every 6 s (war room #19); "ready" restores 6 s
-    interval: root.watchAlive ? 60000 : (root.online ? 6000 : 30000)
+    interval: root.watchAlive ? 10000 : (root.online ? 6000 : 30000)
     running: root.leader
     repeat: true
     triggeredOnStart: true
@@ -914,7 +963,7 @@ BarWidget {
     var parts = []
     if (!root.online) parts.push("Mac unreachable — iMessage bridge offline")
     else if (root.unread === 0) parts.push("No unread messages")
-    else parts.push(root.unread + " unread message" + (root.unread === 1 ? "" : "s"))
+    else parts.push(root.unread + " unread")
 
     if (root.online && root.unread > 0) {
       var hot = root.threads.filter(function(t){ return t.unread > 0 }).slice(0, 4)

@@ -15,15 +15,19 @@
  *   bun collector.ts --deep     # panel open: wider window, full thread list
  *   bun collector.ts --mark-read        # clear every dot (right-click)
  *   bun collector.ts --read <chat>      # clear one thread's dot (opened it)
+ *   bun collector.ts --mark-unread <chat>  # blue-dot that thread again
  */
 
+import { readWorkerState, scheduleReadJob } from "./read-worker";
 import { shimPath } from "./shim-path";
 import { openSync, writeSync, fsyncSync, closeSync } from "node:fs";
 import { homedir } from "node:os";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { parseReadSnapshot, parseReadIntents, queueReadIntent, queueMenuIntent, reconcileReadIntents,
+  type ReadSnapshot, type ReadIntents } from "./read-sync";
 
 const HOME = process.env.HOME ?? homedir();
 
@@ -58,6 +62,8 @@ export interface ImsgMessage {
   // lexical order IS chronological order — which every ledger, watermark and
   // sort in this file relies on. Local time is a DISPLAY concern (thread.ts).
   ts: string;
+  /** Newest reaction activity folded onto this message by the rich bridge. */
+  activity_ts?: string;
   from_me: boolean;
   /** True only when the Mac bridge knows this is the configured self chat. */
   self_chat?: boolean;
@@ -120,6 +126,8 @@ export interface Thread {
   pin_name?: string;
   /** Other people in a group, for explicit per-person contact actions. */
   participants?: GroupParticipant[];
+  /** Messages Hide Alerts (ignoreAlertsFlag). */
+  muted?: boolean;
 }
 
 export interface GroupParticipant { handle: string; name: string }
@@ -152,6 +160,10 @@ export interface GroupInfo {
 }
 
 export interface BlipState {
+  pendingReads?: ReadIntents;
+  readRowId?: number;
+  readAllRowId?: number;
+  alertMuted?: string[];
   watermark: string;
   readMark: string;
   /** Exact unread ledger, independent of the bounded preview window. */
@@ -168,6 +180,10 @@ export interface BlipState {
   /** Per-thread read marks — iMessage semantics: the blue dot stays on a
    *  thread until THAT conversation is opened, not until the list is viewed. */
   readMarks: Record<string, string>;
+  /** Per-thread marks that MAY sit below the global readMark. "Mark as
+   *  Unread" cannot lower the global floor (that would resurrect every other
+   *  thread); it stores an override here so only this chat badges again. */
+  unreadSince: Record<string, string>;
   /** Older chat rows of a re-keyed group → the row Messages writes to now.
    *  Refreshed on --deep with the chat list; cached so a shallow poll folds
    *  the same way and a conversation never blinks into two. */
@@ -185,6 +201,7 @@ export interface BlipOutput {
   error: string;
   ts: string;
   unread: number;
+  unreadCounts?: Record<string, number>;
   threads: Thread[];
   toast: Toast[];
   /** Your own recent sends that died (chat.db error≠0); toasted once each. */
@@ -265,6 +282,10 @@ export function loadState(path = STATE_PATH): BlipState {
     const ledgerComplete = Object.entries(unreadCounts)
       .every(([chat, count]) => count === 0 || unreadOldest[chat]);
     return {
+      ...(Array.isArray(s.alertMuted) ? { alertMuted: s.alertMuted.filter((x): x is string => typeof x === "string") } : {}),
+      ...(Number.isSafeInteger(s.readAllRowId) && s.readAllRowId! >= 0 ? { readAllRowId: s.readAllRowId } : {}),
+      ...(Number.isSafeInteger(s.readRowId) && s.readRowId! >= 0 ? { readRowId: s.readRowId } : {}),
+      ...(s.pendingReads ? { pendingReads: parseReadIntents(s.pendingReads) } : {}),
       watermark,
       // Pre-two-mark state files have no readMark. Inheriting the watermark is
       // the safe migration: it reports zero unread rather than a fake backlog.
@@ -278,6 +299,13 @@ export function loadState(path = STATE_PATH): BlipState {
       readMarks: s.readMarks && typeof s.readMarks === "object"
         ? Object.fromEntries(
           Object.entries(s.readMarks)
+            .filter(([, ts]) => typeof ts === "string" && ts !== "")
+            .map(([chat, ts]) => [chat, toUtcStamp(ts as string)]),
+        )
+        : {},
+      unreadSince: s.unreadSince && typeof s.unreadSince === "object"
+        ? Object.fromEntries(
+          Object.entries(s.unreadSince)
             .filter(([, ts]) => typeof ts === "string" && ts !== "")
             .map(([chat, ts]) => [chat, toUtcStamp(ts as string)]),
         )
@@ -299,7 +327,7 @@ export function loadState(path = STATE_PATH): BlipState {
   } catch {
     return {
       watermark: "", readMark: "", unreadCounts: {}, unreadOldest: {}, unreadInitialized: false,
-      selfChats: [], readMarks: {}, groups: {}, chatAliases: {}, pins: {}, toasted: [],
+      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, chatAliases: {}, pins: {}, toasted: [],
     };
   }
 }
@@ -655,6 +683,7 @@ export function buildThreads(
   groups: Record<string, GroupInfo> = {},
   unreadCounts?: Record<string, number>,
   preferImessage = false,
+  unreadSince: Record<string, string> = {},
 ): Thread[] {
   const byHandle = new Map<string, string>();
   for (const m of msgs) if (m.name && m.handle && !byHandle.has(m.handle)) byHandle.set(m.handle, m.name);
@@ -671,12 +700,13 @@ export function buildThreads(
     const sorted = [...list].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
     const sent = sorted.filter((m) => m.scheduled !== true);
     const last = sent.length ? sent[sent.length - 1]! : sorted[sorted.length - 1]!;
-    const mark = readMarks[chat] && readMarks[chat]! > watermark ? readMarks[chat]! : watermark;
     const unread = unreadCounts
       ? unreadCounts[chat] ?? 0
-      : watermark
-        ? sorted.filter((m) => !m.from_me && m.ts > mark && m.read !== true).length
-        : 0;
+      : sorted.filter((m) => {
+        const mark = unreadMark(chat, m, watermark, readMarks, unreadSince);
+        if (!mark && m.read !== false && !unreadSince[chat]) return false;
+        return isUnread(m, mark, Boolean(unreadSince[chat]));
+      }).length;
     threads.push({
       chat,
       guid: isGroupChat(chat) ? groups[chat]?.guid ?? "" : "",
@@ -690,6 +720,7 @@ export function buildThreads(
       unread,
       pinned: false,
       pin_order: null,
+      muted: false,
       ...(isGroupChat(chat) ? { participants: groupParticipants(groups[chat], byHandle) } : {}),
     });
   }
@@ -1083,63 +1114,16 @@ export function pushReadPolicy(path = BRIDGE_CONF): PushRead {
   return "all";
 }
 
-/** What to hand `imsg-read`, or null when this run should tell the Mac nothing. */
-export function pushReadArgs(
-  policy: PushRead,
-  opts: { markRead: boolean; readChat: string; clearedUnread?: boolean },
-): string[] | null {
-  if (policy === "off") return null;
-  if (opts.markRead) return ["--all"];
-  if (policy !== "thread") return null;
-  // Only when this run turned unread into read. A poll that cleared nothing
-  // has nothing to tell the Mac, and telling it anyway opens the conversation
-  // there — once per poll for as long as the thread stays open.
-  if (opts.clearedUnread === false) return null;
-  const chat = String(opts.readChat || "");
-  // Groups have no imessage:// form, so only a DM can be aimed at.
-  if (!/^\+?[0-9]{3,15}$/.test(chat) && !/^[^@\s]+@[^@\s]+$/.test(chat)) return null;
-  return ["--chat", chat];
+export function pushUnreadArgs(chat: string): string[] | null {
+  const id = String(chat || "");
+  if (!/^\+?[0-9]{3,15}$/.test(id) && !/^[^@\s]+@[^@\s]+$/.test(id)) return null;
+  return ["--unread", id];
 }
 
-/**
- * Tell the Mac, without making the caller wait. The click costs a second or
- * two of AppleScript; a poll must not stall behind it, and a failure must
- * never turn into a failed refresh — the local marks have already moved.
- */
-export function pushRead(args: string[] | null, home = HOME): void {
-  if (!args) return;
-  try {
-    const child = spawn("sh", pushReadCommand(shimPath("imsg-read", home), args, pushReadLogPath(home)),
-      { detached: true, stdio: "ignore" });
-    child.unref();
-  } catch { /* no shim, no Mac, no matter */ }
-}
-
-/** Where a push's outcome is recorded. Timestamps, args and imsg-read's own
- *  status line only — no message content ever reaches this file. */
-export function pushReadLogPath(home = HOME): string {
-  return `${home}/.local/state/blip/push-read.log`;
-}
-
-/**
- * The detached push wrapped so its OUTCOME survives it. The collector exits
- * before imsg-read finishes and cannot collect the exit code itself; without
- * this a push that fails (Accessibility revoked, Messages without a window,
- * the Mac asleep) is indistinguishable from one that worked — the local marks
- * cleared, the phone kept its badge, and nothing anywhere said why. Found
- * 2026-09-04: one unread cleared in Blip, still unread on Apple's side, no
- * evidence in either direction. Keeps the last ~100 lines, 0600.
- */
-export function pushReadCommand(bin: string, args: string[], log: string): string[] {
-  const script = [
-    'umask 077',
-    'log="$1"; bin="$2"; shift 2',
-    'out=$("$bin" "$@" 2>&1); rc=$?',
-    'printf "%s %s exit=%s %s\\n" "$(date +%FT%T)" "$*" "$rc" "${out:0:200}" >> "$log"',
-    '[ "$(wc -c < "$log")" -gt 65536 ] && { tail -n 100 "$log" > "$log.tmp" && mv "$log.tmp" "$log"; }',
-    'exit $rc',
-  ].join('; ');
-  return ["-c", script, "sh", log, bin, ...args];
+/** DMs only: groups have no imessage:// form, same as per-thread mark-read. */
+export function canAddressChat(chat: string): boolean {
+  const id = String(chat || "");
+  return /^\+?[0-9]{3,15}$/.test(id) || /^[^@\s]+@[^@\s]+$/.test(id);
 }
 
 /** How far back a delivery failure is still worth interrupting for. */
@@ -1451,8 +1435,8 @@ export function keepUnverifiedUnread(
  *     from the iPhone via Messages in iCloud) — reading on the PHONE clears
  *     Blip within a poll.
  *   - Local side: newer than the effective read mark — reading in BLIP
- *     clears it here (the phone keeps its own badge; write-back is
- *     impossible).
+ *     clears it here. The collector separately queues Mac read actions when
+ *     the configured policy enables them.
  * A row without the `read` field (older imsg) falls back to local-only.
  */
 /**
@@ -1494,13 +1478,94 @@ export function toUtcStamp(ts: string): string {
 /** Every stamp a message carries, normalised to the wire format. */
 export function normalizeMsgStamps<T extends ImsgMessage>(m: T): T {
   if (typeof m.ts === "string" && !m.ts.includes("T")) m = { ...m, ts: toUtcStamp(m.ts) };
+  if (typeof m.activity_ts === "string") m = { ...m, activity_ts: toUtcStamp(m.activity_ts) };
   if (typeof m.read_at === "string" && !m.read_at.includes("T")) m = { ...m, read_at: toUtcStamp(m.read_at) };
   return m;
 }
 
-export function isUnread(m: ImsgMessage, mark: string): boolean {
+export function isUnread(m: ImsgMessage, mark: string, ignoreAppleRead = false): boolean {
   // Tapbacks preview but never badge — matches every Apple client.
-  return !m.from_me && m.ts > mark && m.read !== true && m.tapback !== true;
+  return !m.from_me && m.ts > mark && m.tapback !== true && (ignoreAppleRead || m.read !== true);
+}
+
+/** The stamp a thread is measured against. unreadSince may sit below the
+ *  global floor; a stale per-thread read mark may not. */
+export function effectiveMark(
+  chat: string,
+  readMark: string,
+  readMarks: Record<string, string>,
+  unreadSince: Record<string, string> = {},
+): string {
+  if (unreadSince[chat]) return unreadSince[chat]!;
+  return readMarks[chat] && readMarks[chat]! > readMark ? readMarks[chat]! : readMark;
+}
+
+/** Mark used for ONE message. Apple-unread (read===false) is the iPhone
+ *  badge: the global floor must not hide it (first-run high-water would
+ *  wipe every already-unread thread). Opening that conversation still
+ *  hides it via readMarks[chat]. Missing `read` keeps the old local-only
+ *  floor so a backlog cannot dump on install. */
+export function unreadMark(
+  chat: string,
+  m: ImsgMessage,
+  readMark: string,
+  readMarks: Record<string, string>,
+  unreadSince: Record<string, string> = {},
+): string {
+  if (unreadSince[chat]) return unreadSince[chat]!;
+  if (m.read === false) return readMarks[chat] || "";
+  return effectiveMark(chat, readMark, readMarks, unreadSince);
+}
+
+/** One second before an ISO stamp, so that message itself counts as unread. */
+export function stampBefore(ts: string): string {
+  const ms = Date.parse(ts);
+  return Number.isNaN(ms) ? "" : nowTs(new Date(ms - 1000));
+}
+
+export function lastInboundTs(msgs: ImsgMessage[], chat: string): string {
+  let ts = "";
+  for (const m of msgs) {
+    if (chatKey(m) !== chat) continue;
+    if (m.from_me || m.tapback === true) continue;
+    if (m.ts > ts) ts = m.ts;
+  }
+  return ts;
+}
+
+/**
+ * Unread is the TRAILING inbound that Messages still flags is_read=0.
+ * Ghost is_read=0 rows under a read tip do not badge. Mark as Unread sets
+ * is_read=0 on the latest inbound even when last_read_message_timestamp is
+ * already past it — that is the blue-dot state. Opening the thread here
+ * still hides it via readMarks[chat].
+ */
+export function trailingUnread(
+  inbound: ImsgMessage[],
+  readMark: string,
+  localMark: string,
+  forceSince = "",
+): { count: number; oldest: string } {
+  const list = [...inbound].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  if (forceSince) {
+    const hit = list.filter((m) => isUnread(m, forceSince, true));
+    return { count: hit.length, oldest: hit[0]?.ts ?? "" };
+  }
+  const newest = list[list.length - 1];
+  if (!newest) return { count: 0, oldest: "" };
+  if (newest.read === true) return { count: 0, oldest: "" };
+  if (newest.read !== false && !readMark && !localMark) return { count: 0, oldest: "" };
+  let count = 0;
+  let oldest = "";
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i]!;
+    if (m.read === true) break;
+    if (localMark && m.ts <= localMark) break;
+    if (m.read !== false && readMark && m.ts <= readMark) break;
+    count++;
+    oldest = m.ts;
+  }
+  return { count, oldest };
 }
 
 export function unreadCounts(
@@ -1508,15 +1573,21 @@ export function unreadCounts(
   readMark: string,
   readMarks: Record<string, string>,
   selfChats: string[] = [],
+  unreadSince: Record<string, string> = {},
 ): Record<string, number> {
   const counts: Record<string, number> = {};
-  if (!readMark) return counts;
   const self = new Set(selfChats);
+  const byChat = new Map<string, ImsgMessage[]>();
   for (const m of msgs) {
     const chat = chatKey(m);
-    if (self.has(chat)) continue; // your own echoes never badge (phone parity)
-    const mark = readMarks[chat] && readMarks[chat]! > readMark ? readMarks[chat]! : readMark;
-    if (isUnread(m, mark)) counts[chat] = (counts[chat] ?? 0) + 1;
+    if (self.has(chat) || m.from_me || m.tapback === true) continue;
+    const list = byChat.get(chat);
+    if (list) list.push(m);
+    else byChat.set(chat, [m]);
+  }
+  for (const [chat, list] of byChat) {
+    const { count } = trailingUnread(list, readMark, readMarks[chat] || "", unreadSince[chat] || "");
+    if (count) counts[chat] = count;
   }
   return counts;
 }
@@ -1526,15 +1597,21 @@ export function unreadOldest(
   readMark: string,
   readMarks: Record<string, string>,
   selfChats: string[] = [],
+  unreadSince: Record<string, string> = {},
 ): Record<string, string> {
   const oldest: Record<string, string> = {};
-  if (!readMark) return oldest;
   const self = new Set(selfChats);
+  const byChat = new Map<string, ImsgMessage[]>();
   for (const m of msgs) {
     const chat = chatKey(m);
-    if (self.has(chat)) continue;
-    const mark = readMarks[chat] && readMarks[chat]! > readMark ? readMarks[chat]! : readMark;
-    if (isUnread(m, mark) && (!oldest[chat] || m.ts < oldest[chat]!)) oldest[chat] = m.ts;
+    if (self.has(chat) || m.from_me || m.tapback === true) continue;
+    const list = byChat.get(chat);
+    if (list) list.push(m);
+    else byChat.set(chat, [m]);
+  }
+  for (const [chat, list] of byChat) {
+    const hit = trailingUnread(list, readMark, readMarks[chat] || "", unreadSince[chat] || "");
+    if (hit.count && hit.oldest) oldest[chat] = hit.oldest;
   }
   return oldest;
 }
@@ -1557,6 +1634,7 @@ export interface ChatInfo {
   pin_order: number | null;
   last_attachment?: { name: string; mime: string } | null;
   pin_name: string | null;
+  muted: boolean;
 }
 
 /** How many conversations the sidebar lists (chat.db has hundreds). */
@@ -1617,6 +1695,7 @@ export function fetchChats(runner = spawnSync): ChatInfo[] | null {
           pin_order: boundedPinOrder,
           pin_name: typeof rawPinName === "string" && rawPinName.trim() !== ""
             ? rawPinName.trim().slice(0, 160) : null,
+          muted: r.muted === true,
         };
       });
   } catch {
@@ -1774,6 +1853,7 @@ export function mergeChats(
       last_text: info.last === thread.last_ts ? info.last_text : messagePreview(thread.last_text),
       pinned,
       pin_order,
+      muted: info.muted === true,
       ...(info.pin_name ? { pin_name: info.pin_name } : {}),
       ...(group ? {
         participants: groupInfo
@@ -1809,6 +1889,7 @@ export function mergeChats(
       unread: aliases.reduce((sum, alias) => sum + (unreadCounts[alias] ?? 0), 0),
       pinned: c.pinned === true,
       pin_order: Number.isInteger(c.pin_order) ? Number(c.pin_order) : null,
+      muted: c.muted === true,
       ...(c.pin_name ? { pin_name: c.pin_name } : {}),
       ...(group ? { participants: groupParticipants(groupInfo) } : {}),
     });
@@ -1851,13 +1932,54 @@ export function fetchGroups(runner = spawnSync): Record<string, GroupInfo> | nul
 
 // ---------------------------------------------------------------- main
 
-export function collect(deep: boolean, markRead = false, readChat = "", seenTs = ""): BlipOutput {
+
+
+export function fetchReadSnapshot(runner = spawnSync): ReadSnapshot | null {
+  try {
+    const r = runner(shimPath("imsg"), ["--json", "read-state"], {
+      encoding: "utf8", timeout: 20000, maxBuffer: 16 * 1024 * 1024,
+    });
+    return r.status === 0 ? parseReadSnapshot(JSON.parse(String(r.stdout))) : null;
+  } catch { return null; }
+}
+
+export function collect(deep: boolean, markRead = false, readChat = "", seenTs = "", unreadChat = "", explicitRead = false, menuAction = "", menuTarget = ""): BlipOutput {
   // When this POLL ran — the output's own metadata, not a message stamp.
   // Distinct from nowTs() below, which is the clock message stamps are
   // measured against and therefore has to be in the wire format.
   const producedAt = new Date().toISOString();
   const state = loadState();
-  const cutoff = windowCutoff(state);
+  const readPush = pushReadPolicy();
+  const globalSeen = seenTs || state.watermark;
+  const worker = readWorkerState(HOME, state.pendingReads ?? {});
+  if (worker.completed) deep = true; // refresh pin and alert metadata after acknowledgement
+  let pendingReads = readPush === "off"
+    ? Object.fromEntries(Object.entries(worker.pending).filter(([, r]) => r.action))
+    : { ...worker.pending };
+  if (menuAction && canAddressChat(menuTarget)) pendingReads = queueMenuIntent(pendingReads, menuTarget, menuAction);
+  // Persist explicit intent before any network call. An offline click survives
+  // the collector exiting and is retried after reconnection.
+  if (readPush !== "off") {
+    if (markRead) pendingReads = queueReadIntent(pendingReads, "*", false, globalSeen, state.readRowId);
+    if (unreadChat && pushUnreadArgs(unreadChat)) pendingReads = queueReadIntent(pendingReads, unreadChat, true);
+    if ((explicitRead || (readPush === "thread" && (state.unreadCounts[readChat] ?? 0) > 0)) && readChat && readChat !== unreadChat && canAddressChat(readChat)) pendingReads = queueReadIntent(pendingReads, readChat, false, seenTs);
+  }
+  if (JSON.stringify(pendingReads) !== JSON.stringify(state.pendingReads ?? {}) &&
+      !saveState({ ...state, pendingReads })) {
+    throw new Error("state write failed; read action was not queued");
+  }
+  const remoteReads = fetchReadSnapshot();
+  if (remoteReads && !worker.busy) pendingReads = reconcileReadIntents(pendingReads, remoteReads);
+  // On migration, seed the ledger all the way back to what the user last read.
+  // Thereafter cover both new arrivals and every outstanding unread row. That
+  // makes the ledger exact even if an unread message is deleted on the Mac.
+  const oldestUnread = Object.values(state.unreadOldest).reduce(
+    (oldest, ts) => !oldest || ts < oldest ? ts : oldest,
+    "",
+  );
+  const cutoff = remoteReads ? state.watermark : state.unreadInitialized
+    ? oldestUnread && oldestUnread < state.watermark ? oldestUnread : state.watermark
+    : state.readMark;
   const fetched = fetchMessagesAfter(cutoff, deep ? DEEP_WINDOW : POLL_WINDOW);
 
   if (!fetched.ok) {
@@ -1916,16 +2038,33 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   }
   // Badge counts against readMark (what the user has seen); toasts fire against
   // watermark (what the collector has seen). See BlipState.
-  const readMark = markRead ? (highest <= now ? highest : now) : state.readMark;
+  const readMark = markRead && globalSeen ? (globalSeen <= now ? globalSeen : now) : state.readMark;
   // Opening one conversation clears only that thread's dot — marked with
   // THAT chat's newest ts, never the global max.
-  const readMarks = { ...state.readMarks };
+  // Under thread sync, confirmed Mac state replaces historical local marks.
+  // Legacy permanent unread overrides are retired as soon as a full snapshot
+  // is available. Failed actions are represented by pendingReads instead.
+  const readMarks = remoteReads && readPush === "thread"
+    ? Object.fromEntries(Object.entries(state.readMarks).filter(([chat]) => isGroupChat(chat)))
+    : { ...state.readMarks };
+  const unreadSince = remoteReads && readPush !== "off"
+    ? Object.fromEntries(Object.entries(state.unreadSince ?? {}).filter(([chat]) => isGroupChat(chat)))
+    : { ...state.unreadSince };
   if (markRead) {
+    for (const c of Object.keys(readMarks)) delete readMarks[c];
     for (const [c, ts] of Object.entries(chatMax)) {
-      if (ts > readMark) readMarks[c] = ts;
+      if (!remoteReads && ts <= globalSeen) readMarks[c] = ts > now ? ts : now;
     }
+    for (const c of Object.keys(unreadSince)) delete unreadSince[c];
   }
-  if (readChat) {
+  if (unreadChat) {
+    const inbound = lastInboundTs(fetched.msgs, unreadChat);
+    const pivot = inbound || chatMax[unreadChat] || now;
+    unreadSince[unreadChat] = stampBefore(pivot) || "1970-01-01T00:00:00Z";
+    delete readMarks[unreadChat];
+  }
+  if (readChat && readChat !== unreadChat) {
+    delete unreadSince[readChat];
     // Mark through what the user actually SAW (the panel passes the newest
     // bubble ts as --seen; it includes a future-dated row when the chat has
     // one on screen). A message arriving between the click and this run has
@@ -1934,7 +2073,7 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
     const own = chatMax[readChat] ?? "";
     readMarks[readChat] = seenTs !== "" ? seenTs : (own > now ? own : now);
   }
-  const readSeen = readChat ? readMarks[readChat]! : "";
+  const readSeen = readChat && readChat !== unreadChat ? readMarks[readChat]! : "";
   // Group metadata is ~1000 rows; refresh it only on a deep (panel) fetch and
   // keep the last good copy if the lookup fails.
   const groups = (deep ? fetchGroups() : null) ?? state.groups;
@@ -1951,8 +2090,8 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   const deduped = dedupeSelfEcho(caughtUp, selfChats);
   const muted = mutedChats(deduped, mute);
   const msgs = dropMuted(deduped, muted);
-  let exactCounts = unreadCounts(msgs, state.readMark, state.readMarks, selfChats);
-  let exactOldest = unreadOldest(msgs, state.readMark, state.readMarks, selfChats);
+  let exactCounts = unreadCounts(msgs, state.readMark, readMarks, selfChats, unreadSince);
+  let exactOldest = unreadOldest(msgs, state.readMark, readMarks, selfChats, unreadSince);
   // Deep runs complete the sidebar from `imsg chats`. A capped catch-up
   // needs that list too: otherwise a chat hide_spam dropped in SQL is
   // restored from the ledger (Astra B#3) and pins every later poll.
@@ -1974,29 +2113,23 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
     exactCounts = kept.counts;
     exactOldest = kept.oldest;
   }
-  // Did THIS run actually turn unread into read for the chat being viewed?
-  // Every poll while a thread is open carries its readChat (that is what keeps
-  // a message landing in the open conversation from flashing unread), so
-  // without this the Mac was told again on every single poll. Each of those
-  // costs an ssh AND pulls Messages to the front, because aiming its menu at
-  // one conversation means opening it — five pushes in one minute, four of
-  // them "nothing unread" (measured, 2026-09-08).
-  let clearedUnread = false;
   if (markRead) {
     exactCounts = {};
     exactOldest = {};
-  } else if (readChat) {
-    clearedUnread = (exactCounts[readChat] ?? 0) > 0;
-    delete exactCounts[readChat];
-    delete exactOldest[readChat];
+  }
+  // Per-chat counts were already calculated through --seen above. Do not
+  // zero them wholesale: that would hide arrivals newer than the rendered view.
+  if (unreadChat && (exactCounts[unreadChat] ?? 0) === 0) {
+    exactCounts[unreadChat] = 1;
+    if (!exactOldest[unreadChat]) exactOldest[unreadChat] = unreadSince[unreadChat] || now;
   }
   // Prune per-thread marks the global mark has overtaken (Codex finding #13):
   // they no longer affect any count and would otherwise accumulate forever.
   for (const [chat, ts] of Object.entries(readMarks)) {
-    if (ts <= readMark) delete readMarks[chat];
+    if (!remoteReads && ts <= readMark) delete readMarks[chat];
   }
   const preferImessage = preferImessagePolicy();
-  const windowThreads = buildThreads(msgs, readMark, readMarks, groups, exactCounts, preferImessage);
+  const windowThreads = buildThreads(msgs, readMark, readMarks, groups, exactCounts, preferImessage, unreadSince);
   // A shallow poll returns the window's rows; the widget keeps its last
   // complete list in memory (it skips identical assignments anyway).
   const chats = deep ? listed : null;
@@ -2004,38 +2137,110 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   // bridge names the older ones as aliases of the live row, and the map is
   // cached so shallow polls fold identically (a conversation must never
   // blink into two between a deep run and the next poll).
-  const chatAliases = chats ? aliasesFromChats(chats) : state.chatAliases;
+  const chatAliases = { ...(chats ? aliasesFromChats(chats) : state.chatAliases) };
+  for (const [chat, row] of Object.entries(remoteReads ?? {})) {
+    delete chatAliases[chat];
+    for (const alias of row.aliases ?? []) chatAliases[alias] = chat;
+  }
   const pins = chats ? pinsFromChats(chats) : state.pins;
-  if (readChat) {
+  if (readChat && readChat !== unreadChat) {
     for (const a of aliasesOf(chatAliases, readChat)) {
-      if (readSeen > readMark) readMarks[a] = readSeen;   // same prune rule as the canonical
-      // An alias carrying the unread counts too: reading the canonical row
-      // cleared it, so the Mac is worth telling.
-      if ((exactCounts[a] ?? 0) > 0) clearedUnread = true;
-      delete exactCounts[a];
-      delete exactOldest[a];
+      if (remoteReads || readSeen > readMark) readMarks[a] = readSeen;   // same prune rule as the canonical
+      delete unreadSince[a];
+      const remaining = unreadCounts(msgs, state.readMark, readMarks, selfChats, unreadSince);
+      const oldestRemaining = unreadOldest(msgs, state.readMark, readMarks, selfChats, unreadSince);
+      if (remaining[a]) {
+        exactCounts[a] = remaining[a]!;
+        exactOldest[a] = oldestRemaining[a]!;
+      } else {
+        delete exactCounts[a];
+        delete exactOldest[a];
+      }
     }
+  }
+  if (unreadChat) {
+    for (const a of [unreadChat, ...aliasesOf(chatAliases, unreadChat)]) {
+      unreadSince[a] = unreadSince[unreadChat]!;
+      delete readMarks[a];
+      if ((exactCounts[a] ?? 0) === 0) exactCounts[a] = 1;
+    }
+  }
+  if (remoteReads) {
+    exactCounts = {};
+    exactOldest = {};
+    for (const [chat, row] of Object.entries(remoteReads)) {
+      if (selfChats.includes(chat) || muted.includes(chat) || mute.includes(chat)) continue;
+      const canonical = chatAliases[chat] ?? chat;
+      if (selfChats.includes(canonical) || muted.includes(canonical) || mute.includes(canonical)) continue;
+      if (row.unread > 0) {
+        exactCounts[chat] = row.unread;
+        exactOldest[chat] = row.oldest;
+      }
+      const reading = canonical === readChat && readChat !== unreadChat;
+      // Compare to the visible snapshot BEFORE advancing any read mark. An
+      // unseen inbound must keep its dot and must not be cleared on the Mac.
+      if (reading && readPush === "thread" && row.unread > 0 && seenTs && row.latest <= seenTs && canAddressChat(readChat)) {
+        pendingReads = queueReadIntent(pendingReads, readChat, false, seenTs);
+      }
+      const intent = pendingReads[canonical] ?? pendingReads["*"];
+      const localMark = readMarks[chat] || readMarks[canonical] || "";
+      const globalRow = markRead ? state.readRowId : state.readAllRowId;
+      const coveredByAll = globalRow !== undefined && row.max_id !== undefined && row.max_id <= globalRow;
+      if ((markRead && coveredByAll) ||
+          ((readPush !== "thread" || isGroupChat(canonical)) && coveredByAll) || (reading && seenTs && row.latest <= seenTs) ||
+          ((readPush !== "thread" || isGroupChat(canonical)) && localMark && row.latest <= localMark) ||
+          (intent && !intent.unread && (!intent.seen || row.latest <= intent.seen))) {
+        delete exactCounts[chat]; delete exactOldest[chat];
+      }
+    }
+  } else if (readPush === "thread" && readChat && canAddressChat(readChat) && readChat !== unreadChat) {
+    // Older/offline bridges still retain the transition until it is verified.
+    const before = unreadCounts(msgs, state.readMark, state.readMarks, selfChats, state.unreadSince);
+    if (seenTs && lastInboundTs(msgs, readChat) > seenTs) {
+      delete pendingReads[readChat];
+    } else if ((before[readChat] ?? 0) > 0 || (state.unreadCounts[readChat] ?? 0) > 0) {
+      pendingReads = queueReadIntent(pendingReads, readChat, false, seenTs);
+    }
+  }
+  {
+    for (const [chat, since] of Object.entries(unreadSince)) {
+      if (readPush !== "off" && !isGroupChat(chat)) continue;
+      exactCounts[chat] = Math.max(1, exactCounts[chat] ?? 0);
+      exactOldest[chat] ||= since;
+    }
+  }
+  for (const [chat, intent] of Object.entries(pendingReads)) {
+    if (!intent.action && intent.unread) { exactCounts[chat] = Math.max(1, exactCounts[chat] ?? 0); exactOldest[chat] ||= unreadSince[chat] || now; }
   }
   exactCounts = foldChatRecord(exactCounts, chatAliases, (a, b) => a + b);
   exactOldest = foldChatRecord(exactOldest, chatAliases, (a, b) => (a < b ? a : b));
-  const foldedWindow = foldThreadAliases(windowThreads, chatAliases);
+  const foldedWindow = foldThreadAliases(windowThreads, chatAliases).map(t => ({ ...t, unread: exactCounts[t.chat] ?? 0 }));
   const threads = chats ? mergeChats(foldedWindow, chats, groups, exactCounts) : applyPins(foldedWindow, pins);
   // The conversation on screen covers its alias rows, exactly as the read
   // marks above do: a message arriving under a retired chat row is the same
   // conversation you are looking at.
   const readingNow = readChat ? [readChat, ...aliasesOf(chatAliases, readChat)] : [];
-  const toast = selectToasts(msgs, state.watermark, loadAllowlist(), state.toasted, readingNow);
+  const alertMuted = listed ? listed.filter(c => c.muted).flatMap(c => [c.id, ...(c.aliases ?? [])]) : state.alertMuted ?? [];
+  const toast = selectToasts(msgs, state.watermark, loadAllowlist(), state.toasted, readingNow)
+    .filter(t => !alertMuted.includes(t.chat));
   const failures = selectFailures(fetched.msgs, state.toasted, now);
-  const links = selectIncomingLinks(msgs, state.watermark, state.toasted, selfChats);
-  const codes = selectCodes(msgs, state.watermark, state.toasted, selfChats);
-  const unread = Object.values(exactCounts).reduce((n, count) => n + count, 0);
+  const links = selectIncomingLinks(msgs, state.watermark, state.toasted, selfChats).filter(t => !alertMuted.includes(t.chat));
+  const codes = selectCodes(msgs, state.watermark, state.toasted, selfChats).filter(t => !alertMuted.includes(t.chat));
+  // Header/badge count conversations with a blue dot, not inbound rows.
+  // Two chats with two unread messages each used to say "4 UNREAD".
+  const unread = Object.values(exactCounts).filter((count) => count > 0).length;
 
   // Both marks advance only on a good fetch, so an outage cannot silently
   // swallow the messages that arrived during it.
   // A row dated tomorrow (tz skew) must not become the mark everything is
   // measured against — nothing would badge or toast until "tomorrow" (Astra B#4).
   const highestNow = highest <= now ? highest : now;
-  const persisted = saveState({
+  const nextState: BlipState = {
+    alertMuted,
+    readAllRowId: markRead ? state.readRowId : state.readAllRowId,
+    readRowId: remoteReads && Object.values(remoteReads).every(r => r.max_id !== undefined)
+      ? Math.max(0, ...Object.values(remoteReads).map(r => r.max_id!)) : state.readRowId,
+    pendingReads,
     watermark: highestNow,
     // First ever run: adopt the current high-water rather than reporting the
     // whole preview window as unread the moment the plugin is installed.
@@ -2045,27 +2250,33 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
     unreadInitialized: true,
     selfChats,
     readMarks,
+    unreadSince,
     groups,
     chatAliases,
     pins,
     toasted: [...state.toasted, ...toast.map((t) => t.key), ...failures.map((f) => f.key),
       ...links.map((l) => l.key), ...codes.map((c) => c.key)],
-  });
+  };
+  const persisted = saveState(nextState);
 
-  // Only after the local state is committed: if the write failed the user
-  // will be asked to read these again, and the Mac must agree.
-  const readPush = pushReadPolicy();
-  if (persisted) pushRead(pushReadArgs(readPush, { markRead, readChat, clearedUnread }));
-
+  // The mailbox worker cannot write collector state or delay message polling.
+  let syncError = worker.notice;
+  if (persisted) {
+    try { scheduleReadJob(HOME, pendingReads, worker.completed); }
+    catch { syncError = "Read worker could not start; will retry"; }
+  }
+  const remaining = Object.keys(pendingReads).length;
   const warning = !persisted
     ? "state write failed; notifications paused"
-    : "";
+    : syncError || (remaining ? (Object.values(pendingReads).find(r => r.error)?.error || `Read sync pending (${remaining}); retrying automatically`) :
+      !remoteReads ? "Read sync snapshot unavailable; update/check the Mac bridge" : "");
   return {
     ok: true,
     online: true,
     error: warning,
     ts: producedAt,
     unread,
+    unreadCounts: remoteReads ? exactCounts : undefined,
     threads,
     // Never emit notifications that could not be committed to the dedupe ring.
     toast: persisted ? toast : [],
@@ -2087,11 +2298,20 @@ if (import.meta.main) {
   const deep = process.argv.includes("--deep");
   const markRead = process.argv.includes("--mark-read");
   const ri = process.argv.indexOf("--read");
-  const readChat = ri >= 0 ? String(process.argv[ri + 1] ?? "") : "";
+  let readChat = ri >= 0 ? String(process.argv[ri + 1] ?? "") : "";
   const si = process.argv.indexOf("--seen");
   const seenTs = si >= 0 ? String(process.argv[si + 1] ?? "") : "";
+  const ui = process.argv.indexOf("--mark-unread");
+  let unreadChat = ui >= 0 ? String(process.argv[ui + 1] ?? "") : "";
+  const ai = process.argv.indexOf("--act");
+  const act = ai >= 0 ? String(process.argv[ai + 1] ?? "") : "";
+  const ti = process.argv.indexOf("--target");
+  const actTarget = ti >= 0 ? String(process.argv[ti + 1] ?? "") : "";
   try {
-    console.log(JSON.stringify(collect(deep, markRead, readChat, seenTs)));
+    if (act === "unread" && actTarget) unreadChat = unreadChat || actTarget;
+    if (act === "read" && actTarget) readChat = readChat || actTarget;
+    const out = collect(deep, markRead, readChat, seenTs, unreadChat, act === "read", act, actTarget);
+    console.log(JSON.stringify(out));
   } catch (e) {
     console.log(
       JSON.stringify({

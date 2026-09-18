@@ -61,7 +61,7 @@ FocusScope {
   readonly property color dim: appearance.muted
   /** An editor owns the keyboard — the host's key catcher must stand down. */
   readonly property bool editorActive:
-    messageMenu.visible || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused
+    messageMenu.visible || contactMenu.visible || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused
   readonly property alias composeEditor: composeField
   readonly property real contentHeightHint: listContent.implicitHeight
   /** The view wants keyboard navigation focus back (list mode). */
@@ -564,8 +564,8 @@ FocusScope {
   }
   /** The one gate for "this thread was looked at": a surface that marks read,
    *  and not a thread merely peeked. */
-  function markRead(chat, seen) {
-    if (hostWidget && readActive && !peeking) hostWidget.markThreadRead(chat, seen)
+  function markRead(chat, seen, act) {
+    if (hostWidget && readActive && !peeking) hostWidget.markThreadRead(chat, seen, act)
   }
   function showThread(t) {
     messageMenu.close()
@@ -716,7 +716,11 @@ FocusScope {
     if (!root.hostWidget || root.unread === 0) return
     root.hostWidget.markAllRead()
   }
-
+  function markUnread(t) {
+    if (!t || !root.hostWidget) return
+    if (isShowing(t) || (inThread && String(active.chat) === String(t.chat))) back()
+    root.hostWidget.markThreadUnread(String(t.chat))
+  }
   /** Chip icon for an attachment's mime type. */
   function attachmentIcon(mime) {
     var m = String(mime || "")
@@ -1618,7 +1622,7 @@ FocusScope {
             var seen = ""
             for (var k = 0; k < list.length; k++) {
               if (list[k].pending === true || list[k].scheduled === true) continue
-              var ts = String(list[k].ts || ""); if (ts > seen) seen = ts
+              var ts = String(list[k].seen_ts || list[k].ts || ""); if (ts > seen) seen = ts
             }
             // thread.ts hands back the sends it is still waiting on for this
             // chat; keep asking for a few seconds, then leave it to the next
@@ -2092,6 +2096,12 @@ FocusScope {
       openThread(threads[i])
       return true
     }
+    if (text === "u" || text === "U") {
+      if (searching || newMode) return false
+      var t = threads[cursor]
+      if (t) markUnread(t)
+      return true
+    }
     if ((inThread && !splitView) || searching || newMode) return false
     if (text === "r" || text === "R") { if (hostWidget) hostWidget.refresh(true, false); return true }
     if (text === "a" || text === "A") { markAllRead(); return true }
@@ -2100,6 +2110,7 @@ FocusScope {
   function catchNavText(text) {
     if (contactReview.opened) return false
     var jump = text === "/" || text === "n" || text === "N"
+      || text === "u" || text === "U"
       || (text >= "1" && text <= "9")
     if (!jump) return false
     if (searchField.activeFocus || newField.activeFocus || bubbleFocused) return false
@@ -3916,11 +3927,62 @@ FocusScope {
   }
 
   property var contactContext: null
+  function isDmChat(t) {
+    var c = t ? String(t.chat || "") : ""
+    return /^\+?[0-9]{3,15}$/.test(c) || c.indexOf("@") > 0
+  }
+  function closeConversationMenu() { contactMenu.close() }
+  function openConversationMenu(thread) {
+    contactContext = thread
+    contactMenu.popup()
+  }
+  function menuIcon(name) { return Qt.resolvedUrl("icons/" + name + ".svg") }
   Menu {
     id: contactMenu
+    width: 240
     MenuItem {
       text: "Review contact"
       onTriggered: if (root.contactContext) contactReview.review(root.contactContext)
+    }
+    MenuSeparator {}
+    MenuItem {
+      text: root.contactContext && root.contactContext.pinned ? "Unpin" : "Pin"
+      icon.source: root.menuIcon("pin")
+      enabled: root.isDmChat(root.contactContext)
+      onTriggered: {
+        var t = root.contactContext
+        if (t && root.hostWidget) root.hostWidget.conversationAct(t.pinned ? "unpin" : "pin", t.chat)
+      }
+    }
+    MenuSeparator {}
+    MenuItem {
+      visible: !(root.contactContext && Number(root.contactContext.unread || 0) > 0)
+      height: visible ? implicitHeight : 0
+      text: "Mark as Unread"
+      icon.source: root.menuIcon("unread")
+      enabled: root.isDmChat(root.contactContext)
+      onTriggered: if (root.contactContext) root.markUnread(root.contactContext)
+    }
+    MenuItem {
+      visible: root.contactContext && Number(root.contactContext.unread || 0) > 0
+      height: visible ? implicitHeight : 0
+      text: "Mark as Read"
+      icon.source: root.menuIcon("read")
+      onTriggered: {
+        var t = root.contactContext
+        if (!t) return
+        root.peeking = false
+        root.markRead(String(t.chat), String(t.last_ts || ""), root.isDmChat(t) ? "read" : "")
+      }
+    }
+    MenuItem {
+      text: root.contactContext && root.contactContext.muted ? "Show Alerts" : "Hide Alerts"
+      icon.source: root.menuIcon("moon")
+      enabled: root.isDmChat(root.contactContext)
+      onTriggered: {
+        var t = root.contactContext
+        if (t && root.hostWidget) root.hostWidget.conversationAct(t.muted ? "unmute" : "mute", t.chat)
+      }
     }
   }
   ContactReview {

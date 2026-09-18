@@ -731,3 +731,14 @@ describe("Send Later bubbles", () => {
     expect(b!.scheduled).toBeUndefined();
   });
 });
+
+test("reading a displayed reaction covers its activity without moving the original bubble", () => {
+  const original = "2026-09-01T10:00:00Z";
+  const reaction = "2026-09-01T11:00:00Z";
+  const bubbles = decorate([{ ts: original, activity_ts: reaction, from_me: true,
+    chat: "+15551234567", handle: "+15551234567", name: null, service: "iMessage", text: "fixture",
+    tapbacks: [{ emoji: "❤️", from_me: false, by: null }] }], "2026-09-01");
+  expect(bubbles[0]!.ts).toBe(original);
+  expect(bubbles[0]!.seen_ts).toBe(reaction);
+  expect(bubbles[0]!.tapbacks).toHaveLength(1);
+});

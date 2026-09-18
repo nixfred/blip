@@ -12,7 +12,8 @@ inventory of what lands on disk.
 | `~/.ssh/blip_ed25519` | Blip's dedicated ssh key — confined on the Mac to the bridge tools | — |
 | `~/.config/blip/allowlist.json` | handles allowed to raise desktop toasts | message text |
 | `~/.config/blip/mutelist.json` | handles and phrases you typed, whose conversations Blip hides entirely | message text Blip received |
-| `~/.local/state/blip/state.json` (0600, atomic) | poll watermark, read marks, per-chat unread counts and oldest-unread timestamps, self-chat ids, group names/members, opaque SHA-256 toast keys | **message bodies — ever** |
+| `~/.local/state/blip/state.json` (0600, atomic) | poll watermark, read marks, per-chat unread counts and oldest-unread timestamps, pending actions, request ids, inbound row boundaries, alert-muted ids and retry status, self-chat ids, group names/members, opaque SHA-256 toast keys | **message bodies — ever** |
+| `~/.local/state/blip/read-worker/` (0700; JSON files 0600, atomic) | current action arguments, opaque request ids, bounded result status and lock file | message bodies, contact names |
 | `~/.local/state/blip/audit-cache.json` (0600, parent 0700) | bounded contact-scan summaries: handles, candidate names, source labels, counts, opaque card tokens, and freshness fingerprints | message bodies, photos, full contact cards |
 | `~/.local/state/blip/window.json` | whether the app window was open, its size | anything else |
 | `~/.cache/blip/att/` (0700, files 0600, 500 MB LRU, no expiry) | attachments you viewed, plus images ≤ 5 MB and link-preview thumbnails in any conversation you *open* (they render inline, so they are fetched when the thread is). HEIC arrives converted to JPEG. File names carry the Mac's attachment row id and a sanitized name whose extension follows the MIME type | attachments in conversations you never opened |
@@ -42,10 +43,10 @@ address is refused. Turn it off with `link_previews=off` in
 Message text lives only in memory while the panel or window is open. Desktop
 toasts show a sender name and a preview through your notification daemon,
 gated by the allowlist — and your notification daemon may keep its own
-history. Blip itself keeps one log, `~/.local/state/blip/push-read.log` (timestamps, the `imsg-read` arguments — `--all`, or a handle when `push_read=thread` — exit codes and its status line; never message content), and nothing else; the shell's stderr (journald) sees
+history. Blip itself keeps one log, `~/.local/state/blip/push-read.log` (timestamps, the `imsg-read` arguments — `--all`, or a handle when `push_read=thread` — verified/failure status; never message content), and nothing else; the shell's stderr (journald) sees
 recipients and exit codes, never bodies (`imsg-send` prints a byte count).
-Message bodies do pass through process arguments on both machines, visible
-to other processes running as you.
+Message bodies do not pass through bridge process arguments; they use stdin.
+The read-state snapshot contains identifiers, counts, timestamps, inbound row ids and aliases only.
 
 Threat model and the audit findings behind these notes: [SECURITY.md](SECURITY.md).
 
@@ -77,7 +78,9 @@ screen reader. That shared bus remains enabled when Blip stops.
 The tools read `~/Library/Messages/chat.db`, the AddressBook database, and
 Messages' pinning preferences read-only, and drive Messages.app through
 AppleScript. They write nothing else. Messages.app itself keeps your
-conversation history exactly as it always has.
+conversation history exactly as it always has. Read actions also use
+`~/.blip/read-action.lock` to serialize access to Messages' selected conversation;
+the lock contains no message data.
 
 Contact review reads bounded names, account labels, matching-field counts,
 and opaque card tokens from Mac Contacts. Raw database identifiers stay on the

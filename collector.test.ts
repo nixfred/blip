@@ -7,8 +7,6 @@ import { join } from "node:path";
 import {
   aliasesOf,
   normalizeGroups,
-  pushReadCommand,
-  pushReadLogPath,
   buildThreads,
   detectSelfChats,
   fetchMessagesAfter,
@@ -48,6 +46,11 @@ import {
   CATCHUP_CHAT_ROWS,
   unreadCounts,
   unreadOldest,
+  stampBefore,
+  lastInboundTs,
+  effectiveMark,
+  pushUnreadArgs,
+  canAddressChat,
   type ImsgMessage,
   type ChatInfo,
 } from "./collector";
@@ -169,6 +172,23 @@ describe("buildThreads", () => {
       { A: "2026-08-30T09:00:00Z" },
     );
     expect(threads[0]!.unread).toBe(0);
+  });
+
+  test("unreadSince may sit below the global mark and resurrects that chat only", () => {
+    const threads = buildThreads(
+      [
+        msg({ chat: "A", handle: "A", ts: "2026-08-30T09:30:00Z", read: true }),
+        msg({ chat: "B", handle: "B", ts: "2026-08-30T09:30:00Z", read: true }),
+      ],
+      "2026-08-30T10:00:00Z",
+      {},
+      {},
+      undefined,
+      false,
+      { A: "2026-08-30T09:00:00Z" },
+    );
+    const byChat = Object.fromEntries(threads.map((t) => [t.chat, t.unread]));
+    expect(byChat).toEqual({ A: 1, B: 0 });
   });
 
   test("a null chat falls back to the handle — never the string \"null\"", () => {
@@ -709,6 +729,7 @@ describe("state and allowlist I/O", () => {
       unreadInitialized: true,
       selfChats: ["SELF"],
       readMarks: { A: "2026-08-30T09:30:00Z" },
+      unreadSince: {},
       groups: {},
       chatAliases: { OLD: "A" },
       pins: { A: 0 },
@@ -720,7 +741,7 @@ describe("state and allowlist I/O", () => {
   test("a missing state file yields a safe empty watermark", () => {
     expect(loadState(join(tmp(), "nope.json"))).toEqual({
       watermark: "", readMark: "", unreadCounts: {}, unreadOldest: {}, unreadInitialized: false,
-      selfChats: [], readMarks: {}, groups: {}, chatAliases: {}, pins: {}, toasted: [],
+      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, chatAliases: {}, pins: {}, toasted: [],
     });
   });
 
@@ -729,7 +750,7 @@ describe("state and allowlist I/O", () => {
     writeFileSync(p, "{ this is not json");
     expect(loadState(p)).toEqual({
       watermark: "", readMark: "", unreadCounts: {}, unreadOldest: {}, unreadInitialized: false,
-      selfChats: [], readMarks: {}, groups: {}, chatAliases: {}, pins: {}, toasted: [],
+      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, chatAliases: {}, pins: {}, toasted: [],
     });
   });
 
@@ -737,7 +758,7 @@ describe("state and allowlist I/O", () => {
     const p = join(tmp(), "big.json");
     saveState({
       watermark: "x", readMark: "x", unreadCounts: {}, unreadOldest: {}, unreadInitialized: true,
-      selfChats: [], readMarks: {}, groups: {}, toasted: Array.from({ length: 500 }, (_, i) => `k${i}`),
+      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, toasted: Array.from({ length: 500 }, (_, i) => `k${i}`),
     }, p);
     expect(loadState(p).toasted).toHaveLength(200);
   });
@@ -757,7 +778,7 @@ describe("state and allowlist I/O", () => {
     writeFileSync(blocker, "x");
     expect(saveState({
       watermark: "x", readMark: "x", unreadCounts: {}, unreadOldest: {}, unreadInitialized: true,
-      selfChats: [], readMarks: {}, groups: {}, toasted: [],
+      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, toasted: [],
     }, join(blocker, "state.json"))).toBe(false);
   });
 
@@ -1048,9 +1069,29 @@ describe("phone-synced read state (imsg ≥1.9.0 `read`)", () => {
     expect(counts["+15551234567"]).toBe(1);
   });
 
-  test("locally-read messages stay read regardless of Apple state", () => {
+  test("Apple-unread still badges below the global floor (iPhone badge)", () => {
     const counts = unreadCounts([m({ read: false })], "2026-08-31T23:00:00Z", {});
+    expect(counts["+15551234567"]).toBe(1);
+  });
+
+  test("opening a thread still hides its Apple-unread rows", () => {
+    const counts = unreadCounts(
+      [m({ read: false })],
+      "2026-08-31T00:00:00Z",
+      { "+15551234567": "2026-08-31T12:00:00Z" },
+    );
     expect(counts["+15551234567"]).toBeUndefined();
+  });
+
+  test("a read tip hides older is_read=0 ghosts; an unread tip badges", () => {
+    expect(unreadCounts([
+      m({ ts: "2026-08-31T10:00:00Z", read: false }),
+      m({ ts: "2026-08-31T12:00:00Z", read: true }),
+    ], "2026-08-31T00:00:00Z", {})).toEqual({});
+    expect(unreadCounts([
+      m({ ts: "2026-08-31T10:00:00Z", read: true }),
+      m({ ts: "2026-08-31T12:00:00Z", read: false }),
+    ], "2026-08-31T23:00:00Z", {})["+15551234567"]).toBe(1);
   });
 });
 
@@ -1494,7 +1535,7 @@ describe("failure-toast keys survive the ring normalizer (2.2.0)", () => {
 });
 
 describe("pushing read state back to the Mac", () => {
-  const { pushReadArgs, pushReadPolicy } = require("./collector") as typeof import("./collector");
+  const { pushReadPolicy } = require("./collector") as typeof import("./collector");
   const conf = (body: string): string => {
     const p = `${process.env.XDG_CACHE_HOME}/push-conf-${process.pid}-${Math.random().toString(36).slice(2)}`;
     writeFileSync(p, body);
@@ -1514,24 +1555,48 @@ describe("pushing read state back to the Mac", () => {
     expect(pushReadPolicy(conf("push_read=chat\n"))).toBe("thread");
   });
 
-  test("mark-all-read pushes --all under every policy but off", () => {
-    expect(pushReadArgs("all", { markRead: true, readChat: "" })).toEqual(["--all"]);
-    expect(pushReadArgs("thread", { markRead: true, readChat: "" })).toEqual(["--all"]);
-    expect(pushReadArgs("off", { markRead: true, readChat: "" })).toBeNull();
+
+
+
+
+
+
+  test("mark-unread pushes --unread for DMs only", () => {
+    expect(pushUnreadArgs("+15550100011")).toEqual(["--unread", "+15550100011"]);
+    expect(pushUnreadArgs("them@example.com")).toEqual(["--unread", "them@example.com"]);
+    expect(pushUnreadArgs("ce5a593a78af408282d61461ade89135")).toBeNull();
+    expect(pushUnreadArgs("chat900000000000000001")).toBeNull();
+    expect(pushUnreadArgs("")).toBeNull();
   });
 
-  test("opening one conversation pushes only under `thread`", () => {
-    expect(pushReadArgs("all", { markRead: false, readChat: "+15550100011" })).toBeNull();
-    expect(pushReadArgs("thread", { markRead: false, readChat: "+15550100011" }))
-      .toEqual(["--chat", "+15550100011"]);
-    expect(pushReadArgs("thread", { markRead: false, readChat: "them@example.com" }))
-      .toEqual(["--chat", "them@example.com"]);
+
+
+
+
+});
+
+describe("mark as unread", () => {
+  test("stampBefore is one second earlier", () => {
+    expect(stampBefore("2026-08-30T10:00:00Z")).toBe("2026-08-30T09:59:59Z");
   });
 
-  test("a group is never pushed per-thread — it has no imessage:// form", () => {
-    expect(pushReadArgs("thread", { markRead: false, readChat: "chat900000000000000001" })).toBeNull();
-    expect(pushReadArgs("thread", { markRead: false, readChat: "ce5a593a78af408282d61461ade89135" })).toBeNull();
-    expect(pushReadArgs("thread", { markRead: false, readChat: "" })).toBeNull();
+  test("lastInboundTs skips outbound and tapbacks", () => {
+    expect(lastInboundTs([
+      msg({ ts: "2026-08-30T09:00:00Z" }),
+      msg({ ts: "2026-08-30T11:00:00Z", from_me: true }),
+      msg({ ts: "2026-08-30T12:00:00Z", tapback: true }),
+    ], "+15551234567")).toBe("2026-08-30T09:00:00Z");
+  });
+
+  test("effectiveMark prefers unreadSince even below the global floor", () => {
+    expect(effectiveMark("A", "2026-08-30T10:00:00Z", { A: "2026-08-30T11:00:00Z" }, { A: "2026-08-30T09:00:00Z" }))
+      .toBe("2026-08-30T09:00:00Z");
+  });
+
+  test("unreadCounts honours unreadSince even when Apple already marked the row read", () => {
+    const rows = [msg({ chat: "A", handle: "A", ts: "2026-08-30T09:30:00Z", read: true })];
+    expect(unreadCounts(rows, "2026-08-30T10:00:00Z", {}, [], { A: "2026-08-30T09:00:00Z" })).toEqual({ A: 1 });
+    expect(unreadCounts(rows, "2026-08-30T10:00:00Z", {}, [])).toEqual({});
   });
 });
 
@@ -1847,25 +1912,9 @@ describe("the mute list can catch a person (documented caveat, #27)", () => {
 });
 
 describe("pushRead breadcrumb", () => {
-  test("the detached push records its exit code and status text, in a 0600 log", () => {
-    const argv = pushReadCommand("/home/u/bin/imsg-read", ["--all"], "/home/u/.local/state/blip/push-read.log");
-    expect(argv[0]).toBe("-c");
-    expect(argv.slice(2)).toEqual(["sh", "/home/u/.local/state/blip/push-read.log", "/home/u/bin/imsg-read", "--all"]);
-    const script = argv[1]!;
-    expect(script.startsWith("umask 077")).toBe(true);
-    expect(script).toContain('"$bin" "$@" 2>&1');
-    expect(script).toContain("exit=");
-    expect(script).toContain('${out:0:200}');          // status text only, bounded
-    expect(script).toContain("tail -n 100");           // never grows unbounded
-    expect(script.trim().endsWith("exit $rc")).toBe(true);
-  });
-  test("--chat pushes carry the handle through untouched", () => {
-    const argv = pushReadCommand("/x/imsg-read", ["--chat", "+15550100011"], "/x/log");
-    expect(argv.slice(-2)).toEqual(["--chat", "+15550100011"]);
-  });
-  test("the log lives beside state.json, never in the cache", () => {
-    expect(pushReadLogPath("/home/u")).toBe("/home/u/.local/state/blip/push-read.log");
-  });
+
+
+
 });
 
 describe("security codes: detect, hold once, never from a group", () => {
@@ -1969,22 +2018,8 @@ describe("search stdin payload (Astra B#2)", () => {
 });
 
 describe("the read-push policy is reported, not just applied", () => {
-  const { pushReadArgs } = require("./collector.ts");
-  test("the default pushes only on mark-all, never on opening a conversation", () => {
-    // This is why reads did not reach the phone: correct by design, and
-    // invisible until collect() started reporting the policy (Fred, 2026-09-08).
-    expect(pushReadArgs("all", { markRead: false, readChat: "+15550100001" })).toBeNull();
-    expect(pushReadArgs("all", { markRead: true, readChat: "" })).toEqual(["--all"]);
-  });
-  test("thread pushes a DM you open, but never a group", () => {
-    expect(pushReadArgs("thread", { markRead: false, readChat: "+15550100001" }))
-      .toEqual(["--chat", "+15550100001"]);
-    expect(pushReadArgs("thread", { markRead: false, readChat: "pat@example.com" }))
-      .toEqual(["--chat", "pat@example.com"]);
-    // 32-hex and chat<digits> have no imessage:// form
-    expect(pushReadArgs("thread", { markRead: false, readChat: "ce5a593a78af408282d61461ade89135" })).toBeNull();
-    expect(pushReadArgs("thread", { markRead: false, readChat: "chat224479848698394295" })).toBeNull();
-  });
+
+
   test("the failure path still reports the policy and the guarded arrays", () => {
     // status says read_push=? exactly when something is broken, unless the
     // offline return carries it too — and BlipOutput declares codes/deep
@@ -1997,24 +2032,9 @@ describe("the read-push policy is reported, not just applied", () => {
     expect(offline).toContain("deep: false");
   });
 
-  test("off pushes nothing at all", () => {
-    expect(pushReadArgs("off", { markRead: true, readChat: "" })).toBeNull();
-  });
 
-  test("a poll that cleared nothing does not re-open the conversation on the Mac", () => {
-    // Every poll while a thread is open carries its readChat, so this gate is
-    // the difference between one push and one per poll — and each push pulls
-    // Messages to the front, because aiming its menu at one conversation means
-    // opening it. Measured before the gate: five pushes in a minute, four of
-    // them "nothing unread".
-    const dm = { markRead: false, readChat: "+15550100001" };
-    expect(pushReadArgs("thread", { ...dm, clearedUnread: true })).toEqual(["--chat", "+15550100001"]);
-    expect(pushReadArgs("thread", { ...dm, clearedUnread: false })).toBeNull();
-    // absent means "caller did not say" — push, so an old caller keeps working
-    expect(pushReadArgs("thread", dm)).toEqual(["--chat", "+15550100001"]);
-    // mark-all is never gated: it is an explicit gesture, not a side effect
-    expect(pushReadArgs("all", { markRead: true, readChat: "", clearedUnread: false })).toEqual(["--all"]);
-  });
+
+
 });
 
 // The dedicated key is confined to blip-dispatch AND, over Tailscale, pinned to
