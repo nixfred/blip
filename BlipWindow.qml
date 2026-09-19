@@ -81,7 +81,11 @@ FloatingWindow {
     return ownToplevel && ownToplevel.lastIpcObject ? String(ownToplevel.lastIpcObject.address || "") : ""
   }
   function sameAddress(a, b) {
-    return !!a && !!b && String(a).toLowerCase() === String(b).toLowerCase()
+    // Raw Hyprland IPC events give bare hex ("5b5a..."); lastIpcObject.address
+    // is 0x-prefixed. Strip both before comparing or a real user move is
+    // never recognized and gets reverted by strayReturn as a stray remap.
+    function norm(x) { return String(x).toLowerCase().replace(/^0x/, "") }
+    return !!a && !!b && norm(a) === norm(b)
   }
   function eventParts(event, count) {
     try { if (event && event.parse) return event.parse(count) } catch (e) { }
