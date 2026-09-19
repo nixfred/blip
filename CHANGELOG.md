@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Security-code autofill fills in Zen and Firefox.** "Fill code" did nothing
+  there: Gecko's accessibility layer reports success from `set_text_contents`
+  but writes nothing, and the helper never checked, so the failure was silent.
+  It now re-reads the field, and if it is still empty types the code through the
+  same Hyprland key path Chromium already uses. A write that did land is left
+  alone, so digits are never entered twice. Checked on a live sign-in page in
+  Zen 1.22.2b.
 - **The app window opens where you are.** Blip remembers a home workspace so
   the window goes back there after the screen idles off, but it claimed that
   home from wherever the window happened to land, and then restored onto it

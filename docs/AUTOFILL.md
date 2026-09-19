@@ -53,9 +53,11 @@ code toast. Browser launch flags can be removed independently on a relaunch.
   origin. Old messages are not replayed when the helper starts.
 
 Brave and Chromium were tested through AT-SPI, and GTK through `EditableText`.
-Chrome, Firefox and Zen identifiers are recognized but have not been tested
-locally. Labels are currently English-oriented, and field coordinates depend
-on the browser/toolkit. No extension or DevTools connection is used by Blip.
+Zen (1.22.2b) was tested against a live sign-in page; Gecko ignores the
+accessibility text write there, so the code is typed as key events. Chrome and
+Firefox identifiers are recognized but have not been tested locally. Labels are
+currently English-oriented, and field coordinates depend on the browser/toolkit.
+No extension or DevTools connection is used by Blip.
 
 ## Code and tests
 

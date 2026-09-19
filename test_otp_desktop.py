@@ -111,5 +111,47 @@ class Segments(unittest.TestCase):
         self.assertEqual(self.run_fill(occupied=True), [])
 
 
+class SingleField(unittest.TestCase):
+    """Gecko reports set_text_contents() success while ignoring the write."""
+
+    def run_fill(self, accepts_write):
+        box = Node(0)
+        box.flags.add("FOCUSED")
+        window = {"pid": 100, "address": "0xabc"}
+        metadata = {"web": True, "tag": "input", "type": "text", "empty": True}
+        chosen = {"window": window["address"], "pid": window["pid"], "browser": True, "field": metadata}
+        writes, keys = [], []
+        def set_text_contents(text):
+            writes.append(text)
+            if accepts_write:
+                box.count = len(text)
+            return True
+        box.is_editable_text = lambda: True
+        box.get_editable_text_iface = lambda: NS(set_text_contents=set_text_contents)
+        clock = [1000.0]
+        def hypr(command, cap):
+            if 'state="down"' in command:
+                keys.append(re.search(r'key="([^"]+)"', command)[1])
+            else:
+                box.count = len(keys)
+            return b"ok"
+        m.focused, m.last_segments = box, None
+        with patch.object(m, "snapshot", return_value=chosen), patch.object(m, "poll"), \
+             patch.object(m, "hypr", side_effect=hypr), patch.object(m, "active", return_value=window), \
+             patch.object(m, "unlocked", return_value=True), \
+             patch.object(m.time, "time", side_effect=lambda: clock[0]), \
+             patch.object(m.time, "sleep", side_effect=lambda delay: clock.__setitem__(0, clock[0] + delay)):
+            m.fill({"code": "482913", "target": chosen, "deadline": 1001500, "mode": "smart"})
+        return writes, keys
+
+    def test_accepted_write_does_not_also_type(self):
+        writes, keys = self.run_fill(accepts_write=True)
+        self.assertEqual((writes, keys), (["482913"], []))
+
+    def test_ignored_write_falls_back_to_typing(self):
+        writes, keys = self.run_fill(accepts_write=False)
+        self.assertEqual("".join(keys), "482913")
+
+
 if __name__ == "__main__":
     unittest.main()

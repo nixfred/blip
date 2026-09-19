@@ -337,8 +337,12 @@ def fill(event):
             return
         if not segments and original and original.is_editable_text():
             original.get_editable_text_iface().set_text_contents(code)
-            poll()
-            return
+            # Gecko (Zen, Firefox) returns success but may ignore the write.
+            # If the field is still empty, fall through to key events below.
+            original.clear_cache()
+            if original.get_text_iface().get_character_count() != 0:
+                poll()
+                return
     elif event.get("mode") != "manual" or not chosen.get("browser"):
         return
     # Chromium exposes field metadata but not EditableText. Use Hyprland's
