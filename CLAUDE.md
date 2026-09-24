@@ -358,6 +358,9 @@ what it is handed. Keep it that way.
   Idle/DPMS maps a new client on the focused workspace; that is not a new
   home. Save workspace only from a user `movewindowv2`. Keep a live-title
   home rule so a remap returns where the window was.
+  With no real screen there is no leader, so no window: Qt's placeholder
+  (empty name, 0x0) gets a bar when the last monitor goes, and mapping the
+  window then segfaults Hyprland 0.56 (`screen-leader.ts`).
 - **After an Omarchy plugin HOT-RELOAD, `qs ipc` keeps serving the OLD
   BarWidget.** Proved 2026-08-31 with a build tag (A after reload to B; C
   after D): the destroyed widget's IpcHandler stays bound to the target,

@@ -5,6 +5,7 @@ import qs.Commons
 import qs.Ui
 import Quickshell.Hyprland
 import "BinDir.mjs" as BinDir
+import "ScreenLeader.mjs" as ScreenLeader
 
 // blip — iMessage in the bar.
 //
@@ -80,9 +81,13 @@ BarWidget {
   // With one screen that default is right (and is what keeps a widget outside
   // any window working); with several it must be the opposite, so an
   // unresolved widget waits instead of racing.
+  // With NO real screen nobody leads. When the last monitor goes (powered
+  // off, or dropped off DisplayPort in its sleep) Qt substitutes a nameless
+  // 0x0 placeholder, Omarchy builds a bar on it, and that widget used to crown
+  // itself and restore the app window — a floating window mapped with no
+  // output, which segfaults Hyprland 0.56 (screen-leader.ts).
   readonly property var ownScreen: QsWindow.window ? QsWindow.window.screen : null
-  readonly property bool leader: Quickshell.screens.length <= 1
-    || (!!ownScreen && String(ownScreen.name) === String(Quickshell.screens[0].name))
+  readonly property bool leader: ScreenLeader.isLeader(ownScreen, Quickshell.screens)
   FileView {
     id: followerState
     path: root.home + "/.local/state/blip/state.json"

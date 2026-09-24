@@ -729,14 +729,15 @@ test("follower bars forward right/middle clicks to the leader", () => {
 
 // QsWindow.window is null while a freshly built bar completes its widgets, so
 // on a monitor hotplug EVERY screen's widget briefly satisfied `!ownScreen`
-// and crowned itself. One screen (or none) must still default to leader —
-// that is what keeps a widget outside any window alive — but with more than
-// one, an unresolved widget waits rather than racing its siblings.
+// and crowned itself. One real screen must still default to leader — that is
+// what keeps a widget outside any window alive — but with more than one, an
+// unresolved widget waits rather than racing its siblings. The rule itself is
+// tested in screen-leader.test.ts; this pins that the widget uses it.
 test("an unresolved window only claims the crown when it is the only screen", () => {
   const elect = widget.slice(widget.indexOf("readonly property var ownScreen"),
                              widget.indexOf("id: followerState"));
-  expect(elect).toContain("Quickshell.screens.length <= 1");
-  expect(elect).toContain("!!ownScreen &&");
+  expect(widget).toContain('import "ScreenLeader.mjs" as ScreenLeader');
+  expect(elect).toContain("leader: ScreenLeader.isLeader(ownScreen, Quickshell.screens)");
   expect(elect).not.toMatch(/leader:\s*!ownScreen/);
 });
 
