@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Turning the monitor off no longer crashes Hyprland.** With the app window
+  open, powering the only monitor off (or a monitor that drops off DisplayPort
+  when it sleeps) took the whole session down. Qt swaps the lost output for a
+  nameless 0x0 placeholder screen, Omarchy builds a bar on it, and Blip's widget
+  on that bar crowned itself leader and restored the app window. Hyprland 0.56
+  segfaults mapping a floating window with no output. Now nobody leads while
+  there is no real screen; the leader on the monitor that comes back restores
+  the window as before.
+
 ## 2.6.1 — 2026-09-20
 
 - **A second monitor's bar icon works on a development shell too.** Blip's bar
