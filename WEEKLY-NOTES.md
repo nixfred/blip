@@ -27,7 +27,30 @@ reconstructed on Sunday from memory.
 
 ## 2026-W39 (Mon 21 Sep to Sun 27 Sep): OPEN, post due Sun 27 Sep
 
-1 PR merged so far, from 1 person.
+2 PRs merged so far, from 2 people.
+
+### Wed 23 Sep: one merge
+
+- **#113 turning the monitor off no longer takes Hyprland down.** Brad Larson
+  (github.com/followbl; X handle likely @followbl, same login and name, asked
+  Fred 2026-09-23, not tagged until answered). With the Blip window open,
+  powering off the only monitor, or a DisplayPort monitor dropping off when
+  it sleeps (his Samsung C49HG9x), segfaulted Hyprland 0.56.2 on four separate
+  nights. Qt swaps the lost output for a placeholder screen with no name and
+  no size, Omarchy builds a bar on it, and Blip's widget on that bar crowned
+  itself leader and restored the app window, mapped with nowhere to put it.
+  The leader rule moved into a pure TypeScript module (`screen-leader.ts`,
+  built to `ScreenLeader.mjs`) and a widget now leads only on a real screen.
+  Verified here in Test Drive on the same Hyprland 0.56.2 / Quickshell 0.3.1:
+  an instrumented build showed the placeholder arriving as `["",0,0]` and the
+  new rule answering `leader=false` with no window, where the old rule led
+  and mapped one (its second IPC handler showed up in the shell log). Not
+  verified: the segfault itself. Hyprland in the VM stands up a FALLBACK
+  output in the same event, so the window landed there; Brad's DisplayPort
+  race is what leaves Hyprland with no output at all. gus logged the same
+  placeholder event twice on 20 Sep. Deployed on gus and vic with the merge.
+  Trade-off he accepted: no polling or toasts while there is no screen, and
+  nothing could show them anyway.
 
 ### Tue 22 Sep: one merge
 
@@ -271,6 +294,11 @@ reconstructed on Sunday from memory.
   compactor would hit it.
 
 ### Handles Fred still needs to answer (asked 2026-09-18)
+- **Brad Larson** (github.com/followbl, #113), asked 2026-09-23. Nothing
+  published on GitHub or his site metaintro.com. https://x.com/followbl has
+  the same unique login and the same name, 905 followers, posts about AI
+  models; no Omarchy/Blip/@NixFred post in the 7-day window. Likely him.
+  Untagged until Fred answers; do not guess.
 - **Ian Swope** (github.com/ianswope), 12 merged PRs, the most of anyone this
   week. Nothing published; @IanSwope on X carries his name but is dormant with
   no tie to Linux or GitHub. FRED IS ASKING HIM (2026-09-18). Untagged until he
