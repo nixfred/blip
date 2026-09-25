@@ -36,6 +36,12 @@ FocusScope {
 
   // ---- host contract (docs/app-design-review.md) ----------------------
   property var hostWidget: null
+  /** Wheel/touchpad scroll gain for the conversation and the thread list.
+   *  1.0 applies the delta the compositor sends: one wheel notch (angleDelta
+   *  120) moves 120 px and touchpad pixelDelta moves 1:1, so the system
+   *  scroll setting (e.g. Hyprland input:scroll_factor) decides the speed. */
+  property real wheelMultiplier: 1.0
+  property real touchpadMultiplier: 1.0
   /** Qt format strings, owned by the host widget (see BarWidget). Empty when no host is
    *  attached or the host has none, which thread.ts and Qt both read as "use the defaults". */
   readonly property string timeFormat: (hostWidget && hostWidget.timeFormat) || ""
@@ -2266,7 +2272,7 @@ FocusScope {
             z: -1
             acceptedButtons: Qt.NoButton
             onWheel: function(wheel) {
-              var d = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * 3.0 : wheel.angleDelta.y * 4.5
+              var d = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * root.touchpadMultiplier : wheel.angleDelta.y * root.wheelMultiplier
               var max = Math.max(0, threadFlick.contentHeight - threadFlick.height)
               threadFlick.contentY = Math.max(0, Math.min(max, threadFlick.contentY - d))
               wheel.accepted = true
@@ -3047,7 +3053,7 @@ FocusScope {
             z: -1
             acceptedButtons: Qt.NoButton
             onWheel: function(wheel) {
-              var d = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * 3.0 : wheel.angleDelta.y * 4.5
+              var d = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * root.touchpadMultiplier : wheel.angleDelta.y * root.wheelMultiplier
               // the wheel bypasses Flickable movement signals — the helper
               // maintains the bottom-stick too
               root.scrollConversation(-d)
