@@ -27,9 +27,29 @@ reconstructed on Sunday from memory.
 
 ## 2026-W39 (Mon 21 Sep to Sun 27 Sep): OPEN, post due Sun 27 Sep
 
-3 PRs merged so far, from 3 people.
+4 PRs merged so far, from 3 people.
 
-### Fri 25 Sep: one merge
+### Fri 25 Sep: two merges, both Guido
+
+- **#115 opt-in glide for mouse-wheel notches.** Guido Jouret again
+  (github.com/gjouret; X https://x.com/gjouret), filed the same afternoon
+  as #114 merged. With `smooth_scroll=on` in bridge.conf a wheel notch glides
+  180 ms (OutCubic) to its place instead of landing at once; a notch that
+  arrives mid-glide moves the target rather than restarting the easing, so a
+  fast spin keeps its full distance; keys, paging, the bottom-stick, the
+  scrollbar and any touchpad event cancel it; image growth above the
+  viewport carries a running glide along. Touchpads never animate. **What
+  changed in the merge:** the PR shipped the glide ON for everyone behind a
+  shell.json setting and rewrote the "never animate wheel scroll" invariant.
+  Fred chose opt-in, default off, as a bridge.conf key, for two reasons:
+  bridge.conf is Blip's one config surface, and the invariant came from his
+  own MX Master, whose single click is four notches in 0.13 s (measured
+  today), while Guido tested on a plain wheel and an offscreen Qt Quick Test
+  harness only. Fred had approved the direct feel at scroll_gain=0.25 an hour
+  before the PR arrived; the default flips on his hand, not on a harness.
+  632 tests green; deployed on gus and vic with the key absent, so nothing
+  changed for anyone yet. Not verified: the glide on real hardware here.
+  Next pass: Fred runs `smooth_scroll=on` on gus for a few days.
 
 - **#114 one wheel notch scrolls one notch, not half a screen.** Guido Jouret
   (github.com/gjouret; X https://x.com/gjouret, declared on his GitHub

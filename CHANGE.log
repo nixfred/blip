@@ -41,6 +41,13 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-09-25  #115 Opt-in glide for mouse-wheel notches: smooth_scroll=on in bridge.conf animates a notch 180 ms OutCubic,
+                 retargeted (a notch mid-glide moves the target, never restarts the easing), cancelled by any other contentY
+                 write; touchpads never animate. The PR shipped it ON by default behind a shell.json setting and rewrote the
+                 "never animate wheel scroll" invariant; Fred chose opt-in, default OFF, bridge.conf key: the invariant came from
+                 his MX Master, whose one click is four notches, and Guido tested on a plain wheel plus an offscreen harness
+                 only. Default flips on Fred's hand, not on a harness. Merged with the change, 632 tests, deployed key-absent.
+                 Guido Jouret, github.com/gjouret, X https://x.com/gjouret
 2026-09-25  (direct)  scroll_gain= and touchpad_scroll_gain= in bridge.conf (0.05-10, default 1, re-read on save, shown by
                  `status`). One physical click of an MX Master 4 is FOUR notches (raw evdev: bursts of 4,4,4,3 in 0.13 s), so
                  even at Guido's 1:1 one click was 480 px in a 609 px window; gus and vic run 0.25 (~120 px per click).
