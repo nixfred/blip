@@ -27,7 +27,31 @@ reconstructed on Sunday from memory.
 
 ## 2026-W39 (Mon 21 Sep to Sun 27 Sep): OPEN, post due Sun 27 Sep
 
-2 PRs merged so far, from 2 people.
+3 PRs merged so far, from 3 people.
+
+### Fri 25 Sep: one merge
+
+- **#114 one wheel notch scrolls one notch, not half a screen.** Guido Jouret
+  (github.com/gjouret; X https://x.com/gjouret, declared on his GitHub
+  profile, name matches). The conversation and the thread list multiplied
+  every wheel event by 4.5, so a standard notch (angleDelta 120) moved about
+  540 px, and touchpad deltas by 3, on top of the scroll factor Hyprland had
+  already applied. Blip was the one app on the desktop scrolling 4.5× faster
+  than everything else, and anyone who tuned `input:scroll_factor` got that
+  tuning multiplied only here. Both handlers now apply the delta 1:1 through
+  two BlipView properties (`wheelMultiplier`, `touchpadMultiplier`, default
+  1.0). The 4.5 dated from Fred's own 1.3.4 scroll fix, where the real bugs
+  were a WheelHandler that never fired, chips growing above the viewport and
+  Repeater rebuilds; the gain was never measured against another app. Fred
+  chose 1:1 over keeping the old defaults and judges the feel by hand; if it
+  is too slow the next step is a bridge.conf key, not a constant. Deployed on
+  gus and vic with the merge, shell logs clean on both: the MX Master 4 goes
+  from 540 to 120 px per notch, the laptop touchpad (scroll_factor 0.4) from
+  1.2 to 0.4 px per px. Still `MouseArea.onWheel`, unanimated, and the
+  conversation still goes through `scrollConversation()`, so the bottom-stick
+  is untouched. 630 tests green; a new test pins both handlers and fails
+  against the old file. Not verified by hand: touchpad feel (Guido has no
+  touchpad on his machine; Fred's Elan is the first real test).
 
 ### Wed 23 Sep: one merge
 

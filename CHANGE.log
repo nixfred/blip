@@ -31,6 +31,7 @@ PEOPLE (verified handles)
   Ian Swope         github.com/ianswope     X: none verified (checked 2026-09-16; @IanSwope exists with the same name but is a dormant account with no tie to Linux or GitHub, so not tagged)
   cjoh              github.com/cjoh         X: none found (checked 2026-09-16)
   Brad Larson       github.com/followbl     X: likely https://x.com/followbl (same unique login AND name; nothing published on GitHub or metaintro.com; no Omarchy/Blip/@NixFred posts in the 7-day window, checked 2026-09-23; ASKED FRED 2026-09-23, not tagged until he answers)
+  Guido Jouret      github.com/gjouret      X https://x.com/gjouret      (GitHub profile twitter_username AND social_accounts; X name matches, 1.4k followers, checked 2026-09-25)
   Fred Nix          github.com/nixfred      X https://x.com/nixfred
 
 Earlier contributors and their handles: CONTRIBUTORS-X-POST.md.
@@ -40,6 +41,14 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-09-25  #114 One wheel notch scrolls one notch. The conversation and the thread list multiplied every wheel event by 4.5
+                 (a standard notch, angleDelta 120, moved about 540 px) and touchpad deltas by 3, on top of the scroll factor
+                 Hyprland had already applied, so Blip alone scrolled 4.5x faster than every other app. Both handlers now
+                 apply the delta 1:1 through two BlipView properties (wheelMultiplier, touchpadMultiplier, default 1.0). The
+                 4.5 dated from the 1.3.4 fix and was never measured against another app. Fred chose 1:1 and judges by hand;
+                 a bridge.conf key is the next step if it is too slow. On gus the MX Master 4 goes 540 -> 120 px per notch and
+                 the Elan touchpad (scroll_factor 0.4) 1.2 -> 0.4 px per px. Not verified by hand: touchpad feel (he has none).
+                 Guido Jouret, github.com/gjouret, X https://x.com/gjouret
 2026-09-23  #113 Turning the only monitor off with the Blip window open no longer crashes Hyprland. Qt swaps the lost output
                  for a nameless 0x0 placeholder screen, Omarchy builds a bar on it, and Blip's widget there crowned itself
                  leader and mapped the app window with no output, a null dereference in Hyprland 0.56.2's floating layout.
