@@ -46,6 +46,9 @@ BarWidget {
   readonly property string dateFormat: formatSetting("dateFormat", "MMM d")
   readonly property string dateFormatWithYear: formatSetting("dateFormatWithYear", "MMM d, yyyy")
   function formatSetting(name, fallback) { var v = String(setting(name, "")); return v === "" ? fallback : v }
+  // Mouse-wheel notches glide (BlipView's WheelGlide); "smoothScroll": false on
+  // the same entry makes every notch jump again. Touchpads are never animated.
+  readonly property bool smoothScroll: setting("smoothScroll", true) !== false
 
   // ---- collector state
   property var threads: []           // [{chat,name,handle,service,last_ts,last_text,last_from_me,count,unread,pinned,pin_order}]

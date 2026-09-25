@@ -379,6 +379,11 @@ the same entry, exactly as Omarchy's clock takes its `format`:
 { "id": "nixfred.blip", "timeFormat": "HH:mm", "dateFormat": "dd.MM", "dateFormatWithYear": "dd.MM.yyyy" }
 ```
 
+**Smooth scrolling.** A mouse-wheel notch glides to its place (180 ms, easing
+out) instead of jumping; notches that arrive mid-glide add up, so a fast spin
+never loses distance. Touchpad scrolling is always direct. To make each notch
+jump instead, add `"smoothScroll": false` to the same entry.
+
 **5. (Optional) `SUPER+M` for the app window** — the Lua snippet under
 "The app" above.
 

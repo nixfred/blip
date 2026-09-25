@@ -581,6 +581,25 @@ describe("QML safety invariants", () => {
     expect(panel).toContain("else rowBudget = rowBatch");
   });
 
+  test("a mouse-wheel notch glides, retargeted; a touchpad stays direct", () => {
+    const glide = panel.slice(panel.indexOf("component WheelGlide: Item {"), panel.indexOf("WheelGlide { id: threadGlide"));
+    // a notch mid-glide moves the TARGET, so fast spinning never loses distance
+    expect(glide).toContain("(anim.running ? target : flick.contentY) + dy");
+    expect(glide).toContain("easing.type: Easing.OutCubic");
+    // any foreign contentY write (keys, jumps, the stick, a touchpad) cancels it
+    expect(glide).toContain("if (!glide.writing && Math.abs(glide.flick.contentY - glide.last) > 1) anim.stop()");
+    // pixelDelta (touchpad) never animates, in either list
+    expect(panel).toContain("if (wheel.pixelDelta.y === 0 && root.smoothWheel) threadGlide.by(-d)");
+    expect(panel).toContain("if (wheel.pixelDelta.y === 0 && root.smoothWheel) root.glideConversation(-d)");
+    // the stick follows where the glide is heading
+    expect(qmlFunction("glideConversation")).toContain("flick.stick = convGlide.by(dy) >= max - 4");
+    // image growth above the viewport carries a running glide along
+    expect(panel.split("convGlide.shift(d)").length - 1).toBe(2);
+    // one shell.json switch, default on
+    expect(widget).toContain('readonly property bool smoothScroll: setting("smoothScroll", true) !== false');
+    expect(panel).toContain("property bool smoothWheel: hostWidget ? hostWidget.smoothScroll !== false : true");
+  });
+
   test("the row budget grows for the wheel and for the keyboard", () => {
     expect(panel).toContain("onContentYChanged: root.growRowsForScroll()");
     const grow = qmlFunction("growRowsForScroll");

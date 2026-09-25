@@ -335,20 +335,25 @@ what it is handed. Keep it that way.
   Flickable grabs every drag, and drag IS text selection in a bubble; a
   slightly-moving click on a link became a flick. Wheel scrolling never
   needed it (next invariant). Ctrl+C in a bubble goes through `wl-copy`.
-- **Wheel scrolling = `MouseArea.onWheel`, direct 1:1, and INSTRUMENT before
+- **Wheel scrolling = `MouseArea.onWheel`, 1:1 distance, and INSTRUMENT before
   tuning.** A `WheelHandler` on the Flickable received ZERO events on this
   stack (proved by logging after four "fixes" that were placebos — the
   Flickable's native decaying kinetic path was doing the scrolling the whole
   time). Omarchy's own panels use `MouseArea.onWheel`; so does Blip now.
-  Never animate wheel scroll (two schemes collapsed under MX Master hi-res
-  event floods). Two other scroll killers, both fixed and both invisible
-  without logging: async image growth ABOVE the viewport cancels wheel motion
-  (chipRow compensates contentY by its own height delta), and model
-  reassignment rebuilds Repeaters and resets scroll (skip identical
-  assignments; restore contentY after a list rebuild). Every writer of the
-  conversation's `contentY` — wheel, arrows, paging, Esc — goes through
-  `scrollConversation()`, the one owner of the bottom-stick that gates the
-  deferred push reload.
+  Touchpad (`pixelDelta`) scrolling is never animated. Mouse-wheel notches
+  glide through `WheelGlide` (setting `smoothScroll`, default on): a notch
+  mid-glide moves the TARGET, never restarts from the current position —
+  the two earlier schemes (restarted easing, SmoothedAnimation chase)
+  collapsed under MX Master hi-res event floods because they did. Any other
+  `contentY` write cancels a glide. Two other scroll killers, both fixed and
+  both invisible without logging: async image growth ABOVE the viewport
+  cancels wheel motion (chipRow/linkRow compensate contentY by their own
+  height delta, carrying a running glide along via `convGlide.shift`), and
+  model reassignment rebuilds Repeaters and resets scroll (skip identical
+  assignments; restore contentY after a list rebuild). The bottom-stick that
+  gates the deferred push reload is owned by `scrollConversation()` (arrows,
+  paging, Esc, touchpad) and its animated twin `glideConversation()` (the
+  wheel), which sets it from where the glide is heading.
 - **The app window is RECREATED on show, never re-mapped.** Quickshell does
   not re-map a `FloatingWindow` after `visible` has been false once: the
   property flips true, no client appears (SUPER+M "did nothing", 1.8.3).
