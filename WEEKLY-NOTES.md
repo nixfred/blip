@@ -74,6 +74,8 @@ reconstructed on Sunday from memory.
   Backups now live in `~/.local/state/omarchy/plugin-backups/`; CLAUDE.md's
   deploy recipe says so. Brad's #113 fix and Guido's #114 are live on both
   hosts as of 25 Sep, verified by the `scroll_gain=0.25` field in `status`.
+  Fred's hand verdict the same evening: "I like the scrolling." 0.25 stays
+  on gus and vic; nothing left to tune here.
 
 ### Wed 23 Sep: one merge
 
