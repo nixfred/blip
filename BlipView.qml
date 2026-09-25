@@ -39,9 +39,12 @@ FocusScope {
   /** Wheel/touchpad scroll gain for the conversation and the thread list.
    *  1.0 applies the delta the compositor sends: one wheel notch (angleDelta
    *  120) moves 120 px and touchpad pixelDelta moves 1:1, so the system
-   *  scroll setting (e.g. Hyprland input:scroll_factor) decides the speed. */
-  property real wheelMultiplier: 1.0
-  property real touchpadMultiplier: 1.0
+   *  scroll setting (e.g. Hyprland input:scroll_factor) decides the speed.
+   *  `scroll_gain=` / `touchpad_scroll_gain=` in bridge.conf (read by the
+   *  host, re-read on save) lower it for wheels whose one click is several
+   *  notches; no host, or no key, is 1.0. */
+  property real wheelMultiplier: (hostWidget && hostWidget.scrollGain > 0) ? hostWidget.scrollGain : 1.0
+  property real touchpadMultiplier: (hostWidget && hostWidget.touchpadScrollGain > 0) ? hostWidget.touchpadScrollGain : 1.0
   /** Qt format strings, owned by the host widget (see BarWidget). Empty when no host is
    *  attached or the host has none, which thread.ts and Qt both read as "use the defaults". */
   readonly property string timeFormat: (hostWidget && hostWidget.timeFormat) || ""

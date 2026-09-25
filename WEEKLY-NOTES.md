@@ -53,6 +53,28 @@ reconstructed on Sunday from memory.
   against the old file. Not verified by hand: touchpad feel (Guido has no
   touchpad on his machine; Fred's Elan is the first real test).
 
+- **Follow-up the same afternoon: `scroll_gain=` in bridge.conf (direct,
+  Fred / Larry).** Fred's first hand test came back "way too fast, a whole
+  page per click". A raw evdev capture of the MX Master 4 showed why: one
+  physical click of that wheel is FOUR notches (bursts of 4, 4, 4, 3 in 0.13 s
+  each), so even at 1:1 one click is 480 px in a 609 px window. Rather than
+  put a constant back, `scroll_gain=` and `touchpad_scroll_gain=` (0.05–10,
+  default 1, re-read on save, reported by `status`) went in as bridge.conf
+  keys per the config rule, and gus and vic run 0.25: one click ≈ 120 px.
+  Guido's 1:1 default stands for everyone else. 631 tests.
+  **Correction to the two entries above.** The "deployed on gus and vic"
+  claims for #113 and #114 were not true until 25 Sep. The #113 deploy on
+  23 Sep left its backup as `nixfred.blip.bak-113-<ts>` INSIDE
+  `~/.config/omarchy/plugins/` on both hosts; the registry scans that folder
+  in glob order and the last manifest with an id wins, so the backup (the
+  pre-#113 build) was what actually ran, on both machines, while three
+  deploys reported `healthy=true`. Found because `status` never printed the
+  new `scroll_gain=` field the file on disk contained. Fred's "too fast" test
+  was therefore the OLD 4.5× code (2160 px per click), never Guido's 1:1.
+  Backups now live in `~/.local/state/omarchy/plugin-backups/`; CLAUDE.md's
+  deploy recipe says so. Brad's #113 fix and Guido's #114 are live on both
+  hosts as of 25 Sep, verified by the `scroll_gain=0.25` field in `status`.
+
 ### Wed 23 Sep: one merge
 
 - **#113 turning the monitor off no longer takes Hyprland down.** Brad Larson

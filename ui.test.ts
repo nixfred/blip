@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { parseUiFontSize, scaleFontPx } from "./ui-font";
+import { parseScrollGain, parseTouchpadScrollGain } from "./scroll-gain";
 
 // The renderer moved from Panel.qml into BlipView.qml in 1.8.0 (shared with the app window).
 const panel = readFileSync(new URL("./BlipView.qml", import.meta.url), "utf8");
@@ -438,12 +439,37 @@ describe("QML safety invariants", () => {
   test("wheel and touchpad deltas apply 1:1, leaving speed to the system setting", () => {
     // angleDelta * 4.5 made one notch ~540 px and multiplied the compositor's
     // own scroll factor; both scroll bodies use the view's gains, default 1.0.
-    expect(panel).toContain("property real wheelMultiplier: 1.0");
-    expect(panel).toContain("property real touchpadMultiplier: 1.0");
+    expect(panel).toContain("property real wheelMultiplier: (hostWidget && hostWidget.scrollGain > 0) ? hostWidget.scrollGain : 1.0");
+    expect(panel).toContain("property real touchpadMultiplier: (hostWidget && hostWidget.touchpadScrollGain > 0) ? hostWidget.touchpadScrollGain : 1.0");
     const d = "var d = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * root.touchpadMultiplier : wheel.angleDelta.y * root.wheelMultiplier";
     expect(panel.split(d).length - 1).toBe(2);
     expect(panel).not.toContain("wheel.angleDelta.y * 4.5");
     expect(panel).not.toContain("wheel.pixelDelta.y * 3.0");
+  });
+
+  test("scroll_gain / touchpad_scroll_gain in bridge.conf lower the wheel gain, default 1", () => {
+    // One click of an MX Master 4 is four notches: 480 px per click at 1:1 in
+    // a 609 px window (measured 2026-09-25). The key lives in bridge.conf
+    // like every other knob, is re-read on save, and reads as 1 when absent.
+    expect(widget).toContain("property real scrollGain: 1.0");
+    expect(widget).toContain("property real touchpadScrollGain: 1.0");
+    expect(widget).toContain("root.scrollGain = root.parseGain(t, /^\\s*scroll_gain\\s*=\\s*['\"]?(\\d*\\.?\\d+)/mi)");
+    expect(widget).toContain("root.touchpadScrollGain = root.parseGain(t, /^\\s*touchpad_scroll_gain\\s*=\\s*['\"]?(\\d*\\.?\\d+)/mi)");
+    expect(widget).toContain("root.scrollGain = 1.0; root.touchpadScrollGain = 1.0;");
+    expect(widget).toContain('+ " scroll_gain=" + root.scrollGain');
+    expect(parseScrollGain("")).toBe(1);
+    expect(parseScrollGain("host=mac\n")).toBe(1);
+    expect(parseScrollGain("scroll_gain=0.25\n")).toBe(0.25);
+    expect(parseScrollGain("  scroll_gain = '0.5'\n")).toBe(0.5);
+    expect(parseScrollGain("scroll_gain=.5")).toBe(0.5);
+    expect(parseScrollGain("scroll_gain=0")).toBe(1);
+    expect(parseScrollGain("scroll_gain=abc")).toBe(1);
+    expect(parseScrollGain("scroll_gain=0.001")).toBe(0.05);
+    expect(parseScrollGain("scroll_gain=99")).toBe(10);
+    // The wheel key never reads the touchpad key, and vice versa.
+    expect(parseScrollGain("touchpad_scroll_gain=0.5")).toBe(1);
+    expect(parseTouchpadScrollGain("scroll_gain=0.25")).toBe(1);
+    expect(parseTouchpadScrollGain("scroll_gain=0.25\ntouchpad_scroll_gain=0.5")).toBe(0.5);
   });
 
   test("keys and wheel scroll the conversation through one stick-aware helper", () => {

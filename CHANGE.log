@@ -41,6 +41,14 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-09-25  (direct)  scroll_gain= and touchpad_scroll_gain= in bridge.conf (0.05-10, default 1, re-read on save, shown by
+                 `status`). One physical click of an MX Master 4 is FOUR notches (raw evdev: bursts of 4,4,4,3 in 0.13 s), so
+                 even at Guido's 1:1 one click was 480 px in a 609 px window; gus and vic run 0.25 (~120 px per click).
+                 FOUND WHILE VERIFYING: the #113 deploy on 23 Sep left nixfred.blip.bak-113-<ts> inside
+                 ~/.config/omarchy/plugins/ on both hosts; PluginRegistry scans plugins/* in glob order and the last manifest
+                 id wins, so the pre-#113 backup was what actually ran on gus AND vic until today, through three deploys
+                 that reported healthy=true. #113 and #114 are live as of 25 Sep. Backups now go to
+                 ~/.local/state/omarchy/plugin-backups/. Fred Nix / Larry, X https://x.com/nixfred
 2026-09-25  #114 One wheel notch scrolls one notch. The conversation and the thread list multiplied every wheel event by 4.5
                  (a standard notch, angleDelta 120, moved about 540 px) and touchpad deltas by 3, on top of the scroll factor
                  Hyprland had already applied, so Blip alone scrolled 4.5x faster than every other app. Both handlers now

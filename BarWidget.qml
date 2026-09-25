@@ -882,6 +882,14 @@ BarWidget {
   property bool uiFontTheme: false
   /** `ui_font_size=N` in bridge.conf: bubble text in px (9–24). 0 = Omarchy default. */
   property int uiFontSize: 0
+  /** `scroll_gain=` / `touchpad_scroll_gain=` in bridge.conf (0.05–10, default 1):
+   *  multiply the wheel's angleDelta / the touchpad's pixelDelta in the
+   *  conversation and the thread list. 1 is the delta Hyprland delivers, its
+   *  own scroll_factor already applied (#114). One click of a hi-res wheel can
+   *  be several notches (an MX Master 4 sends four, 480 px per click at 1:1),
+   *  which is what the key is for. scroll-gain.ts is the tested twin. */
+  property real scrollGain: 1.0
+  property real touchpadScrollGain: 1.0
   // The version, read from THIS plugin's manifest.json — the one place it is
   // written, so a release bump is the only thing that ever updates what the
   // header shows (Fred, 2.3.3: "keep it there forever updated"). Both surfaces
@@ -902,6 +910,12 @@ BarWidget {
   // watcher waits for the first load so it never spawns from the wrong place.
   property string binDir: root.home + "/bin"
   property bool bridgeConfLoaded: false
+  /** One gain key: unset, empty or nonsense reads as 1; clamped to 0.05–10. */
+  function parseGain(t, re) {
+    var m = t.match(re)
+    var g = m ? parseFloat(m[1]) : 1
+    return (!isFinite(g) || g <= 0) ? 1 : Math.min(10, Math.max(0.05, g))
+  }
   readonly property string automationOff: "blip: automation=off — set automation=on in ~/.config/blip/bridge.conf to allow ipc send/read"
   FileView {
     id: bridgeConf
@@ -919,9 +933,11 @@ BarWidget {
       var sm = t.match(/^\s*ui_font_size\s*=\s*['"]?(\d+)/mi)
       var n = sm ? parseInt(sm[1], 10) : 0
       root.uiFontSize = (!isFinite(n) || n <= 0) ? 0 : Math.min(24, Math.max(9, n))
+      root.scrollGain = root.parseGain(t, /^\s*scroll_gain\s*=\s*['"]?(\d*\.?\d+)/mi)
+      root.touchpadScrollGain = root.parseGain(t, /^\s*touchpad_scroll_gain\s*=\s*['"]?(\d*\.?\d+)/mi)
       root.bridgeConfLoaded = true
     }
-    onLoadFailed: { root.otpAutofill = false; root.automationOn = false; root.uiFontTheme = false; root.uiFontSize = 0; root.binDir = root.home + "/bin"; root.bridgeConfLoaded = true }
+    onLoadFailed: { root.otpAutofill = false; root.automationOn = false; root.uiFontTheme = false; root.uiFontSize = 0; root.scrollGain = 1.0; root.touchpadScrollGain = 1.0; root.binDir = root.home + "/bin"; root.bridgeConfLoaded = true }
   }
   IpcHandler {
     target: root.moduleName
@@ -934,6 +950,7 @@ BarWidget {
         + " watch=" + root.watchAlive
         + " read_push=" + (root.readPush !== "" ? root.readPush : "?")
         + " autofill=" + (root.otpAutofill ? (otp.ready ? "ready" : "starting") : "off")
+        + " scroll_gain=" + root.scrollGain + (root.touchpadScrollGain !== 1 ? "/" + root.touchpadScrollGain : "")
         + (root.lastError !== "" ? " error=" + root.lastError : "")
     }
     function threads(): string { return root.automationOn ? JSON.stringify(root.threads) : root.automationOff }

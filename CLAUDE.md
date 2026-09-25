@@ -270,7 +270,8 @@ what it is handed. Keep it that way.
 - **Configuration is `bridge.conf` keys, not a settings system.** Blip has one
   config file (`~/.config/blip/bridge.conf`, parsed not sourced) carrying
   `host`, `remote_bin`, `automation`, `ui_font_size`, `ui_font_theme`,
-  `link_previews`, `push_read`, `hide_spam`, `hide_unknown`, `prefer_imessage`, plus the mute list. Anything worth configuring
+  `link_previews`, `push_read`, `hide_spam`, `hide_unknown`, `prefer_imessage`,
+  `scroll_gain`, `touchpad_scroll_gain`, plus the mute list. Anything worth configuring
   becomes another key. Settled 2026-09-04 against PR #21, which proposed a
   `preferences.json` with eleven knobs and a ~1300-line settings panel: it was
   careful work (atomic, 0600, ownership and size validated) and was still the
@@ -413,6 +414,12 @@ bun test                                   # 620+ tests, ~1.5 s
 bun collector.ts --deep | jq .unread       # live against the Mac
 bun thread.ts <chat-id> 40 | jq .bubbles   # one conversation
 cp *.qml *.ts *.mjs otp-desktop.py manifest.json ~/.config/omarchy/plugins/nixfred.blip/
+# NEVER leave a backup copy INSIDE ~/.config/omarchy/plugins/ (nixfred.blip.bak-*): it carries the
+# same manifest id, PluginRegistry scans `plugins/*` in glob order and the LAST id wins, so the
+# backup silently replaces the live plugin. A .bak-113 dir ran on gus and vic from 23 to 25 Sep
+# while three deploys reported success; `status` still lacked a field the new file printed.
+# Back up to ~/.local/state/omarchy/plugin-backups/ instead, and after a deploy verify a field
+# the new code emits (e.g. `status` → scroll_gain=), not just "healthy=true".
 omarchy-restart-shell                      # ALWAYS restart (hot-reload leaves IPC on a zombie)
 # MANDATORY after every deploy — a QML syntax error kills BOTH surfaces silently (2.1.4 shipped one):
 qs log /run/user/1000/quickshell/by-id/$(basename $(readlink /run/user/1000/quickshell/by-pid/$(pgrep -x quickshell)))/log.qslog -t 400 | grep -iE 'nixfred.blip.*(error|warn|unavailable|token)'

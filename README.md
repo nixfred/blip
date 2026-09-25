@@ -261,6 +261,21 @@ Blip renders in the first of these it finds, so it is optional either way:
 bubble text in pixels so Blip can be larger than the rest of the shell;
 unset, it follows Omarchy's type size.
 
+**Scroll speed.** Blip applies the wheel delta the compositor delivers, 1:1,
+so Hyprland's `input:scroll_factor` decides the speed as it does everywhere
+else. Some hi-res wheels send several notches per physical click (an MX
+Master 4 sends four, which is a whole 600 px window per click). Slow Blip
+alone with
+
+```
+# ~/.config/blip/bridge.conf — re-read on save, no restart
+scroll_gain=0.25           # wheel: 0.05–10, default 1
+touchpad_scroll_gain=0.5   # touchpad, separately: same range, default 1
+```
+
+`0.25` makes one MX Master click about 120 px, roughly five lines. `status`
+reports the live value as `scroll_gain=`.
+
 > **Blip ships no fonts.** SF Pro is Apple's and its licence forbids
 > redistribution, so it is not carried in this repo — note that even the AUR
 > package fetches it from Apple rather than mirroring it.

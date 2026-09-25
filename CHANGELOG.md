@@ -8,6 +8,12 @@
   scroll factor the compositor had already applied. Both now apply the delta
   as delivered, so the system scroll setting decides the speed;
   `wheelMultiplier` / `touchpadMultiplier` on the view default to 1.0.
+  **And a knob for wheels whose one click is several notches:** an MX Master
+  4 sends four notches per click, so at 1:1 one click still moved 480 px in a
+  609 px window (measured on the raw evdev stream, 2026-09-25). `scroll_gain=`
+  and `touchpad_scroll_gain=` in `bridge.conf` (0.05–10, default 1, re-read on
+  save) multiply the wheel's and the touchpad's delta separately; `status`
+  reports the live value. `scroll-gain.ts` is the parser's tested twin.
 
 - **Turning the monitor off no longer crashes Hyprland.** With the app window
   open, powering the only monitor off (or a monitor that drops off DisplayPort
