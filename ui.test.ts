@@ -435,6 +435,17 @@ describe("QML safety invariants", () => {
     expect(close.slice(0, close.indexOf("\n  }") + 4)).toContain('"ipc", "call", root.moduleName, "close"');
   });
 
+  test("wheel and touchpad deltas apply 1:1, leaving speed to the system setting", () => {
+    // angleDelta * 4.5 made one notch ~540 px and multiplied the compositor's
+    // own scroll factor; both scroll bodies use the view's gains, default 1.0.
+    expect(panel).toContain("property real wheelMultiplier: 1.0");
+    expect(panel).toContain("property real touchpadMultiplier: 1.0");
+    const d = "var d = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * root.touchpadMultiplier : wheel.angleDelta.y * root.wheelMultiplier";
+    expect(panel.split(d).length - 1).toBe(2);
+    expect(panel).not.toContain("wheel.angleDelta.y * 4.5");
+    expect(panel).not.toContain("wheel.pixelDelta.y * 3.0");
+  });
+
   test("keys and wheel scroll the conversation through one stick-aware helper", () => {
     // Two writers of flick.contentY would drift on the bottom-stick, which
     // gates the deferred push reload; the wheel handler must go through it.

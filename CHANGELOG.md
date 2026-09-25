@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **One wheel notch scrolls one notch, not half a screen.** The conversation
+  and the thread list multiplied every wheel event by 4.5 (a standard notch,
+  angleDelta 120, moved about 540 px) and touchpad deltas by 3, on top of the
+  scroll factor the compositor had already applied. Both now apply the delta
+  as delivered, so the system scroll setting decides the speed;
+  `wheelMultiplier` / `touchpadMultiplier` on the view default to 1.0.
+
 - **Turning the monitor off no longer crashes Hyprland.** With the app window
   open, powering the only monitor off (or a monitor that drops off DisplayPort
   when it sleeps) took the whole session down. Qt swaps the lost output for a
