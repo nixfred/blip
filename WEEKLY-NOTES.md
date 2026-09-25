@@ -219,7 +219,7 @@ reconstructed on Sunday from memory.
   that cleared what it could. Neither of us tested it live, because that means
   marking every conversation read on a real account.
 - **#96 `prefer_imessage=on` keeps a mixed 1:1 on iMessage.** Baden,
-  https://x.com/bhp35. One RCS inbound turned every later send green and the
+  https://x.com/badenpiland. One RCS inbound turned every later send green and the
   Mac logged SMS error 4 while the iPhone had delivered. Off by default. Say
   plainly: an old successful iMessage counts, so a contact who moved to Android
   is tried on iMessage until a send fails.

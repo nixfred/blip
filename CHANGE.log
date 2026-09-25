@@ -26,9 +26,9 @@ PEOPLE (verified handles)
   Marshall Huss     github.com/mwhuss       X https://x.com/mwhuss       (X name matches; posts about his Omarchy plugin, replies to @NixFred)
   Jethro Jones      github.com/jethrojones   X https://x.com/jethrojones  (X name matches; app-building and schools, fits his known work) (confirmed by Fred 2026-09-18)
   Damon Janis      github.com/damonjanis   X https://x.com/damonjanis    (X name matches; posts about Omarchy and replies to @dhh)
-  Baden (bpiland)   github.com/bpiland      X https://x.com/bhp35         (published on his GitHub profile; X name matches)
+  Baden             github.com/badenpiland  X https://x.com/badenpiland  (GitHub profile twitter_username AND social_accounts; X name "Baden"; CORRECTED 2026-09-25: the earlier "github.com/bpiland → @bhp35" line named a GitHub user and an X account that do not exist)
   Danny Cecil       github.com/jefehoser    X https://x.com/jefehoser    (same unique login on X; posts about Omarchy) (confirmed by Fred 2026-09-16)
-  Ian Swope         github.com/ianswope     X: none verified (checked 2026-09-16; @IanSwope exists with the same name but is a dormant account with no tie to Linux or GitHub, so not tagged)
+  Ian Swope         github.com/ianswope     X https://x.com/ianfs        (GitHub profile twitter_username AND social_accounts, found 2026-09-25; @ianfs replies to @NixFred about Omarchy. The dormant @IanSwope is NOT him)
   cjoh              github.com/cjoh         X: none found (checked 2026-09-16)
   Brad Larson       github.com/followbl     X: likely https://x.com/followbl (same unique login AND name; nothing published on GitHub or metaintro.com; no Omarchy/Blip/@NixFred posts in the 7-day window, checked 2026-09-23; ASKED FRED 2026-09-23, not tagged until he answers)
   Guido Jouret      github.com/gjouret      X https://x.com/gjouret      (GitHub profile twitter_username AND social_accounts; X name matches, 1.4k followers, checked 2026-09-25)
@@ -74,7 +74,7 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
                  Brad Larson, github.com/followbl, X: likely @followbl, asked Fred
 2026-09-22  #111 CLAUDE.md's deploy recipe copies otp-desktop.py and names all five shims, including contact-save. Following the old one
                  had left vic's autofill helper at 2.5.0 and contact-save missing on gus and vic; both fixed with the merge.
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-20  (direct)  Follower bars forward to the shell that is ACTUALLY running (Quickshell.shellDir), not the hardcoded
                  /usr/share/omarchy/shell. Under `omarchy dev link` every forward exited 255 "No running instances" while the
                  shell's summon still reported ok, so a second monitor's icon and hotkey did nothing, silently. Found verifying #109.
@@ -90,7 +90,7 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
                  exists is ignored instead of recreated (Super+M flew the window away under plonk).
                  Fred Nix / Larry, X https://x.com/nixfred
 2026-09-18  #108 A read push counts the whole conversation cluster, not one chat row (fixes #107): an unread on an alias silently never pushed.
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-18  #91  Save a NEW contact to the Mac from a conversation: create-only, confirmed, duplicate-refusing, verified by read-back.
                  Kb2uka, github.com/Kb2uka, X: none found (checked 2026-09-18, asked on the PR)
 2026-09-18  #106 A group read in Blip clears it on the Mac too, through Messages' imessage:open?groupid= deep link.
@@ -98,19 +98,19 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 2026-09-18  #105 Per-conversation spawns route through a source-id seam; stock Blip still resolves to the one Mac bridge (closes #70).
                  David Reinecke, github.com/dreinecke, X: none found (checked 2026-09-18)
 2026-09-18  #104 One Linux-shim line in the shape diagram, listing all four shims.
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-18  4134bbf  Exact-card details and vCard export honour bin_dir; the guard test that missed it is widened.
                  Found by Kb2uka, github.com/Kb2uka, X: none found (checked 2026-09-18). Fixed by Fred Nix / Larry, X https://x.com/nixfred
 2026-09-17  #96  prefer_imessage=on keeps a mixed 1:1 on iMessage instead of going green after one RCS inbound. Opt-in, off by default.
-                 Baden, github.com/bpiland, X https://x.com/bhp35
+                 Baden, github.com/badenpiland, X https://x.com/badenpiland
 2026-09-17  #101 A read dot no longer returns while the badge says zero: the poll no-op check follows the model, not a stale cache.
                  Damon Janis, github.com/damonjanis, X https://x.com/damonjanis
 2026-09-17  #102 A read push is reported done only when the Mac's unread count reaches zero; partial or unverifiable is now a failure.
                  Damon Janis, github.com/damonjanis, X https://x.com/damonjanis
 2026-09-17  #98  One never-opened unread no longer slows every poll: per-chat catch-up, measured 1.8 s to 0.63 s here.
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-17  #99  CLAUDE.md records rank-then-size for contact sources, matching b5cafc2.
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-16  (direct)  Blip's Mac-side fixes upstreamed as claude-on-mac v2.0.0; contact names rank the owner's book first, then the
                  largest source within a rank (reconciles claude-on-mac #5). tcc-check says 2 minutes, not 60s.
                  Fred Nix / Larry, X https://x.com/nixfred
@@ -125,7 +125,7 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 2026-09-16  #93  Super+M only ever touches the real Blip window (exact title, not a prefix).
                  Danny Cecil, github.com/jefehoser, X https://x.com/jefehoser
 2026-09-16  #95  A message already read on another device never toasts on wake (fixes #89).
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
                  Reported by Marshall Huss, github.com/mwhuss, X https://x.com/mwhuss
 2026-09-15  #80  Timestamps cross the bridge as UTC; local time is display only (fixes #86).
                  Zach Wilke, github.com/zachwilke, X https://x.com/zachwilke_1
@@ -137,17 +137,17 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 2026-09-15  #87  The app window stays on its workspace after idle.
                  Danny Cecil, github.com/jefehoser, X https://x.com/jefehoser
 2026-09-15  #88  Conversation list builds only rows near the viewport; panel fade no longer freezes (441-627 ms stalls measured).
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-15  #85  Docked to extra monitors, follower bars stop firing one toast per screen.
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-15  #76  No toast for the conversation you already have open.
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-15  #75  A 3-4 digit carrier short code (611, 2536) is a DM you can reply STOP to, not a group.
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-15  #84  Docs: outbound tapbacks are half possible on macOS 26, not impossible.
                  Zach Wilke, github.com/zachwilke, X https://x.com/zachwilke_1
 2026-09-15  #77  README allowlist and mutelist examples now parse as strict JSON.
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-15  481e555  blip-setup copies only regular files to the Mac, so __pycache__ cannot abort it.
                  Fred Nix / Larry, X https://x.com/nixfred
 2026-09-13  2.5.0 released.
@@ -156,10 +156,10 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 2026-09-13  #54  Sending a link no longer opens the share sheet.
                  Jon Kinney, github.com/jondkinney, X https://x.com/jondkinney
 2026-09-13  #71  blip-setup passes ssh -n, so its Enter prompts no longer hit EOF.
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-13  #74  README says how to remove Blip and what it leaves behind.
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-13  #72  Every Text sink declares PlainText, so none can fall back to rich text.
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-13  #73  A copied security code reaches wl-copy on stdin, not the environment (/proc leak).
-                 Ian Swope, github.com/ianswope, X: none verified
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
