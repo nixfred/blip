@@ -46,6 +46,12 @@ BarWidget {
   readonly property string dateFormat: formatSetting("dateFormat", "MMM d")
   readonly property string dateFormatWithYear: formatSetting("dateFormatWithYear", "MMM d, yyyy")
   function formatSetting(name, fallback) { var v = String(setting(name, "")); return v === "" ? fallback : v }
+  /** `smooth_scroll=on` in bridge.conf: mouse-wheel notches glide (BlipView's
+   *  WheelGlide) instead of jumping. OFF by default: two animated wheel schemes
+   *  collapsed under MX Master hi-res floods before (CLAUDE.md), and this one,
+   *  from #115, is unproven on that mouse until Fred's hand says otherwise.
+   *  Touchpads are never animated. Parsed with the other keys below. */
+  property bool smoothScroll: false
 
   // ---- collector state
   property var threads: []           // [{chat,name,handle,service,last_ts,last_text,last_from_me,count,unread,pinned,pin_order}]
@@ -935,9 +941,10 @@ BarWidget {
       root.uiFontSize = (!isFinite(n) || n <= 0) ? 0 : Math.min(24, Math.max(9, n))
       root.scrollGain = root.parseGain(t, /^\s*scroll_gain\s*=\s*['"]?(\d*\.?\d+)/mi)
       root.touchpadScrollGain = root.parseGain(t, /^\s*touchpad_scroll_gain\s*=\s*['"]?(\d*\.?\d+)/mi)
+      root.smoothScroll = /^\s*smooth_scroll\s*=\s*['"]?(on|true|1|yes)\b/mi.test(t)
       root.bridgeConfLoaded = true
     }
-    onLoadFailed: { root.otpAutofill = false; root.automationOn = false; root.uiFontTheme = false; root.uiFontSize = 0; root.scrollGain = 1.0; root.touchpadScrollGain = 1.0; root.binDir = root.home + "/bin"; root.bridgeConfLoaded = true }
+    onLoadFailed: { root.otpAutofill = false; root.automationOn = false; root.uiFontTheme = false; root.uiFontSize = 0; root.scrollGain = 1.0; root.touchpadScrollGain = 1.0; root.smoothScroll = false; root.binDir = root.home + "/bin"; root.bridgeConfLoaded = true }
   }
   IpcHandler {
     target: root.moduleName
@@ -951,6 +958,7 @@ BarWidget {
         + " read_push=" + (root.readPush !== "" ? root.readPush : "?")
         + " autofill=" + (root.otpAutofill ? (otp.ready ? "ready" : "starting") : "off")
         + " scroll_gain=" + root.scrollGain + (root.touchpadScrollGain !== 1 ? "/" + root.touchpadScrollGain : "")
+        + (root.smoothScroll ? " smooth_scroll=on" : "")
         + (root.lastError !== "" ? " error=" + root.lastError : "")
     }
     function threads(): string { return root.automationOn ? JSON.stringify(root.threads) : root.automationOff }

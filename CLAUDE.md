@@ -271,7 +271,7 @@ what it is handed. Keep it that way.
   config file (`~/.config/blip/bridge.conf`, parsed not sourced) carrying
   `host`, `remote_bin`, `automation`, `ui_font_size`, `ui_font_theme`,
   `link_previews`, `push_read`, `hide_spam`, `hide_unknown`, `prefer_imessage`,
-  `scroll_gain`, `touchpad_scroll_gain`, plus the mute list. Anything worth configuring
+  `scroll_gain`, `touchpad_scroll_gain`, `smooth_scroll`, plus the mute list. Anything worth configuring
   becomes another key. Settled 2026-09-04 against PR #21, which proposed a
   `preferences.json` with eleven knobs and a ~1300-line settings panel: it was
   careful work (atomic, 0600, ownership and size validated) and was still the
@@ -336,20 +336,31 @@ what it is handed. Keep it that way.
   Flickable grabs every drag, and drag IS text selection in a bubble; a
   slightly-moving click on a link became a flick. Wheel scrolling never
   needed it (next invariant). Ctrl+C in a bubble goes through `wl-copy`.
-- **Wheel scrolling = `MouseArea.onWheel`, direct 1:1, and INSTRUMENT before
-  tuning.** A `WheelHandler` on the Flickable received ZERO events on this
-  stack (proved by logging after four "fixes" that were placebos — the
-  Flickable's native decaying kinetic path was doing the scrolling the whole
-  time). Omarchy's own panels use `MouseArea.onWheel`; so does Blip now.
-  Never animate wheel scroll (two schemes collapsed under MX Master hi-res
-  event floods). Two other scroll killers, both fixed and both invisible
-  without logging: async image growth ABOVE the viewport cancels wheel motion
-  (chipRow compensates contentY by its own height delta), and model
-  reassignment rebuilds Repeaters and resets scroll (skip identical
-  assignments; restore contentY after a list rebuild). Every writer of the
-  conversation's `contentY` — wheel, arrows, paging, Esc — goes through
-  `scrollConversation()`, the one owner of the bottom-stick that gates the
-  deferred push reload.
+- **Wheel scrolling = `MouseArea.onWheel`, direct 1:1 by default, and
+  INSTRUMENT before tuning.** A `WheelHandler` on the Flickable received ZERO
+  events on this stack (proved by logging after four "fixes" that were
+  placebos — the Flickable's native decaying kinetic path was doing the
+  scrolling the whole time). Omarchy's own panels use `MouseArea.onWheel`; so
+  does Blip now. Never animate wheel scroll BY DEFAULT: two schemes (restarted
+  easing, SmoothedAnimation chase) collapsed under MX Master hi-res event
+  floods, and one physical click of an MX Master 4 is FOUR notches in 0.13 s
+  (evdev, 2026-09-25), so that flood is the normal case on Fred's desk, not
+  an edge. `scroll_gain=` in bridge.conf is how a notch gets smaller; it is
+  not an animation. OPT-IN glide (#115, `smooth_scroll=on`, default off):
+  `WheelGlide` animates a mouse-wheel notch 180 ms OutCubic; a notch
+  mid-glide moves the TARGET, never restarts from the current position, which
+  is what the two dead schemes did; any other `contentY` write cancels it;
+  touchpad `pixelDelta` is never animated. Unproven on an MX Master until
+  Fred's hand says so; the default flips only on that verdict, never on a
+  harness. Two other scroll killers, both fixed and both invisible without
+  logging: async image growth ABOVE the viewport cancels wheel motion
+  (chipRow/linkRow compensate contentY by their own height delta, carrying a
+  running glide along via `convGlide.shift`), and model reassignment rebuilds
+  Repeaters and resets scroll (skip identical assignments; restore contentY
+  after a list rebuild). The bottom-stick that gates the deferred push reload
+  is owned by `scrollConversation()` (wheel by default, arrows, paging, Esc,
+  touchpad) and its animated twin `glideConversation()` (the wheel with
+  `smooth_scroll=on`), which sets it from where the glide is heading.
 - **The app window is RECREATED on show, never re-mapped.** Quickshell does
   not re-map a `FloatingWindow` after `visible` has been false once: the
   property flips true, no client appears (SUPER+M "did nothing", 1.8.3).

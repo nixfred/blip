@@ -45,6 +45,13 @@ FocusScope {
    *  notches; no host, or no key, is 1.0. */
   property real wheelMultiplier: (hostWidget && hostWidget.scrollGain > 0) ? hostWidget.scrollGain : 1.0
   property real touchpadMultiplier: (hostWidget && hostWidget.touchpadScrollGain > 0) ? hostWidget.touchpadScrollGain : 1.0
+  /** OPT-IN: with `smooth_scroll=on` in bridge.conf (read by the host),
+   *  mouse-wheel notches (angleDelta, no pixelDelta) glide to their target
+   *  over smoothWheelDuration ms (OutCubic) instead of jumping; see
+   *  WheelGlide. Off, and without a host, every notch jumps, as always.
+   *  Touchpads (pixelDelta) stay 1:1 and immediate either way. */
+  property bool smoothWheel: hostWidget ? hostWidget.smoothScroll === true : false
+  property int smoothWheelDuration: 180
   /** Qt format strings, owned by the host widget (see BarWidget). Empty when no host is
    *  attached or the host has none, which thread.ts and Qt both read as "use the defaults". */
   readonly property string timeFormat: (hostWidget && hostWidget.timeFormat) || ""
@@ -635,6 +642,73 @@ FocusScope {
     flick.contentY = Math.max(0, Math.min(max, flick.contentY + dy))
     flick.stick = flick.contentY >= max - 4
   }
+  /** The wheel's animated twin of scrollConversation: the stick follows where
+   *  the glide is HEADING, so a glide toward the newest re-arms it at once
+   *  (a new message then snaps to the bottom and ends the glide) and one
+   *  away releases it before anything can pull the view back down. */
+  function glideConversation(dy) {
+    var max = Math.max(0, flick.contentHeight - flick.height)
+    flick.stick = convGlide.by(dy) >= max - 4
+  }
+
+  /** Smooth mouse-wheel scrolling for one Flickable. by(dy) animates contentY
+   *  toward a target clamped to the content; a notch that arrives mid-glide
+   *  moves the TARGET (not the current position), so fast spinning
+   *  accumulates and never loses distance, and the glide is retargeted rather
+   *  than restarted from scratch (the old restarted-easing scheme fought
+   *  hi-res wheels). Any contentY write that is not the glide's own (keys,
+   *  a jump, the bottom-stick, the scrollbar, a touchpad) cancels it; the
+   *  Flickable's own sub-pixel rounding on a contentHeight change does not. */
+  component WheelGlide: Item {
+    id: glide
+    property Flickable flick: null
+    property int duration: 180
+    property real target: 0
+    property real pos: 0
+    property real last: 0          // the contentY the glide itself wrote
+    property bool writing: false
+    readonly property bool running: anim.running
+    onPosChanged: { writing = true; flick.contentY = pos; last = flick.contentY; writing = false }
+    Connections {
+      target: glide.flick
+      function onContentYChanged() {
+        if (!glide.writing && Math.abs(glide.flick.contentY - glide.last) > 1) anim.stop()
+      }
+    }
+    NumberAnimation { id: anim; target: glide; property: "pos"; easing.type: Easing.OutCubic }
+    function stop() { anim.stop() }
+    /** Returns the contentY this glide is heading for. */
+    function by(dy) {
+      var max = Math.max(0, flick.contentHeight - flick.height)
+      var to = Math.max(0, Math.min(max, (anim.running ? target : flick.contentY) + dy))
+      anim.stop()
+      target = to
+      if (duration <= 0) flick.contentY = to
+      else if (Math.abs(to - flick.contentY) >= 0.5) {
+        anim.duration = duration
+        last = flick.contentY
+        anim.from = flick.contentY
+        anim.to = to
+        anim.start()
+      }
+      return to
+    }
+    /** Content above the viewport grew by d (an image decoded): keep the
+     *  reader anchored and carry a running glide along instead of dropping it. */
+    function shift(d) {
+      if (!anim.running) { flick.contentY = Math.max(0, flick.contentY + d); return }
+      var to = Math.max(0, target + d)
+      anim.stop()
+      flick.contentY = Math.max(0, flick.contentY + d)
+      target = to
+      last = flick.contentY
+      anim.from = flick.contentY
+      anim.to = to
+      anim.start()
+    }
+  }
+  WheelGlide { id: threadGlide; flick: threadFlick; duration: root.smoothWheelDuration }
+  WheelGlide { id: convGlide; flick: flick; duration: root.smoothWheelDuration }
   /** Up/Down in an empty compose field walk the bubbles, newest first, and
    *  keep the selected one in view. Down past the newest drops the selection
    *  and re-sticks to the bottom, so the conversation follows new messages
@@ -2257,11 +2331,14 @@ FocusScope {
           ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
           onContentYChanged: root.growRowsForScroll()
 
-          // Wheel scrolling is DIRECT, 1:1 — no animation. Two animated
-          // schemes (restarted easing, SmoothedAnimation chase) both fought
-          // the MX Master's hi-res event flood and felt broken; hi-res
-          // wheels are smooth by HARDWARE, so applying each delta
-          // immediately is what a browser does and what reads as smooth.
+          // Wheel scrolling is DIRECT, 1:1 — no animation by default. Two
+          // animated schemes (restarted easing, SmoothedAnimation chase) both
+          // fought the MX Master's hi-res event flood and felt broken; hi-res
+          // wheels are smooth by HARDWARE, so applying each delta immediately
+          // is what a browser does. OPT-IN (`smooth_scroll=on`): a mouse-wheel
+          // notch glides (smoothWheel, WheelGlide), retargeted rather than
+          // restarted, so a flood of notches accumulates instead of fighting
+          // itself. Touchpad pixel deltas are never animated.
           // The handler owns the event outright so the Flickable's own
           // wheel path can never double-apply it.
           // MouseArea.onWheel, NOT WheelHandler: instrumentation proved the
@@ -2277,7 +2354,8 @@ FocusScope {
             onWheel: function(wheel) {
               var d = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * root.touchpadMultiplier : wheel.angleDelta.y * root.wheelMultiplier
               var max = Math.max(0, threadFlick.contentHeight - threadFlick.height)
-              threadFlick.contentY = Math.max(0, Math.min(max, threadFlick.contentY - d))
+              if (wheel.pixelDelta.y === 0 && root.smoothWheel) threadGlide.by(-d)
+              else threadFlick.contentY = Math.max(0, Math.min(max, threadFlick.contentY - d))
               wheel.accepted = true
             }
           }
@@ -3038,11 +3116,14 @@ FocusScope {
             Qt.callLater(root.pushReload)
           }
 
-          // Wheel scrolling is DIRECT, 1:1 — no animation. Two animated
-          // schemes (restarted easing, SmoothedAnimation chase) both fought
-          // the MX Master's hi-res event flood and felt broken; hi-res
-          // wheels are smooth by HARDWARE, so applying each delta
-          // immediately is what a browser does and what reads as smooth.
+          // Wheel scrolling is DIRECT, 1:1 — no animation by default. Two
+          // animated schemes (restarted easing, SmoothedAnimation chase) both
+          // fought the MX Master's hi-res event flood and felt broken; hi-res
+          // wheels are smooth by HARDWARE, so applying each delta immediately
+          // is what a browser does. OPT-IN (`smooth_scroll=on`): a mouse-wheel
+          // notch glides (smoothWheel, WheelGlide), retargeted rather than
+          // restarted, so a flood of notches accumulates instead of fighting
+          // itself. Touchpad pixel deltas are never animated.
           // The handler owns the event outright so the Flickable's own
           // wheel path can never double-apply it.
           // MouseArea.onWheel, NOT WheelHandler: instrumentation proved the
@@ -3059,7 +3140,8 @@ FocusScope {
               var d = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * root.touchpadMultiplier : wheel.angleDelta.y * root.wheelMultiplier
               // the wheel bypasses Flickable movement signals — the helper
               // maintains the bottom-stick too
-              root.scrollConversation(-d)
+              if (wheel.pixelDelta.y === 0 && root.smoothWheel) root.glideConversation(-d)
+              else root.scrollConversation(-d)
               wheel.accepted = true
             }
           }
@@ -3216,7 +3298,7 @@ FocusScope {
                       if (d === 0 || flick.stick || root.pinToBottom) return
                       var yc = chipRow.mapToItem(content, 0, 0).y
                       if (yc < flick.contentY)
-                        flick.contentY = Math.max(0, flick.contentY + d)
+                        convGlide.shift(d)
                     }
                     readonly property string attId: String(modelData.id || "")
                     // the pill lands here when the message has no text bubble to carry it
@@ -3377,7 +3459,7 @@ FocusScope {
                     if (d === 0 || flick.stick || root.pinToBottom) return
                     var yc = linkRow.mapToItem(content, 0, 0).y
                     if (yc < flick.contentY)
-                      flick.contentY = Math.max(0, flick.contentY + d)
+                      convGlide.shift(d)
                   }
                   Item { Layout.fillWidth: true; visible: bubbleRow.mine }
                   Rectangle {

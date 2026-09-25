@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Opt-in glide for mouse-wheel notches (#115, Guido Jouret).** With
+  `smooth_scroll=on` in `bridge.conf` a notch glides to its place over 180 ms
+  (OutCubic) instead of landing at once; a notch that arrives mid-glide moves
+  the target rather than restarting the easing, so a fast spin never loses
+  distance, and any other write to `contentY` (keys, paging, the bottom-stick,
+  a touchpad) cancels it. Touchpads are never animated. OFF by default: the
+  two earlier animated schemes collapsed under MX Master hi-res floods, and
+  this one is unproven on that mouse; `status` shows `smooth_scroll=on` while
+  it is on. The PR shipped it on by default with a shell.json switch; the
+  merge made it a bridge.conf key, off, like every other knob.
+
 - **One wheel notch scrolls one notch, not half a screen.** The conversation
   and the thread list multiplied every wheel event by 4.5 (a standard notch,
   angleDelta 120, moved about 540 px) and touchpad deltas by 3, on top of the

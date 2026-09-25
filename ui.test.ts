@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { parseUiFontSize, scaleFontPx } from "./ui-font";
-import { parseScrollGain, parseTouchpadScrollGain } from "./scroll-gain";
+import { parseScrollGain, parseSmoothScroll, parseTouchpadScrollGain } from "./scroll-gain";
 
 // The renderer moved from Panel.qml into BlipView.qml in 1.8.0 (shared with the app window).
 const panel = readFileSync(new URL("./BlipView.qml", import.meta.url), "utf8");
@@ -605,6 +605,36 @@ describe("QML safety invariants", () => {
       'readonly property bool hasCursor: root.cursorChat !== "" && root.cursorChat === String(modelData.chat)');
     // closing drops what scrolling built, so the next open is cheap again
     expect(panel).toContain("else rowBudget = rowBatch");
+  });
+
+  test("a mouse-wheel notch glides, retargeted; a touchpad stays direct", () => {
+    const glide = panel.slice(panel.indexOf("component WheelGlide: Item {"), panel.indexOf("WheelGlide { id: threadGlide"));
+    // a notch mid-glide moves the TARGET, so fast spinning never loses distance
+    expect(glide).toContain("(anim.running ? target : flick.contentY) + dy");
+    expect(glide).toContain("easing.type: Easing.OutCubic");
+    // any foreign contentY write (keys, jumps, the stick, a touchpad) cancels it
+    expect(glide).toContain("if (!glide.writing && Math.abs(glide.flick.contentY - glide.last) > 1) anim.stop()");
+    // pixelDelta (touchpad) never animates, in either list
+    expect(panel).toContain("if (wheel.pixelDelta.y === 0 && root.smoothWheel) threadGlide.by(-d)");
+    expect(panel).toContain("if (wheel.pixelDelta.y === 0 && root.smoothWheel) root.glideConversation(-d)");
+    // the stick follows where the glide is heading
+    expect(qmlFunction("glideConversation")).toContain("flick.stick = convGlide.by(dy) >= max - 4");
+    // image growth above the viewport carries a running glide along
+    expect(panel.split("convGlide.shift(d)").length - 1).toBe(2);
+    // OPT-IN: one bridge.conf key, default OFF (the invariant: never animate
+    // the wheel by default; unproven on an MX Master until Fred's hand says so)
+    expect(widget).toContain("property bool smoothScroll: false");
+    expect(widget).toContain("root.smoothScroll = /^\\s*smooth_scroll\\s*=\\s*['\"]?(on|true|1|yes)\\b/mi.test(t)");
+    expect(widget).toContain("root.smoothScroll = false;");
+    expect(widget).toContain('(root.smoothScroll ? " smooth_scroll=on" : "")');
+    expect(widget).not.toContain('setting("smoothScroll"');
+    expect(panel).toContain("property bool smoothWheel: hostWidget ? hostWidget.smoothScroll === true : false");
+    expect(parseSmoothScroll("")).toBe(false);
+    expect(parseSmoothScroll("host=mac\nscroll_gain=0.25\n")).toBe(false);
+    expect(parseSmoothScroll("smooth_scroll=on")).toBe(true);
+    expect(parseSmoothScroll("smooth_scroll = 'true'\n")).toBe(true);
+    expect(parseSmoothScroll("smooth_scroll=off")).toBe(false);
+    expect(parseSmoothScroll("smooth_scroll=onward")).toBe(false);
   });
 
   test("the row budget grows for the wheel and for the keyboard", () => {

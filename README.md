@@ -394,6 +394,18 @@ the same entry, exactly as Omarchy's clock takes its `format`:
 { "id": "nixfred.blip", "timeFormat": "HH:mm", "dateFormat": "dd.MM", "dateFormatWithYear": "dd.MM.yyyy" }
 ```
 
+**Smooth scrolling (opt-in).** By default a mouse-wheel notch lands at once.
+With
+
+```
+# ~/.config/blip/bridge.conf — re-read on save, no restart
+smooth_scroll=on
+```
+
+a notch glides to its place (180 ms, easing out) instead; notches that
+arrive mid-glide add up, so a fast spin never loses distance. Touchpad
+scrolling is always direct. `status` shows `smooth_scroll=on` while it is on.
+
 **5. (Optional) `SUPER+M` for the app window** — the Lua snippet under
 "The app" above.
 

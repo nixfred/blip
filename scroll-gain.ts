@@ -34,3 +34,10 @@ export function parseScrollGain(conf: string): number {
 export function parseTouchpadScrollGain(conf: string): number {
   return parseGain(conf, "touchpad_scroll_gain");
 }
+
+/** `smooth_scroll=on` → mouse-wheel notches glide (#115). OFF unless the key
+ *  says on/true/1/yes: two animated wheel schemes died under MX Master hi-res
+ *  floods, so animation is opt-in until proven on that mouse. */
+export function parseSmoothScroll(conf: string): boolean {
+  return /^\s*smooth_scroll\s*=\s*['"]?(on|true|1|yes)\b/im.test(String(conf || ""));
+}
