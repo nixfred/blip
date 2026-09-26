@@ -100,8 +100,8 @@ reconstructed on Sunday from memory.
 ### Wed 23 Sep: one merge
 
 - **#113 turning the monitor off no longer takes Hyprland down.** Brad Larson
-  (github.com/followbl; X handle likely @followbl, same login and name, asked
-  Fred 2026-09-23, not tagged until answered). With the Blip window open,
+  (github.com/followbl; X https://x.com/followbl, confirmed by Brad on
+  #113, 2026-09-26). With the Blip window open,
   powering off the only monitor, or a DisplayPort monitor dropping off when
   it sleeps (his Samsung C49HG9x), segfaulted Hyprland 0.56.2 on four separate
   nights. Qt swaps the lost output for a placeholder screen with no name and

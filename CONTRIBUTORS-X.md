@@ -26,13 +26,12 @@ tags are at the bottom.
 | Espen Zachrisen | ezachrisen | https://x.com/ezachrisen | 1 | GitHub profile |
 | Jethro Jones | jethrojones | https://x.com/jethrojones | 1 | confirmed by Fred 2026-09-18 |
 | Brenden Bishop | bbishdotdev | https://x.com/bbishdotdev | 1 | his site bbish.dev |
+| Brad Larson | followbl | https://x.com/followbl | 1 | confirmed by Brad on #113, 2026-09-26 |
 | Baden | badenpiland | https://x.com/badenpiland | 1 | GitHub profile + social accounts (older notes said @bhp35, which does not exist) |
 
 ## Likely, waiting on Fred
 
-| Person | GitHub | Candidate | PRs | Why not tagged yet |
-|---|---|---|---|---|
-| Brad Larson | followbl | https://x.com/followbl | 1 | same login and name, no Omarchy tie found; asked Fred 2026-09-23 |
+Nobody right now.
 
 ## No X account found (thank by name and GitHub)
 
@@ -53,8 +52,8 @@ None have published an X account (checked 2026-09-25): jacobaross, Zain Nayer
 ## Paste block
 
 ```
-@ianfs @jondkinney @jefehoser @adamgamble @zachwilke_1 @jmythoren @gjouret @damonjanis @tlehmanifold @joshuaswarren @ezachrisen @jethrojones @bbishdotdev @badenpiland
+@ianfs @jondkinney @jefehoser @adamgamble @zachwilke_1 @jmythoren @gjouret @damonjanis @tlehmanifold @joshuaswarren @ezachrisen @jethrojones @bbishdotdev @badenpiland @followbl
 ```
 
 Plus by name: Erik Fillipsveen (github.com/Fileri), joshhattan, Kb2uka,
-David Reinecke, cw228, Unhook Dev. Add @followbl once Fred confirms.
+David Reinecke, cw228, Unhook Dev.

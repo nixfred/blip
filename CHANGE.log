@@ -30,7 +30,7 @@ PEOPLE (verified handles)
   Danny Cecil       github.com/jefehoser    X https://x.com/jefehoser    (same unique login on X; posts about Omarchy) (confirmed by Fred 2026-09-16)
   Ian Swope         github.com/ianswope     X https://x.com/ianfs        (GitHub profile twitter_username AND social_accounts, found 2026-09-25; @ianfs replies to @NixFred about Omarchy. The dormant @IanSwope is NOT him)
   cjoh              github.com/cjoh         X: none found (checked 2026-09-16)
-  Brad Larson       github.com/followbl     X: likely https://x.com/followbl (same unique login AND name; nothing published on GitHub or metaintro.com; no Omarchy/Blip/@NixFred posts in the 7-day window, checked 2026-09-23; ASKED FRED 2026-09-23, not tagged until he answers)
+  Brad Larson       github.com/followbl     X https://x.com/followbl     (confirmed by Brad himself on #113, 2026-09-26)
   Guido Jouret      github.com/gjouret      X https://x.com/gjouret      (GitHub profile twitter_username AND social_accounts; X name matches, 1.4k followers, checked 2026-09-25)
   Fred Nix          github.com/nixfred      X https://x.com/nixfred
 
@@ -75,7 +75,7 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
                  The leader rule now lives in screen-leader.ts and nobody leads while no real screen exists. Verified in
                  Test Drive with an instrumented build: the placeholder is ["",0,0] and got leader=false; the segfault itself
                  was not reproducible there because Hyprland stands up a FALLBACK output in the same event.
-                 Brad Larson, github.com/followbl, X: likely @followbl, asked Fred
+                 Brad Larson, github.com/followbl, X https://x.com/followbl
 2026-09-22  #111 CLAUDE.md's deploy recipe copies otp-desktop.py and names all five shims, including contact-save. Following the old one
                  had left vic's autofill helper at 2.5.0 and contact-save missing on gus and vic; both fixed with the merge.
                  Ian Swope, github.com/ianswope, X https://x.com/ianfs
