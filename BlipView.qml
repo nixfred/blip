@@ -1004,6 +1004,37 @@ FocusScope {
       Qt.callLater(root.pumpAvatar)
     }
   }
+  /** Voice messages play WITHOUT a window. xdg-open handed audio to mpv,
+   *  which opens an empty black video window for a sound file (Fred,
+   *  2026-09-26). mpv runs with --no-video --force-window=no; the chip toggles:
+   *  a second click on the same file stops it, a click on another stops the
+   *  first. The path is an argument, never interpolated; without mpv the file
+   *  still goes to xdg-open. */
+  property string playingAudio: ""
+  function toggleAudio(path) {
+    if (path === "") return
+    var same = audioPlayer.running && root.playingAudio === path
+    if (audioPlayer.running) audioPlayer.running = false
+    if (same) {
+      root.playingAudio = ""
+      root.note = "stopped"
+      noteTimer.restart()
+      return
+    }
+    root.playingAudio = path
+    audioPlayer.command = ["sh", "-c",
+      'if command -v mpv >/dev/null 2>&1; then exec mpv --no-video --force-window=no --no-terminal --really-quiet -- "$1"; else exec xdg-open "$1"; fi',
+      "sh", path]
+    audioPlayer.running = true
+    root.note = "playing, click again to stop"
+    noteTimer.restart()
+  }
+  Process {
+    id: audioPlayer
+    onExited: function(code, status) { root.playingAudio = "" }
+  }
+  Component.onDestruction: if (audioPlayer.running) audioPlayer.running = false
+
   /** Only media/documents are handed to xdg-open. Anything a sender could
    *  make executable (scripts, .desktop, unknown blobs) is saved and named,
    *  never launched (Codex audit #10). */
@@ -1835,7 +1866,9 @@ FocusScope {
             root.note = "copied"
             noteTimer.restart()
           } else if (d.ok === true && root.fetchJobAction === "open") {
-            if (root.openableMime(root.fetchJobMime)) {
+            if (String(root.fetchJobMime || "").indexOf("audio/") === 0) {
+              root.toggleAudio(String(d.path || ""))
+            } else if (root.openableMime(root.fetchJobMime)) {
               Quickshell.execDetached(["xdg-open", String(d.url || "")])
             } else {
               root.note = "saved, not opened (" + (root.fetchJobMime || "unknown type") + "): " + String(d.path || "")

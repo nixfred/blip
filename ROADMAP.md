@@ -47,7 +47,10 @@ changes to the Mac beyond claude-on-mac updates.
   `/attach <path>`, drag-and-drop; draft chip with ✕; caption rides along,
   reported per-part. Verified delivered from the Linux box end-to-end.
 - [x] **Audio messages (inbound)** — verified 1.3.0: the 🎤 chip fetches and
-  xdg-opens into mpv (the Linux box's audio/x-m4a handler). Nothing more needed.
+  plays through mpv with no window (2026-09-26: xdg-open gave mpv an empty
+  black video window); a second click stops it. iPhone voice messages are CAF
+  with no MIME in chat.db: the bridge fills it from the UTI and fetch.ts
+  re-encodes to Ogg Opus.
 
 ## Tier 3 — UX parity
 

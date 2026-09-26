@@ -7,6 +7,8 @@
   `.bin` and refused to open it. The Mac bridge now fills a missing MIME from
   that code, and Blip turns the CAF into Ogg Opus with ffmpeg, which the
   default player opens. Re-run `blip-setup` so the Mac's `imsg` picks this up.
+  Audio plays with no window (mpv opened an empty black one); click the chip
+  again to stop it.
 
 ## 2.6.2 — 2026-09-26 — scrolling that fits your mouse, pins that stay pinned
 

@@ -472,6 +472,15 @@ describe("QML safety invariants", () => {
     expect(parseTouchpadScrollGain("scroll_gain=0.25\ntouchpad_scroll_gain=0.5")).toBe(0.5);
   });
 
+  test("a voice message plays without a window, and the chip toggles it", () => {
+    // xdg-open gave audio to mpv, which opened an empty black video window.
+    expect(panel).toContain('if (String(root.fetchJobMime || "").indexOf("audio/") === 0) {');
+    expect(panel).toContain("root.toggleAudio(String(d.path || \"\"))");
+    expect(panel).toContain("exec mpv --no-video --force-window=no --no-terminal --really-quiet -- \"$1\"");
+    expect(panel).toContain('"sh", path]'); // the path is an argument, never interpolated
+    expect(panel).toContain("var same = audioPlayer.running && root.playingAudio === path");
+  });
+
   test("keys and wheel scroll the conversation through one stick-aware helper", () => {
     // Two writers of flick.contentY would drift on the bottom-stick, which
     // gates the deferred push reload; the wheel handler must go through it.
