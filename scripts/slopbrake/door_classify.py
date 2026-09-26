@@ -27,7 +27,12 @@ DEFAULT_RULES = ".claude/door-rules.yml"
 
 def load_rules(path: Path) -> dict[str, list[str]]:
     data = load_simple_yaml(path.read_text(encoding="utf-8"))
-    rules = {key: list(data.get(key) or []) for key in ("one_way", "content_patterns", "ignore", "content_ignore")}
+    rules: dict[str, list[str]] = {}
+    for key in ("one_way", "content_patterns", "ignore", "content_ignore"):
+        value = data.get(key) or []
+        if not isinstance(value, list):  # list("x/**") would silently become one-character globs
+            raise SystemExit(f"{path}: {key} must be a list of '- item' lines, got {value!r}")
+        rules[key] = value
     if data.get("default", "two_way") not in ("two_way", "one_way"):
         raise SystemExit(f"{path}: default must be two_way or one_way")
     rules["default"] = [str(data.get("default", "two_way"))]

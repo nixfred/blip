@@ -1,7 +1,8 @@
 # Door classifier (vendored from Slopbrake)
 
-`door_classify.py` and `common.py` are copied unmodified from
-https://github.com/GreyforgeLabs/slopbrake (`slopbrake/kit/common/scripts/slopbrake/`, MIT, see LICENSE).
+`door_classify.py` and `common.py` are copied from
+https://github.com/GreyforgeLabs/slopbrake (`slopbrake/kit/common/scripts/slopbrake/`, MIT, see LICENSE),
+with Larry's fixes from upstream PRs #2 (diff parser) and #3 (scalar rules) applied.
 Standard-library Python; the only subprocess it runs is `git`.
 
 Run it before merging a PR:
