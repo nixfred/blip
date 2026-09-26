@@ -686,6 +686,39 @@ def pinned_chat_identifiers() -> list[set[str]]:
     return []
 
 
+def expand_pins_via_lookup(con, pins: list[set[str]]) -> list[set[str]]:
+    """Add the live chat_identifier behind every pinned group id.
+
+    A group pin stores iCloud group ids (``pD.pP`` and ``pZ.o``). When the
+    group is re-keyed those ids stop matching any chat row's group_id or
+    original_group_id, and the pin silently fell out of Favorites (LMT,
+    2026-09-26: both of its pin ids matched nothing). Messages itself keeps
+    the mapping in ``chat_lookup`` (domain ``iMessageGroupID``, identifier →
+    chat ROWID), which is how it still shows the pin. Read-only; a missing
+    table (older macOS) leaves the pins unchanged.
+    """
+    try:
+        rows = con.execute(
+            "SELECT l.identifier, c.chat_identifier FROM chat_lookup l "
+            "JOIN chat c ON c.ROWID = l.chat WHERE l.domain = 'iMessageGroupID'"
+        ).fetchall()
+    except sqlite3.Error:
+        return pins
+    lookup: dict[str, set[str]] = {}
+    for identifier, chat_identifier in rows:
+        if identifier and chat_identifier:
+            lookup.setdefault(str(identifier).strip().lower(), set()).add(str(chat_identifier))
+    if not lookup:
+        return pins
+    out = []
+    for pin_ids in pins:
+        extra: set[str] = set()
+        for pin_id in pin_ids:
+            extra |= lookup.get(str(pin_id).strip().lower(), set())
+        out.append(pin_ids | extra)
+    return out
+
+
 def _pin_id(value: str) -> str:
     """Reduce an Apple chat id (or service-qualified id) to its chat id."""
     value = str(value or "").strip().lower()
@@ -1274,7 +1307,7 @@ def cmd_chats(con, args):
         (args.n,),
     ).fetchall()
     if args.json:
-        pin_ids = pinned_chat_identifiers()
+        pin_ids = expand_pins_via_lookup(con, pinned_chat_identifiers())
         # One entry per CONVERSATION: a group re-keyed by Messages leaves
         # several chat rows and used to list once per row. A merged DM
         # (phone + email sharing group_id) is the same shape.

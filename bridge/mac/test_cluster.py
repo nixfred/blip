@@ -65,6 +65,33 @@ class ClusterPins(unittest.TestCase):
         self.assertTrue(self.imsg._same_chat_id(dashed, plain))
         self.assertFalse(self.imsg._same_chat_id(dashed, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 
+    def test_group_pin_resolves_through_chat_lookup(self) -> None:
+        # LMT, 2026-09-26: the pin's ids (pP entry and pZ.o) matched no chat
+        # row's group_id or original_group_id; Messages maps them to the live
+        # chat in chat_lookup (domain iMessageGroupID). Without it LMT fell
+        # out of Favorites while the phone still showed it pinned.
+        live = "ce5a593a78af408282d61461ade89135"
+        self.con.execute(
+            "INSERT INTO chat VALUES (1, ?, 'any;+;' || ?, 'LMT', 43, "
+            "'53466BFF-732F-4270-836E-B5B18DB1CD10', 'E203FF66-DC0F-4B7C-BB99-C8CBB1EABF44')",
+            (live, live),
+        )
+        self.con.executescript(
+            "CREATE TABLE chat_lookup (identifier TEXT, domain TEXT, chat INTEGER, priority INTEGER);"
+            "INSERT INTO chat_lookup VALUES ('76377A76-A8B0-49BE-B7CC-EC9A287E948F', 'iMessageGroupID', 1, 0);"
+            "INSERT INTO chat_lookup VALUES ('+15550100009', 'iMessageHandle', 1, 0);"
+        )
+        pins = [{"thomasonix@example.com"},
+                {"76377A76-A8B0-49BE-B7CC-EC9A287E948F", "ADDDE374-5030-4C87-99F3-E356F950117F"}]
+        cands = [live, f"any;+;{live}", "53466BFF-732F-4270-836E-B5B18DB1CD10"]
+        self.assertIsNone(self.imsg.pin_order_for(pins, *cands))  # the bug
+        expanded = self.imsg.expand_pins_via_lookup(self.con, pins)
+        self.assertEqual(self.imsg.pin_order_for(expanded, *cands), 1)
+        self.assertEqual(expanded[0], pins[0])  # a DM pin is untouched
+        # an older macOS without chat_lookup leaves the pins as they were
+        bare = sqlite3.connect(":memory:")
+        self.assertEqual(self.imsg.expand_pins_via_lookup(bare, pins), pins)
+
     def test_rekeyed_group_pin_on_retired_row_attaches_to_live_id(self) -> None:
         live = "4b3d072e07b14bf88b4b8fde00deebcf"
         old = "chat909594254947022019"
