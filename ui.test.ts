@@ -479,6 +479,10 @@ describe("QML safety invariants", () => {
     expect(panel).toContain("exec mpv --no-video --force-window=no --no-terminal --really-quiet -- \"$1\"");
     expect(panel).toContain('"sh", path]'); // the path is an argument, never interpolated
     expect(panel).toContain("var same = audioPlayer.running && root.playingAudio === path");
+    // clicking away stops it: surface closed, another thread, view destroyed
+    expect(panel).toContain("if (!surfaceOpen) root.stopAudio()");
+    expect(panel).toContain("root.stopAudio() // another conversation");
+    expect(panel).toContain("Component.onDestruction: root.stopAudio()");
   });
 
   test("keys and wheel scroll the conversation through one stick-aware helper", () => {

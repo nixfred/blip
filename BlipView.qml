@@ -541,6 +541,7 @@ FocusScope {
   }
 
   function back() {
+    root.stopAudio() // leaving the conversation stops its voice message
     clearThread()
     composeField.text = ""
     clearAttachments()   // a queued file must never survive into another thread
@@ -555,6 +556,8 @@ FocusScope {
 
   function isShowing(t) { return inThread && String(active.chat) === String(t.chat) }
   function openThread(t) {
+    root.stopAudio() // another conversation: the last one's voice message stops
+
     if (!t) return
     // A sheet opened over the PREVIOUS conversation (an arriving link opens it
     // by itself) otherwise floats over this one, offering a QR for a link that
@@ -963,6 +966,9 @@ FocusScope {
     if (surfaceOpen) root.retryBareAvatars()
     // Closed: drop the rows scrolling built, so the next open is cheap again.
     else rowBudget = rowBatch
+    // Closing the surface stops a voice message (Fred, 2026-09-26: it kept
+    // talking after he clicked away).
+    if (!surfaceOpen) root.stopAudio()
   }
   function pumpAvatar() {
     if (avatarProc.running || avatarQueue.length === 0) return
@@ -1033,7 +1039,11 @@ FocusScope {
     id: audioPlayer
     onExited: function(code, status) { root.playingAudio = "" }
   }
-  Component.onDestruction: if (audioPlayer.running) audioPlayer.running = false
+  function stopAudio() {
+    if (audioPlayer.running) audioPlayer.running = false
+    root.playingAudio = ""
+  }
+  Component.onDestruction: root.stopAudio()
 
   /** Only media/documents are handed to xdg-open. Anything a sender could
    *  make executable (scripts, .desktop, unknown blobs) is saved and named,
