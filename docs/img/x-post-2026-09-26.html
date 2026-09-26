@@ -1,0 +1,75 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Blip 2.6.2</title>
+<style>
+:root{--bg:#07090f;--ink:#e8edf6;--dim:#7c8699;--blue:#0a84ff;--blue2:#5ac8fa;--card:#0f1422;--edge:#1c2436;--c:14px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1600px;height:900px;background:var(--bg);color:var(--ink);font-family:"JetBrainsMono Nerd Font",monospace;overflow:hidden;position:relative}
+.grid{position:absolute;inset:0;background-image:linear-gradient(#ffffff08 1px,transparent 1px),linear-gradient(90deg,#ffffff08 1px,transparent 1px);background-size:40px 40px;mask-image:radial-gradient(ellipse at 20% 30%,#000 30%,transparent 80%)}
+.glow{position:absolute;width:900px;height:900px;left:-250px;top:-300px;background:radial-gradient(circle,#0a84ff55,transparent 65%);filter:blur(20px)}
+.glow2{position:absolute;width:700px;height:700px;right:-200px;bottom:-350px;background:radial-gradient(circle,#5ac8fa30,transparent 65%)}
+.left{position:absolute;left:80px;top:78px;width:560px}
+.tag{display:inline-block;padding:8px 14px;background:var(--blue);color:#fff;font-weight:700;font-size:18px;letter-spacing:3px;clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
+h1{font-size:150px;line-height:.9;font-weight:800;letter-spacing:-6px;margin-top:28px}
+h1 span{color:var(--blue)}
+.ver{font-size:56px;font-weight:700;color:var(--blue2);margin-top:10px;letter-spacing:-1px}
+.sub{font-size:24px;color:var(--dim);margin-top:22px;line-height:1.45}
+.sub b{color:var(--ink);font-weight:600}
+.bubbles{margin-top:40px;display:flex;flex-direction:column;gap:12px;width:470px}
+.b{padding:14px 20px;font-size:21px;border-radius:22px;max-width:88%}
+.in{background:#1e2433;align-self:flex-start;border-bottom-left-radius:6px}
+.out{background:var(--blue);color:#fff;align-self:flex-end;border-bottom-right-radius:6px}
+.stats{position:absolute;left:80px;bottom:70px;display:flex;gap:18px}
+.stat{background:var(--card);border:1px solid var(--edge);padding:18px 26px;clip-path:polygon(var(--c) 0,100% 0,100% calc(100% - var(--c)),calc(100% - var(--c)) 100%,0 100%,0 var(--c))}
+.stat .n{font-size:52px;font-weight:800;color:var(--blue)}
+.stat .l{font-size:15px;color:var(--dim);letter-spacing:2px;margin-top:2px}
+.right{position:absolute;right:70px;top:70px;width:850px}
+.rh{font-size:17px;letter-spacing:5px;color:var(--dim);margin-bottom:18px}
+.rh b{color:var(--blue2)}
+.people{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.p{background:linear-gradient(135deg,#121a2c,#0c111d);border:1px solid var(--edge);padding:16px 18px 15px;position:relative;clip-path:polygon(var(--c) 0,100% 0,100% calc(100% - var(--c)),calc(100% - var(--c)) 100%,0 100%,0 var(--c))}
+.p::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--blue)}
+.p.top{background:linear-gradient(135deg,#0a84ff33,#0c111d 70%);border-color:#0a84ff66}
+.h{font-size:21px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.h.gh{color:#b9c2d3}
+.nm{font-size:14px;color:var(--dim);margin-top:4px}
+.k{position:absolute;right:14px;top:14px;font-size:14px;font-weight:700;color:var(--blue2)}
+.what{font-size:13.5px;color:#9aa6bb;margin-top:8px;line-height:1.35}
+.foot{position:absolute;right:70px;bottom:62px;font-size:18px;color:var(--dim)}
+.foot b{color:var(--ink)}
+</style></head><body>
+<div class="grid"></div><div class="glow"></div><div class="glow2"></div>
+<div class="left">
+  <div class="tag">RELEASE</div>
+  <h1>Bl<span>i</span>p</h1>
+  <div class="ver">2.6.2</div>
+  <div class="sub"><b>iMessage on Omarchy.</b><br>Your Mac is the gateway.<br>Your Linux desk is the phone.</div>
+  <div class="bubbles">
+    <div class="b in">who built this one?</div>
+    <div class="b out">thirteen people →</div>
+  </div>
+</div>
+<div class="stats">
+  <div class="stat"><div class="n">35</div><div class="l">PRS MERGED</div></div>
+  <div class="stat"><div class="n">13</div><div class="l">CONTRIBUTORS</div></div>
+  <div class="stat"><div class="n">632</div><div class="l">TESTS GREEN</div></div>
+</div>
+<div class="right">
+  <div class="rh">SINCE 11 SEP · <b>THANK YOU</b></div>
+  <div class="people">
+    <div class="p top"><div class="k">14 PRs</div><div class="h">@ianfs</div><div class="nm">Ian Swope</div><div class="what">panel speed, toasts, security</div></div>
+    <div class="p"><div class="k">4</div><div class="h">@zachwilke_1</div><div class="nm">Zach Wilke</div><div class="what">UTC time, GIFs, multi-file</div></div>
+    <div class="p"><div class="k">3</div><div class="h">@jefehoser</div><div class="nm">Danny Cecil</div><div class="what">workspace, Super+M, quote</div></div>
+    <div class="p"><div class="k">2</div><div class="h">@damonjanis</div><div class="nm">Damon Janis</div><div class="what">badge you can trust</div></div>
+    <div class="p"><div class="k">2</div><div class="h">@gjouret</div><div class="nm">Guido Jouret</div><div class="what">wheel scroll 1:1, glide</div></div>
+    <div class="p"><div class="k">2</div><div class="h">@jondkinney</div><div class="nm">Jon Kinney</div><div class="what">group reads reach the iPhone</div></div>
+    <div class="p"><div class="k">2</div><div class="h gh">joshhattan</div><div class="nm">github</div><div class="what">multi-monitor, Zen autofill</div></div>
+    <div class="p"><div class="k">1</div><div class="h">@bbishdotdev</div><div class="nm">Brenden Bishop</div><div class="what">codes beside the field</div></div>
+    <div class="p"><div class="k">1</div><div class="h">@badenpiland</div><div class="nm">Baden</div><div class="what">stay blue: prefer_imessage</div></div>
+    <div class="p"><div class="k">1</div><div class="h">@StudioXRadio</div><div class="nm">Kb2uka</div><div class="what">save senders as contacts</div></div>
+    <div class="p"><div class="k">1</div><div class="h">@followbl</div><div class="nm">Brad Larson</div><div class="what">monitor off, no crash</div></div>
+    <div class="p"><div class="k">1</div><div class="h gh">cw228</div><div class="nm">github</div><div class="what">bin_dir= for the shims</div></div>
+    <div class="p"><div class="k">1</div><div class="h gh">dreinecke</div><div class="nm">David Reinecke</div><div class="what">source-id seam</div></div>
+  </div>
+</div>
+<div class="foot">github.com/<b>nixfred/blip</b></div>
+</body></html>

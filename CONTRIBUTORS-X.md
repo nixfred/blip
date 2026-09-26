@@ -26,6 +26,7 @@ tags are at the bottom.
 | Espen Zachrisen | ezachrisen | https://x.com/ezachrisen | 1 | GitHub profile |
 | Jethro Jones | jethrojones | https://x.com/jethrojones | 1 | confirmed by Fred 2026-09-18 |
 | Brenden Bishop | bbishdotdev | https://x.com/bbishdotdev | 1 | his site bbish.dev |
+| Kb2uka | Kb2uka | https://x.com/StudioXRadio | 1 | said so himself on #91 ("@StudioXRadio, tag away"), 2026-09-18; recorded 2026-09-26 |
 | Brad Larson | followbl | https://x.com/followbl | 1 | confirmed by Brad on #113, 2026-09-26 |
 | Baden | badenpiland | https://x.com/badenpiland | 1 | GitHub profile + social accounts (older notes said @bhp35, which does not exist) |
 
@@ -39,7 +40,6 @@ Nobody right now.
 |---|---|---|---|
 | Erik Fillipsveen | Fileri | 22 | nothing published, 2026-09-25. Largest contributor |
 | joshhattan | joshhattan | 2 | nothing published; asked on the PR 2026-09-19 |
-| Kb2uka | Kb2uka | 1 | GitHub and kb2uka.com, nothing; asked on the PR 2026-09-18 |
 | David Reinecke | dreinecke | 1 (+ issues) | nothing published, 2026-09-25 |
 | cw228 | cw228 | 1 | nothing published; asked on the PR 2026-09-18 |
 | "Unhook Dev" | tolewis | 1 | nothing published, 2026-09-25 |
@@ -52,8 +52,8 @@ None have published an X account (checked 2026-09-25): jacobaross, Zain Nayer
 ## Paste block
 
 ```
-@ianfs @jondkinney @jefehoser @adamgamble @zachwilke_1 @jmythoren @gjouret @damonjanis @tlehmanifold @joshuaswarren @ezachrisen @jethrojones @bbishdotdev @badenpiland @followbl
+@ianfs @jondkinney @jefehoser @adamgamble @zachwilke_1 @jmythoren @gjouret @damonjanis @tlehmanifold @joshuaswarren @ezachrisen @jethrojones @bbishdotdev @badenpiland @followbl @StudioXRadio
 ```
 
-Plus by name: Erik Fillipsveen (github.com/Fileri), joshhattan, Kb2uka,
+Plus by name: Erik Fillipsveen (github.com/Fileri), joshhattan,
 David Reinecke, cw228, Unhook Dev.

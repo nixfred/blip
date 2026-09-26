@@ -32,6 +32,7 @@ PEOPLE (verified handles)
   cjoh              github.com/cjoh         X: none found (checked 2026-09-16)
   Brad Larson       github.com/followbl     X https://x.com/followbl     (confirmed by Brad himself on #113, 2026-09-26)
   Guido Jouret      github.com/gjouret      X https://x.com/gjouret      (GitHub profile twitter_username AND social_accounts; X name matches, 1.4k followers, checked 2026-09-25)
+  Kb2uka            github.com/Kb2uka       X https://x.com/StudioXRadio (he said so on #91, 2026-09-18: "@StudioXRadio, tag away")
   Fred Nix          github.com/nixfred      X https://x.com/nixfred
 
 Earlier contributors and their handles: CONTRIBUTORS-X-POST.md.
@@ -96,7 +97,7 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 2026-09-18  #108 A read push counts the whole conversation cluster, not one chat row (fixes #107): an unread on an alias silently never pushed.
                  Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-18  #91  Save a NEW contact to the Mac from a conversation: create-only, confirmed, duplicate-refusing, verified by read-back.
-                 Kb2uka, github.com/Kb2uka, X: none found (checked 2026-09-18, asked on the PR)
+                 Kb2uka, github.com/Kb2uka, X https://x.com/StudioXRadio
 2026-09-18  #106 A group read in Blip clears it on the Mac too, through Messages' imessage:open?groupid= deep link.
                  Jon Kinney, github.com/jondkinney, X https://x.com/jondkinney
 2026-09-18  #105 Per-conversation spawns route through a source-id seam; stock Blip still resolves to the one Mac bridge (closes #70).
@@ -104,7 +105,7 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 2026-09-18  #104 One Linux-shim line in the shape diagram, listing all four shims.
                  Ian Swope, github.com/ianswope, X https://x.com/ianfs
 2026-09-18  4134bbf  Exact-card details and vCard export honour bin_dir; the guard test that missed it is widened.
-                 Found by Kb2uka, github.com/Kb2uka, X: none found (checked 2026-09-18). Fixed by Fred Nix / Larry, X https://x.com/nixfred
+                 Found by Kb2uka, github.com/Kb2uka, X https://x.com/StudioXRadio. Fixed by Fred Nix / Larry, X https://x.com/nixfred
 2026-09-17  #96  prefer_imessage=on keeps a mixed 1:1 on iMessage instead of going green after one RCS inbound. Opt-in, off by default.
                  Baden, github.com/badenpiland, X https://x.com/badenpiland
 2026-09-17  #101 A read dot no longer returns while the badge says zero: the poll no-op check follows the model, not a stale cache.

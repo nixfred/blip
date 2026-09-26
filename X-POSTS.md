@@ -15,8 +15,9 @@ no pomp, no em dashes. Plain text below the marker; X renders no markdown.
 | # | Status | Date | Covers |
 |---|--------|------|--------|
 | 1 | POSTED | 2026-09-11 | Everyone through 2.4.x: CONTRIBUTORS-X-POST.md |
-| 2 | DRAFT, ready | 2026-09-16 | 19 merged PRs since Post 1, 2.5.0 and Unreleased |
-| 3 | DUE Sun 20 Sep | 2026-W38 | Weekly contributor update, notes in WEEKLY-NOTES.md |
+| 2 | SUPERSEDED by 4 (never posted) | 2026-09-16 | 19 merged PRs since Post 1, 2.5.0 and Unreleased |
+| 3 | SUPERSEDED by 4 | 2026-W38 | Weekly contributor update, notes in WEEKLY-NOTES.md |
+| 4 | DRAFT, ready | 2026-09-26 | Blip 2.6.2: all 35 PRs from 13 people since Post 1. Text docs/x-post-2026-09-26.txt, image docs/img/x-post-2026-09-26.png |
 
 ---
 
