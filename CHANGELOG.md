@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 2.6.2 — 2026-09-26 — scrolling that fits your mouse, pins that stay pinned
+
+- **A pinned group whose id changed stays in Favorites.** Messages re-keys a
+  group now and then, and its pin keeps the old iCloud group ids, which match
+  no chat row any more. The phone and the Mac still showed the pin; Blip
+  quietly dropped it. The Mac bridge now resolves pin ids through chat.db's
+  `chat_lookup` table, the same mapping Messages uses. Re-run `blip-setup` so
+  the Mac's `imsg` picks this up.
 
 - **Opt-in glide for mouse-wheel notches (#115, Guido Jouret).** With
   `smooth_scroll=on` in `bridge.conf` a notch glides to its place over 180 ms
