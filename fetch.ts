@@ -82,6 +82,10 @@ const MIME_EXT: Record<string, string> = {
   "image/heic": "jpg", "image/heif": "jpg", "image/tiff": "tiff", "image/bmp": "bmp",
   "video/mp4": "mp4", "video/quicktime": "mov", "video/x-m4v": "m4v",
   "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/aac": "aac", "audio/amr": "amr",
+  // An iPhone voice message is Opus inside Apple's CAF container. Nothing on
+  // Linux registers .caf (shared-mime-info reads it as octet-stream, so
+  // xdg-open had no handler), so fetch rewraps it as Ogg: see rewrapCaf.
+  "audio/x-caf": "ogg",
   "application/pdf": "pdf", "text/plain": "txt", "text/vcard": "vcf", "text/calendar": "ics",
 };
 export function cacheFileName(id: string, name: string, mime: string, preview = false): string {
@@ -346,6 +350,33 @@ export interface FetchResult {
   pixelRatio: number;
 }
 
+/** An iPhone voice message (CAF, Opus inside) → Ogg Opus, so the default
+ *  audio player opens it. Measured on a real one (2026-09-26): ffmpeg cannot
+ *  read CAF from a pipe (the packet table sits at the END: "Missing packet
+ *  table"), and a stream copy fails too (Apple's Opus carries no OpusHead:
+ *  "No extradata present"), so the bytes go to a private temp file in the
+ *  0700 cache dir and are re-encoded at 48 kb/s. The temp file is always
+ *  removed. Any failure (no ffmpeg, an unreadable stream, output that is not
+ *  Ogg) keeps the original bytes: mpv still probes content, it just arrives
+ *  under an .ogg name. */
+export function rewrapCaf(bytes: Buffer, runner = spawnSync, dir = CACHE_DIR): Buffer {
+  const tmp = join(dir, `.caf-${process.pid}-${Math.random().toString(36).slice(2, 10)}.caf`);
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const fd = openSync(tmp, "wx", 0o600);
+    try { writeSync(fd, bytes); } finally { closeSync(fd); }
+    const res = runner("ffmpeg", [
+      "-v", "error", "-f", "caf", "-i", tmp, "-vn", "-map_metadata", "-1",
+      "-c:a", "libopus", "-b:a", "48k", "-f", "ogg", "pipe:1",
+    ], { timeout: 60000, maxBuffer: FETCH_MAX_BYTES + (1 << 20) });
+    const out = res.stdout as Buffer | undefined;
+    if (res.status === 0 && out && out.length > 4 && out.subarray(0, 4).toString("latin1") === "OggS") return out;
+  } catch { /* keep the original */ } finally {
+    try { unlinkSync(tmp); } catch { /* never written */ }
+  }
+  return bytes;
+}
+
 export function fetchAttachment(
   id: string,
   name: string,
@@ -399,7 +430,9 @@ export function fetchAttachment(
   const raw = res.stdout as Buffer;
   if (!raw || raw.length === 0) return fail("empty attachment stream");
   if (raw.length > Math.min(maxBytes, FETCH_MAX_BYTES)) return fail("attachment exceeds the fetch ceiling");
-  const bytes = bakeOrientation(raw, runner);
+  const bytes = String(mime || "").toLowerCase() === "audio/x-caf"
+    ? rewrapCaf(raw, runner)
+    : bakeOrientation(raw, runner);
 
   // tmp + fsync + rename: a killed fetch must never leave a cache hit that
   // looks complete.

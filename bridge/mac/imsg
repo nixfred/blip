@@ -48,6 +48,23 @@ PINNING_PLIST_PATHS = (
     ),
 )
 APPLE_EPOCH = 978307200  # 2001-01-01 UTC
+# chat.db leaves mime_type EMPTY on some rows and only the UTI says what the
+# file is: every iPhone voice message ("Audio Message.caf") is uti
+# com.apple.coreaudio-format with no MIME, so Blip saved it as .bin and never
+# opened it (2026-09-26). This SQL fills the gap from the UTI, Apple's own
+# field, never from the sender's filename.
+ATTACHMENT_MIME_SQL = """COALESCE(NULLIF(a.mime_type, ''), CASE a.uti
+    WHEN 'com.apple.coreaudio-format' THEN 'audio/x-caf'
+    WHEN 'public.mpeg-4-audio' THEN 'audio/mp4'
+    WHEN 'com.apple.m4a-audio' THEN 'audio/x-m4a'
+    WHEN 'public.mp3' THEN 'audio/mpeg'
+    WHEN 'org.3gpp.adaptive-multi-rate-audio' THEN 'audio/amr'
+    WHEN 'public.jpeg' THEN 'image/jpeg'
+    WHEN 'public.png' THEN 'image/png'
+    WHEN 'public.heic' THEN 'image/heic'
+    WHEN 'com.apple.quicktime-movie' THEN 'video/quicktime'
+    WHEN 'public.mpeg-4' THEN 'video/mp4'
+    END)"""
 CONTACT_HELPER = os.path.expanduser("~/.blip/bin/contact-delete")
 
 # ---------- Contacts name resolution (built-in, no external deps) ----------
@@ -921,13 +938,13 @@ def enrich(con, rows, with_names: bool):
     rowids = [r["ROWID"] for r in kept]
     for a in _chunked_in(
         con,
-        """SELECT maj.message_id AS mid, a.ROWID AS aid, a.transfer_name AS name,
-                  a.mime_type AS mime, a.total_bytes AS bytes
+        f"""SELECT maj.message_id AS mid, a.ROWID AS aid, a.transfer_name AS name,
+                  {ATTACHMENT_MIME_SQL} AS mime, a.total_bytes AS bytes
            FROM message_attachment_join maj
            JOIN attachment a ON a.ROWID = maj.attachment_id
            WHERE a.transfer_name IS NOT NULL
              AND a.transfer_name NOT LIKE '%.pluginPayloadAttachment'
-             AND maj.message_id IN ({marks})""",
+             AND maj.message_id IN ({{marks}})""",
         rowids,
     ):
         extras.setdefault(a["mid"], {}).setdefault("attachments", []).append(
@@ -1355,10 +1372,10 @@ def cmd_chats(con, args):
         attachments = {}
         for attachment in _chunked_in(
             con,
-            """SELECT maj.message_id AS mid, a.transfer_name AS name, a.mime_type AS mime
+            f"""SELECT maj.message_id AS mid, a.transfer_name AS name, {ATTACHMENT_MIME_SQL} AS mime
                  FROM message_attachment_join maj
                  JOIN attachment a ON a.ROWID = maj.attachment_id
-                WHERE maj.message_id IN ({marks})
+                WHERE maj.message_id IN ({{marks}})
                   AND COALESCE(a.transfer_name, '') NOT LIKE '%.pluginPayloadAttachment'
                 ORDER BY a.ROWID""",
             [last["mid"] for last in latest.values()],
@@ -1961,7 +1978,7 @@ def cmd_attachment(con, args):
     if not re.fullmatch(r"[0-9]{1,18}", args.id):
         sys.exit("error: attachment id must be decimal digits")
     row = con.execute(
-        f"""SELECT a.filename, a.mime_type
+        f"""SELECT a.filename, {ATTACHMENT_MIME_SQL} AS mime_type
             FROM attachment a
             JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
             JOIN {MESSAGE_SRC} m ON m.ROWID = maj.message_id

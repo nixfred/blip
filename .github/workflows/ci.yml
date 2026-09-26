@@ -34,6 +34,8 @@ jobs:
         run: python3 bridge/mac/test_app_cards.py
       - name: unsent messages are tombstones, not empty bubbles (no macOS needed)
         run: python3 bridge/mac/test_unsent.py
+      - name: a voice message gets its MIME from the UTI (no macOS needed)
+        run: python3 bridge/mac/test_attachment_mime.py
       - name: a waiting Send Later is flagged, never "sent" (no macOS needed)
         run: python3 bridge/mac/test_scheduled.py
       - name: conversation cluster pins (no macOS needed)

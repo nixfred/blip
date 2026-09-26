@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { CACHE_DIR, bakeOrientation, cacheFileName, exifOrientation, fetchAttachment, imageMetrics, isAnimatedMime, isImageMime, jpegtranArgs, lruEvictions, sanitizeName, wantsJpeg } from "./fetch";
+import { CACHE_DIR, bakeOrientation, cacheFileName, rewrapCaf, exifOrientation, fetchAttachment, imageMetrics, isAnimatedMime, isImageMime, jpegtranArgs, lruEvictions, sanitizeName, wantsJpeg } from "./fetch";
 import { extFor, existingLocalFile, firstFileUri, localFileFromPayload, pickFileType, pickImageType, snapshotClipboard } from "./paste";
 import { resolveTarget, sendFile } from "./send-file";
 import { linkHost, linkify, normalizeLink, selectThread } from "./thread";
@@ -15,7 +15,7 @@ import {
   sniffImage,
 } from "./linkpreview";
 import { AVATAR_DIR, AVATAR_NONE_TTL_MS, AVATAR_RETRY_MS, AVATAR_TTL_MS, avatarArgs, avatarKey, fetchAvatar, fetchAvatarBatch } from "./avatar";
-import { readFileSync, writeFileSync, unlinkSync, utimesSync, mkdtempSync, mkdirSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, unlinkSync, utimesSync, mkdtempSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -984,5 +984,47 @@ describe("cache file names (Astra B#1)", () => {
   test("a mapped MIME still gets its own extension", () => {
     expect(cacheFileName("8", "photo.heic", "image/heic")).toBe("8-jpg-photo.jpg");
     expect(cacheFileName("9", "doc.pdf", "application/pdf")).toBe("9-orig-doc.pdf");
+  });
+});
+
+describe("voice messages (CAF) open on Linux", () => {
+  test("an audio/x-caf attachment caches as .ogg, never under the sender's name", () => {
+    expect(cacheFileName("12753", "Audio Message.caf", "audio/x-caf")).toBe("12753-orig-Audio_Message.ogg");
+    // an empty MIME still gets no opener: the bridge must supply one from the UTI
+    expect(cacheFileName("12753", "Audio Message.caf", "")).toBe("12753-orig-Audio_Message.bin");
+  });
+
+  test("rewrapCaf re-encodes from a private temp file, removes it, and keeps the original on failure", () => {
+    const dir = mkdtempSync(join(tmpdir(), "blip-caf-stub-"));
+    const caf = Buffer.from("caff\u0000\u0001fakeopus");
+    const ogg = Buffer.from("OggS\u0000rest");
+    let seen: string[] = [];
+    const ok = rewrapCaf(caf, ((cmd: string, args: string[]) => {
+      seen = [cmd, ...args];
+      const input = args[args.indexOf("-i") + 1];
+      expect(readFileSync(input)).toEqual(caf); // the temp file holds the bytes
+      return { status: 0, stdout: ogg };
+    }) as never, dir);
+    expect(ok).toBe(ogg);
+    expect(seen).toContain("libopus");
+    expect(readdirSync(dir)).toEqual([]); // temp file removed
+
+    expect(rewrapCaf(caf, (() => { throw new Error("no ffmpeg"); }) as never, dir)).toBe(caf);
+    expect(rewrapCaf(caf, (() => ({ status: 1, stdout: Buffer.alloc(0) })) as never, dir)).toBe(caf);
+    // a zero exit that is not an Ogg stream is not trusted
+    expect(rewrapCaf(caf, (() => ({ status: 0, stdout: Buffer.from("junkjunk") })) as never, dir)).toBe(caf);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  test("a real CAF voice message plays as Ogg Opus through ffmpeg", () => {
+    const has = spawnSync("ffmpeg", ["-version"]).status === 0;
+    if (!has) return;
+    const dir = mkdtempSync(join(tmpdir(), "blip-caf-"));
+    const src = join(dir, "v.caf");
+    const mk = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.5",
+      "-c:a", "libopus", "-f", "caf", src]);
+    if (mk.status !== 0) return; // this ffmpeg cannot write CAF+Opus; the stub test above still covers the logic
+    const out = rewrapCaf(readFileSync(src), undefined, dir);
+    expect(out.subarray(0, 4).toString("latin1")).toBe("OggS");
   });
 });

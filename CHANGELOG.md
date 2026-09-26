@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Voice messages play.** An iPhone voice message ("Audio Message.caf") arrived
+  with no MIME type in chat.db, only Apple's type code, so Blip saved it as a
+  `.bin` and refused to open it. The Mac bridge now fills a missing MIME from
+  that code, and Blip turns the CAF into Ogg Opus with ffmpeg, which the
+  default player opens. Re-run `blip-setup` so the Mac's `imsg` picks this up.
+
 ## 2.6.2 — 2026-09-26 — scrolling that fits your mouse, pins that stay pinned
 
 - **A pinned group whose id changed stays in Favorites.** Messages re-keys a
