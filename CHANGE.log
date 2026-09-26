@@ -41,6 +41,10 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-09-26  (direct)  A re-keyed group's pin stays in Favorites: the Mac's pinning plist kept LMT under iCloud group ids
+                 that match no chat row any more, so Blip dropped it while the phone still showed it pinned. imsg now
+                 resolves pin ids through chat.db's chat_lookup (iMessageGroupID), the table Messages itself uses.
+                 gus and vic both show all 9 pins in the phone's order. Fred Nix / Larry, X https://x.com/nixfred
 2026-09-25  #115 Opt-in glide for mouse-wheel notches: smooth_scroll=on in bridge.conf animates a notch 180 ms OutCubic,
                  retargeted (a notch mid-glide moves the target, never restarts the easing), cancelled by any other contentY
                  write; touchpads never animate. The PR shipped it ON by default behind a shell.json setting and rewrote the
