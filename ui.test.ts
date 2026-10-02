@@ -289,6 +289,16 @@ describe("QML safety invariants", () => {
     expect(nav).toContain("Qt.ShiftModifier");
   });
 
+  test("the conversation menu matches Messages: pin, read/unread, alerts, delete", () => {
+    expect(panel).toContain('text: root.contactContext && root.contactContext.pinned ? "Unpin" : "Pin"');
+    expect(panel).toContain('text: "Mark as Unread"');
+    expect(panel).toContain('text: "Mark as Read"');
+    expect(panel).toContain('text: root.contactContext && root.contactContext.muted ? "Show Alerts" : "Hide Alerts"');
+    expect(panel).not.toContain("Open in New Window");
+    expect(widget).toContain("function conversationAct");
+    expect(widget).toContain("--act");
+  });
+
   test("mark as unread is a list action, not a compose jump that eats the letter u", () => {
     expect(panel).toContain('text: "Review contact"');
     expect(panel).toContain('text: "Mark as Unread"');

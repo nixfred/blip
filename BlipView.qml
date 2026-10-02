@@ -4198,6 +4198,16 @@ FocusScope {
       onTriggered: if (root.contactContext) contactReview.review(root.contactContext)
     }
     MenuItem {
+      text: root.contactContext && root.contactContext.pinned ? "Unpin" : "Pin"
+      icon.source: root.menuIcon("pin")
+      enabled: root.isDmChat(root.contactContext)
+      onTriggered: {
+        var t = root.contactContext
+        if (t && root.hostWidget) root.hostWidget.conversationAct(t.pinned ? "unpin" : "pin", t.chat)
+      }
+    }
+    MenuSeparator {}
+    MenuItem {
       visible: !(root.contactContext && Number(root.contactContext.unread || 0) > 0)
       height: visible ? implicitHeight : 0
       text: "Mark as Unread"
@@ -4215,6 +4225,15 @@ FocusScope {
         if (!t) return
         root.peeking = false
         root.markRead(String(t.chat), String(t.last_ts || ""), root.isDmChat(t) ? "read" : "")
+      }
+    }
+    MenuItem {
+      text: root.contactContext && root.contactContext.muted ? "Show Alerts" : "Hide Alerts"
+      icon.source: root.menuIcon("moon")
+      enabled: root.isDmChat(root.contactContext)
+      onTriggered: {
+        var t = root.contactContext
+        if (t && root.hostWidget) root.hostWidget.conversationAct(t.muted ? "unmute" : "mute", t.chat)
       }
     }
   }

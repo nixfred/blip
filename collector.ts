@@ -125,6 +125,8 @@ export interface Thread {
   pin_name?: string;
   /** Other people in a group, for explicit per-person contact actions. */
   participants?: GroupParticipant[];
+  /** Messages Hide Alerts (ignoreAlertsFlag). */
+  muted?: boolean;
 }
 
 export interface GroupParticipant { handle: string; name: string }
@@ -186,6 +188,9 @@ export interface BlipState {
    *  Refreshed with the chat list on deep runs; shallow polls apply it so
    *  pins never vanish between a deep run and the next (ids only). */
   pins: Record<string, number | null>;
+  /** Chat ids whose Messages "Hide Alerts" flag was on at the last full chat
+   *  list. Ids only. Shallow polls keep this so a muted chat stays quiet. */
+  alertsOff: string[];
   toasted: string[];   // recent opaque sha256 keys; never message content
 }
 
@@ -309,6 +314,9 @@ export function loadState(path = STATE_PATH): BlipState {
         ? Object.fromEntries(Object.entries(s.chatAliases).filter(([, v]) => typeof v === "string" && v !== ""))
         : {},
       pins: validPins(s.pins),
+      alertsOff: Array.isArray(s.alertsOff)
+        ? s.alertsOff.filter((id: unknown): id is string => typeof id === "string" && id.length > 0 && id.length <= 512).slice(0, 4000)
+        : [],
       // Older releases stored ts|chat|text verbatim. Hash legacy entries while
       // loading so the next successful save scrubs message bodies from disk.
       toasted: Array.isArray(s.toasted)
@@ -318,7 +326,7 @@ export function loadState(path = STATE_PATH): BlipState {
   } catch {
     return {
       watermark: "", readMark: "", unreadCounts: {}, unreadOldest: {}, unreadInitialized: false,
-      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, chatAliases: {}, pins: {}, toasted: [],
+      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, chatAliases: {}, pins: {}, alertsOff: [], toasted: [],
     };
   }
 }
@@ -711,6 +719,7 @@ export function buildThreads(
       unread,
       pinned: false,
       pin_order: null,
+      muted: false,
       ...(isGroupChat(chat) ? { participants: groupParticipants(groups[chat], byHandle) } : {}),
     });
   }
@@ -1154,6 +1163,26 @@ export function canPushChat(chat: string): boolean {
   return /^\+?[0-9]{3,15}$/.test(id)
     || /^[^@\s\x00-\x1f\x7f]+@[^@\s\x00-\x1f\x7f]+$/.test(id)
     || /^(?:chat[0-9]{1,40}|[a-fA-F0-9]{32})$/.test(id);
+}
+
+const CONVERSATION_ACTS: Record<string, string> = {
+  pin: "--pin", unpin: "--unpin", mute: "--mute", unmute: "--unmute",
+  read: "--chat", unread: "--unread",
+};
+
+/** Pin / mute / read / unread through Messages' Conversation menu. DMs only. */
+export function conversationAct(act: string, chat: string, home = HOME, runner = spawnSync): { ok: boolean; error: string } {
+  const flag = CONVERSATION_ACTS[act];
+  if (!flag) return { ok: false, error: "unknown action" };
+  if (!pushUnreadArgs(chat)) return { ok: false, error: "groups cannot use this action from here" };
+  try {
+    const r = runner(shimPath("imsg-read", home), [flag, chat], { encoding: "utf8", timeout: 60000 });
+    if ((r.status ?? 1) === 0) return { ok: true, error: "" };
+    const msg = String(r.stderr || r.stdout || "action failed").trim().split("\n").pop() || "action failed";
+    return { ok: false, error: msg.slice(0, 240) };
+  } catch (e) {
+    return { ok: false, error: String(e).slice(0, 240) };
+  }
 }
 
 /**
@@ -1708,6 +1737,18 @@ export interface ChatInfo {
   pin_order: number | null;
   last_attachment?: { name: string; mime: string } | null;
   pin_name: string | null;
+  muted: boolean;
+}
+
+/** Ids Messages has set Hide Alerts on. A shallow poll keeps the previous set. */
+export function messagesMutedIds(chats: ChatInfo[] | null, previous: string[]): string[] {
+  if (!chats) return previous;
+  const ids = new Set<string>();
+  for (const c of chats) if (c.muted) {
+    ids.add(c.id);
+    for (const alias of c.aliases) ids.add(alias);
+  }
+  return [...ids];
 }
 
 /** How many conversations the sidebar lists (chat.db has hundreds). */
@@ -1768,6 +1809,7 @@ export function fetchChats(runner = spawnSync): ChatInfo[] | null {
           pin_order: boundedPinOrder,
           pin_name: typeof rawPinName === "string" && rawPinName.trim() !== ""
             ? rawPinName.trim().slice(0, 160) : null,
+          muted: r.muted === true,
         };
       });
   } catch {
@@ -1925,6 +1967,7 @@ export function mergeChats(
       last_text: info.last === thread.last_ts ? info.last_text : messagePreview(thread.last_text),
       pinned,
       pin_order,
+      muted: info.muted === true,
       ...(info.pin_name ? { pin_name: info.pin_name } : {}),
       ...(group ? {
         participants: groupInfo
@@ -1960,6 +2003,7 @@ export function mergeChats(
       unread: aliases.reduce((sum, alias) => sum + (unreadCounts[alias] ?? 0), 0),
       pinned: c.pinned === true,
       pin_order: Number.isInteger(c.pin_order) ? Number(c.pin_order) : null,
+      muted: c.muted === true,
       ...(c.pin_name ? { pin_name: c.pin_name } : {}),
       ...(group ? { participants: groupParticipants(groupInfo) } : {}),
     });
@@ -2294,7 +2338,10 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   // marks above do: a message arriving under a retired chat row is the same
   // conversation you are looking at.
   const readingNow = readChat ? [readChat, ...aliasesOf(chatAliases, readChat)] : [];
-  const toast = selectToasts(msgs, state.watermark, loadAllowlist(), state.toasted, readingNow);
+  const alertsOff = messagesMutedIds(listed, state.alertsOff ?? []);
+  const quiet = new Set(alertsOff);
+  const toast = selectToasts(msgs, state.watermark, loadAllowlist(), state.toasted, readingNow)
+    .filter((t) => !quiet.has(t.chat));
   const failures = selectFailures(fetched.msgs, state.toasted, now);
   const links = selectIncomingLinks(msgs, state.watermark, state.toasted, selfChats);
   const codes = selectCodes(msgs, state.watermark, state.toasted, selfChats);
@@ -2322,6 +2369,7 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
     groups,
     chatAliases,
     pins,
+    alertsOff,
     toasted: [...state.toasted, ...toast.map((t) => t.key), ...failures.map((f) => f.key),
       ...links.map((l) => l.key), ...codes.map((c) => c.key)],
   };
@@ -2395,9 +2443,16 @@ if (import.meta.main) {
   const ti = process.argv.indexOf("--target");
   const actTarget = ti >= 0 ? String(process.argv[ti + 1] ?? "") : "";
   try {
+    let actionError = "";
     if (act === "unread" && actTarget) unreadChat = unreadChat || actTarget;
     if (act === "read" && actTarget) readChat = readChat || actTarget;
-    console.log(JSON.stringify(collect(deep, markRead, readChat, seenTs, unreadChat, act === "read")));
+    if (act && actTarget && act !== "unread" && act !== "read") {
+      const did = conversationAct(act, actTarget);
+      if (!did.ok) actionError = did.error;
+    }
+    const out = collect(deep, markRead, readChat, seenTs, unreadChat, act === "read");
+    if (actionError) out.error = actionError;
+    console.log(JSON.stringify(out));
   } catch (e) {
     console.log(
       JSON.stringify({

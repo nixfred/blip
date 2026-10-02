@@ -15,8 +15,10 @@
   default player opens. Re-run `blip-setup` so the Mac's `imsg` picks this up.
   Audio plays with no window (mpv opened an empty black one); click the chip
   again to stop it.
-- **Conversation menu.** Right-click is Mark as Unread or Mark as Read.
-  Read-state clicks Messages' own menu (DMs). Mark as Unread stays on direct
+- **Conversation menu.** Right-click is Pin / Unpin, Mark as Unread or Mark as
+  Read, and Hide Alerts / Show Alerts. Pin, alerts, and read-state click
+  Messages' own menu (DMs). Hide Alerts also stops Blip's own toasts for that
+  chat; the conversation stays in the list. Mark as Unread, pin, and alerts stay on direct
   messages. A group read still reaches the Mac through
   Messages' groupid link. Mark-all-read stays on the list, the `a` key, and
   the bar right-click.

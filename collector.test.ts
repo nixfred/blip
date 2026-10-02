@@ -53,6 +53,8 @@ import {
   effectiveMark,
   pushUnreadArgs,
   markUnreadOnMac,
+  conversationAct,
+  messagesMutedIds,
   type ImsgMessage,
   type ChatInfo,
 } from "./collector";
@@ -734,6 +736,7 @@ describe("state and allowlist I/O", () => {
       groups: {},
       chatAliases: { OLD: "A" },
       pins: { A: 0 },
+      alertsOff: [],
       toasted: [opaque],
     });
     expect(statSync(p).mode & 0o777).toBe(0o600);
@@ -742,7 +745,7 @@ describe("state and allowlist I/O", () => {
   test("a missing state file yields a safe empty watermark", () => {
     expect(loadState(join(tmp(), "nope.json"))).toEqual({
       watermark: "", readMark: "", unreadCounts: {}, unreadOldest: {}, unreadInitialized: false,
-      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, chatAliases: {}, pins: {}, toasted: [],
+      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, chatAliases: {}, pins: {}, alertsOff: [], toasted: [],
     });
   });
 
@@ -751,7 +754,7 @@ describe("state and allowlist I/O", () => {
     writeFileSync(p, "{ this is not json");
     expect(loadState(p)).toEqual({
       watermark: "", readMark: "", unreadCounts: {}, unreadOldest: {}, unreadInitialized: false,
-      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, chatAliases: {}, pins: {}, toasted: [],
+      selfChats: [], readMarks: {}, unreadSince: {}, groups: {}, chatAliases: {}, pins: {}, alertsOff: [], toasted: [],
     });
   });
 
@@ -1591,6 +1594,17 @@ describe("pushing read state back to the Mac", () => {
     expect(markUnreadOnMac("+15550100011", "/home/u", no).ok).toBe(false);
     expect(markUnreadOnMac("ce5a593a78af408282d61461ade89135").error).toContain("groups");
   });
+
+  test("conversationAct maps pin/mute onto imsg-read and refuses groups", () => {
+    const calls: string[][] = [];
+    const runner = (_bin: string, args: string[]) => {
+      calls.push(args);
+      return { status: 0, stdout: "ok\n", stderr: "" } as never;
+    };
+    expect(conversationAct("pin", "+15550100011", "/home/u", runner).ok).toBe(true);
+    expect(calls[0]).toEqual(["--pin", "+15550100011"]);
+    expect(conversationAct("mute", "ce5a593a78af408282d61461ade89135").ok).toBe(false);
+  });
 });
 
 describe("mark as unread", () => {
@@ -2200,4 +2214,11 @@ describe("Send Later", () => {
   test("a scheduled message never moves the watermark", () => {
     expect(maxTs([msg({ ts: "2026-09-16T15:00:00Z" }), msg(queued)], "")).toBe("2026-09-16T15:00:00Z");
   });
+});
+
+test("Hide Alerts ids survive a shallow poll and clear when the list says so", () => {
+  const row = { id: "+15550100001", aliases: ["pat@example.com"], muted: true } as ChatInfo;
+  expect(messagesMutedIds(null, ["+15550100001"])).toEqual(["+15550100001"]);
+  expect(messagesMutedIds([row], [])).toEqual(["+15550100001", "pat@example.com"]);
+  expect(messagesMutedIds([{ ...row, muted: false }], ["+15550100001"])).toEqual([]);
 });

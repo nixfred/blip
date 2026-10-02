@@ -80,7 +80,7 @@ Messages' pinning preferences read-only, and drive Messages.app through
 AppleScript. Contact creation writes a new card through the native address
 book API. Contact drafts stay in memory and cross bounded stdin, never argv
 or persistent Linux storage. Messages.app itself keeps your
-conversation history exactly as it always has. Read and unread
+conversation history exactly as it always has. Read, pin, and alert
 actions use `~/.blip/messages-ui.lock` to serialize access to Messages'
 selected conversation; the lock contains no message data.
 

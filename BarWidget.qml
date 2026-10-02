@@ -62,7 +62,7 @@ BarWidget {
 
   // ---- collector state
   property var threads: []           // [{chat,name,handle,service,last_ts,last_text,last_from_me,count,unread,pinned,pin_order}]
-  readonly property string threadsJson: JSON.stringify(threads) // includes optimistic reads
+  readonly property string threadsJson: JSON.stringify(threads) // includes optimistic reads and edits
   property int unread: 0
   property bool online: false        // the Mac is reachable
   property bool healthy: false       // last collector run parsed cleanly
@@ -472,6 +472,25 @@ BarWidget {
     threads = list
     unread = unreadChatCount(list)
     refresh(true, false, "", "", c)
+  }
+
+  function conversationAct(kind, chat) {
+    var c = String(chat)
+    var k = String(kind)
+    if (k === "pin" || k === "unpin") {
+      var nextOrder = 0
+      threads.forEach(function(t) { if (t.pinned && t.pin_order != null && t.pin_order >= nextOrder) nextOrder = Number(t.pin_order) + 1 })
+      threads = threads.map(function(t) {
+        if (String(t.chat) !== c) return t
+        return Object.assign({}, t, { pinned: k === "pin", pin_order: k === "pin" ? nextOrder : null })
+      }).sort(root.compareThreads)
+    } else if (k === "mute" || k === "unmute") {
+      threads = threads.map(function(t) {
+        if (String(t.chat) !== c) return t
+        return Object.assign({}, t, { muted: k === "mute" })
+      })
+    }
+    refresh(true, false, "", "", "", k, c)
   }
 
   function markAllRead() {

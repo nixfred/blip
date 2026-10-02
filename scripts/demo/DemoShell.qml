@@ -37,6 +37,7 @@ ShellRoot {
     function markAllRead() { }
     function markThreadRead(chat) { }
     function markThreadUnread(chat) { }
+    function conversationAct(kind, chat) { }
     function showApp() { }
   }
 

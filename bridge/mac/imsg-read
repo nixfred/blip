@@ -16,6 +16,10 @@ Going through Messages means the change syncs the way any read does.
     imsg-read --all              mark every conversation read
     imsg-read --chat <id>        mark ONE conversation read (DM or group)
     imsg-read --unread <handle>  mark ONE conversation unread (DMs only)
+    imsg-read --pin <handle>     pin a DM
+    imsg-read --unpin <handle>   unpin a DM
+    imsg-read --mute <handle>    Hide Alerts
+    imsg-read --unmute <handle>  Show Alerts
     imsg-read --status           report whether this Mac can do it at all
 
 --all leaves the Mac alone: no window is raised, no selection changes, and
@@ -34,15 +38,17 @@ Access; `blip-check` reports it. Without the grant this exits 77 and says so,
 rather than failing silently.
 """
 import os
+import fcntl
+import plistlib
 import re
 import sqlite3
 import subprocess
 import sys
 import time
-import fcntl
 import importlib.machinery
 import importlib.util
 import stat
+from typing import Optional
 from contextlib import contextmanager
 from urllib.parse import urlencode
 
@@ -50,6 +56,13 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from read_state import read_state
 
 MENU = 'menu 1 of menu bar item "Conversation" of menu bar 1'
+PINNING_PLIST_PATHS = (
+    os.path.expanduser("~/Library/Preferences/com.apple.messages.pinning.plist"),
+    os.path.expanduser(
+        "~/Library/Containers/com.apple.MobileSMS/Data/Library/Preferences/"
+        "com.apple.messages.pinning.plist"
+    ),
+)
 TIMEOUT = 150   # the first System Events call can be a consent prompt; give it the ~2 minutes macOS gives it (Astra C#8)
 
 
@@ -291,6 +304,79 @@ def click(item: str) -> tuple[bool, str]:
     return (code == 0), ("" if code == 0 else out)
 
 
+def chat_muted(handle: str) -> Optional[bool]:
+    try:
+        con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
+        try:
+            row = con.execute(
+                "SELECT properties FROM chat WHERE chat_identifier = ?", (handle,)
+            ).fetchone()
+        finally:
+            con.close()
+    except Exception:
+        return None
+    if not row or row[0] is None:
+        return False
+    try:
+        props = plistlib.loads(row[0])
+    except Exception:
+        return False
+    return bool(props.get("ignoreAlertsFlag")) if isinstance(props, dict) else False
+
+
+def chat_pinned(handle: str) -> bool:
+    needle = str(handle or "").strip().lower()
+    if not needle:
+        return False
+    for path in PINNING_PLIST_PATHS:
+        try:
+            with open(path, "rb") as fh:
+                data = plistlib.load(fh)
+        except (OSError, plistlib.InvalidFileException, ValueError, TypeError):
+            continue
+        stack = [data]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, str) and item.strip().lower() == needle:
+                return True
+            if isinstance(item, dict):
+                stack.extend(item.values())
+            elif isinstance(item, (list, tuple)):
+                stack.extend(item)
+    return False
+
+
+def click_conversation_item(item: str, handle: str) -> None:
+    """Select a DM and click a Conversation-menu item while Messages is awake."""
+    why = select_chat(handle)
+    if why:
+        sys.stderr.write(f"imsg-read: {why}\n")
+        sys.exit(64)
+    prev = wake_messages()
+    try:
+        ok, err = click(item)
+        if not ok and not err:
+            ok, err = click(item)
+        if err:
+            sys.stderr.write(f"imsg-read: {err}\n")
+            sys.exit(1)
+        if not ok:
+            sys.stderr.write(f"imsg-read: {item!r} was not available\n")
+            sys.exit(1)
+    finally:
+        restore_front(prev)
+
+
+def settle_flag(fn, want: bool, tries: int = 8, pause: float = 0.4) -> Optional[bool]:
+    got = fn()
+    for _ in range(tries):
+        if got is None or got is want:
+            return got
+        time.sleep(pause)
+        got = fn()
+    return got
+
+
 def frontmost() -> str:
     code, out = osa('tell application "System Events" to name of first application process whose frontmost is true')
     return out if code == 0 else ""
@@ -450,6 +536,29 @@ def main() -> None:
         finally:
             restore_front(prev)
         return
+
+    acts = {
+        "--pin": ("Pin", lambda h: chat_pinned(h), True, "pinned"),
+        "--unpin": ("Unpin", lambda h: chat_pinned(h), False, "unpinned"),
+        "--mute": ("Hide Alerts", lambda h: chat_muted(h), True, "muted"),
+        "--unmute": ("Show Alerts", lambda h: chat_muted(h), False, "unmuted"),
+    }
+    if argv[0] in acts:
+        if len(argv) < 2:
+            sys.stderr.write(f"imsg-read: {argv[0]} needs a handle\n")
+            sys.exit(64)
+        item, probe, want, word = acts[argv[0]]
+        handle = argv[1]
+        click_conversation_item(item, handle)
+        got = settle_flag(lambda: probe(handle), want)
+        if got is want:
+            print(word)
+            return
+        if got is None:
+            sys.stderr.write(f"imsg-read: cannot verify the conversation is {word}\n")
+            sys.exit(75)
+        sys.stderr.write(f"imsg-read: {item} was clicked but the conversation is not {word}\n")
+        sys.exit(75)
 
     sys.stderr.write(f"imsg-read: unknown option {argv[0]!r}\n")
     sys.exit(64)

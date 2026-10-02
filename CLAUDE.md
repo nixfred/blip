@@ -203,7 +203,7 @@ what it is handed. Keep it that way.
   Under `push_read=thread`, confirmed Mac state replaces historical local
   read marks for DMs and for groups (Messages' groupid link). A pending intent
   alone overrides it; a later Mac read clears a previously marked-unread Blip
-  dot. Mark-unread stays on direct messages.
+  dot. Pin, mute, and mark-unread stay on direct messages.
   Compare remote unread against the rendered `--seen` BEFORE updating local
   marks. A stale read must not clear a newer inbound; recheck with `--through`
   on the Mac. Newer explicit gestures replace old same-chat pending intents.
@@ -485,7 +485,7 @@ to whatever has focus otherwise.
   (SIP on, the same grant `imsg-read` already holds) is reported there.
   Nothing from that issue is in-tree; do not treat the menu-item note
   above as a claim that outbound tapbacks ship.
-- Mark-unread on a GROUP. That menu item addresses a
+- Pin, mute, and mark-unread on a GROUP. Those menu items address a
   handle. A group read already uses Messages' `imessage:open?groupid=` link.
 
 ## Things that ARE possible (verified)

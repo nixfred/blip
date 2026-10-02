@@ -1346,6 +1346,17 @@ def cmd_contacts(con, args):
         print(f"{fmt_ts_local(r['last_date'])}  {r['n']:>6}  {r['service']:>8}  {r['handle']}{suffix}")
 
 
+def _chat_muted(blob) -> bool:
+    """Hide Alerts is chat.properties.ignoreAlertsFlag."""
+    if not blob:
+        return False
+    try:
+        props = plistlib.loads(blob)
+    except (plistlib.InvalidFileException, ValueError, TypeError, OSError):
+        return False
+    return bool(props.get("ignoreAlertsFlag")) if isinstance(props, dict) else False
+
+
 def conversation_window(rows, limit, read_rows):
     unread_ids = {cid for r in read_rows if r["unread"] > 0
                   for cid in [r["chat"], *r.get("aliases", [])]}
@@ -1361,13 +1372,14 @@ def cmd_chats(con, args):
     # original_group_id is absent on older chat.db schemas; probe once.
     chat_cols = {row[1] for row in con.execute("PRAGMA table_info(chat)")}
     orig_col = "c.original_group_id" if "original_group_id" in chat_cols else "NULL"
+    properties_col = "c.properties" if "properties" in chat_cols else "NULL"
     filt = chat_filter_sql(con, args, already_where=False)
     pending = pending_schedule_sql(con)
     rows = con.execute(
         f"""
         SELECT c.ROWID AS cid, c.chat_identifier, c.guid, c.group_id,
                {orig_col} AS original_group_id, c.display_name, c.room_name, c.style,
-               c.service_name,
+               c.service_name, {properties_col} AS properties,
                COALESCE(MAX(CASE WHEN {pending} THEN NULL ELSE m.date END), MAX(m.date)) AS last_date,
                COUNT(m.ROWID) AS n
         FROM chat c
@@ -1506,6 +1518,7 @@ def cmd_chats(con, args):
                 "pinned": pin_order is not None,
                 "pin_order": pin_order,
                 "pin_name": pin_name or None,
+                "muted": _chat_muted(r["properties"]),
                 # Other chat rows of this same conversation. A client must fold
                 # any thread carrying one of these onto this id.
                 "aliases": [c for c, k in clusters.items()
