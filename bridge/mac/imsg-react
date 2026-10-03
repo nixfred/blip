@@ -26,34 +26,32 @@ How one run goes:
      is found among the rendered ones by that description, paging the
      transcript up at most MAX_PAGES_UP pages. Nothing is performed while
      searching.
-  3. The action is performed once, by its exact name, after the bubble is
-     scrolled into view and read again ("moved" if it is no longer the
-     same bubble; nothing is performed). A bubble that does not offer that
-     name is reported ("not-offered", with what it does offer) and left
-     alone: Apple is free to rename a localized action in a point release,
-     and the neighbouring action is never a substitute.
+  3. The action is performed once, by its exact name, and never in the pass
+     that scrolled: AX elements are addressed by their place in the tree,
+     and a scroll renumbers the rows, so the same path can then name the
+     neighbour. A pass that finds the bubble brings it into view and notes
+     its frame; the press comes on a later pass that finds it at that same
+     frame, reading its action, and then its label and frame in one Apple
+     event, just before ("unsettled" after MAX_SETTLES passes that saw it
+     move, "moved" if the last read disagrees; nothing is performed either
+     way). An identical bubble that slides onto that very frame in between
+     is invisible to AX; the stray check below names it. A bubble that
+     does not offer that name is reported ("not-offered", with what it does
+     offer) and left alone: Apple is free to rename a localized action in a
+     point release, and the neighbouring action is never a substitute.
   4. chat.db is the referee. Success means a new tapback row from this
      account, of the requested type, appeared on the message within ROW_WAIT
      seconds. The screen proves nothing. Paging for the bubble stops after
      RUN_LIMIT seconds.
 
-The one retry, and when it gives up:
-  Messages sometimes keeps a stale copy of a bubble in the AX tree: same
-  frame, same label, same actions, dead. The action lands on it, nothing
-  happens, and no row follows (seven such runs on the first day of testing).
-  So: if no row came AND the bubble had a second copy at the SAME frame, and a
-  last look at chat.db still shows no row (a late one must not be toggled
-  back), the action is performed once on that second copy. Never on another
-  frame, never a second retry. No row after that → exit 75, "no-row". After
-  a retry the latest row is the verdict, a moment later: a first action that
-  landed late would be toggled back by the retry, and that must not read as
-  success.
-  A new row of this account on ANOTHER message in the conversation stops
-  the run at once, before any retry: exit 75, "stray", with that message's
-  GUID. The other person can see it, so it is named, never left as "no-row".
-  An osascript that times out or fails mid-run may have pressed anyway, so
-  chat.db is asked the same way: a row on the target is success, one
-  elsewhere a stray, none the error.
+No retry. A press with no row after ROW_WAIT → exit 75, "no-row"; a second
+press could land after a late first row and toggle it back. A new row of this
+account on ANOTHER message in the conversation ends the run on any outcome,
+success or error: exit 75, "stray", with that message's GUID. The other person
+can see it, so it is named, never left as "no-row" or behind another error.
+An osascript that times out or fails mid-run may have pressed anyway, so
+chat.db is asked the same way: a row on the target is success, one elsewhere
+a stray, none the error.
 
 Consent: over ssh, nothing touches System Events until TCC.db shows it is
 already allowed; a prompt at an empty Mac becomes a denial (#36). Exit 77.
@@ -68,9 +66,9 @@ Message text never rides argv: it goes to osascript on stdin.
 Output: one JSON line on stdout; a reason on stderr when it fails.
 Exit: 0 done or nothing to do · 1 not-offered · 64 usage · 65 unsupported
 target · 69 Messages or chat.db unavailable · 70 a bug in this tool (the
-exception is named) · 75 unverified (not-rendered, ambiguous, moved, no-row,
-stray, unexpected row, timeout, osascript, busy) · 77 Accessibility or, over
-ssh, Automation → System Events not granted yet.
+exception is named) · 75 unverified (not-rendered, ambiguous, unsettled,
+moved, no-row, stray, unexpected row, timeout, osascript, busy) · 77
+Accessibility or, over ssh, Automation → System Events not granted yet.
 """
 import argparse
 import contextlib
@@ -102,8 +100,9 @@ TAPBACKS_BY_KIND = {k: a for a, k in TAPBACKS.values()}
 
 MAX_PAGES_DOWN = 3   # a transcript parked above the newest message
 MAX_PAGES_UP = 6     # how far back a target may sit
-ROW_WAIT = 12.0      # seconds; a performed tapback lands in chat.db in 1-3 s (p90 of the wall time was 9 s)
-ROW_SETTLE = 3.0     # after a retry: time for a late first row to show before the verdict
+ROW_WAIT = 30.0      # seconds; a tapback lands in chat.db in 1-3 s, but a late stray must still be seen
+MAX_SETTLES = 3      # passes that find the bubble moved since the last one before giving up ("unsettled")
+SETTLE_PAUSE = 0.5   # seconds between them, for a scroll to finish
 RUN_LIMIT = 60.0     # paging stops here (the longest run measured took 33 s); read push waits 150 s for the lock
 JXA_TIMEOUT = 45     # one scan or page; they take 1-3 s
 SELF_TWIN_NS = 3_000_000_000   # a self-thread echo is written within 3 s of its sent row
@@ -283,10 +282,10 @@ def my_rows(con, guids: list, self_handles: list, since: int = 0) -> list:
 
 
 def stray(con, target: dict, self_handles: list, since: int):
-    """No row on the target: stop if a tapback row of this account newer than
-    `since` sits on another message in the conversation. It is the one
-    failure the other person sees, so it is named ("stray", its GUID), never
-    left as "no-row", and never taken back or retried here. The row may add
+    """Stop if a tapback row of this account newer than `since` sits on
+    another message in the conversation. It is the one failure the other
+    person sees, so it is named ("stray", its GUID), never left as "no-row"
+    or hidden behind another error, and never taken back here. The row may add
     or remove, or be one made on the phone meanwhile, so the reason says only
     that one of yours changed."""
     handles = list(self_handles) or [""]
@@ -320,12 +319,15 @@ def plan(current, kind: int, remove: bool):
     return None if current == kind else 2000 + kind
 
 
-def wait_for_row(con, guids, self_handles, since, seconds=None, pause=0.2):
-    """The first tapback row of this account on the target newer than
-    `since`, waiting up to `seconds` (ROW_WAIT by default)."""
-    end = time.monotonic() + (ROW_WAIT if seconds is None else seconds)
+def answer(con, target: dict, self_handles: list, since: int, pause=0.2):
+    """chat.db's verdict on the one press: this account's first tapback row
+    on the target newer than `since`, or None after ROW_WAIT seconds. Every
+    look checks for a stray first, success included: a press that went to a
+    neighbour is the failure the other person sees, and its row can be late."""
+    end = time.monotonic() + ROW_WAIT
     while True:
-        rows = my_rows(con, guids, self_handles, since)
+        stray(con, target, self_handles, since)
+        rows = my_rows(con, target["guids"], self_handles, since)
         if rows or time.monotonic() >= end:
             return rows[0] if rows else None
         time.sleep(pause)
@@ -487,25 +489,36 @@ function run() {
     if (r.offered.length) out.offered = r.offered;
     return JSON.stringify(out);
   }
-  out.frame = g.key; out.copies = g.copies.length;
+  out.frame = g.key;
   // Identical bubbles below the target are counted from the bottom; with the
   // bottom out of view one of them may be too, and the count would land on
   // a neighbour.
   if (q.ordinal > 0 && !r.atBottom) { out.error = "ambiguous"; return JSON.stringify(out); }
-  if (q.frame && q.frame !== g.key) { out.error = "moved"; return JSON.stringify(out); }
-  const c = g.copies[q.copy];
-  if (!c) { out.error = "no-second-copy"; return JSON.stringify(out); }
+  const c = g.copies[0];
   const i = c.names.indexOf(q.action);
   if (i < 0) { out.error = "not-offered"; out.offered = c.names; return JSON.stringify(out); }
-  // Elements are addressed by their place in the tree, and scrolling can
-  // re-render the rows: read the label and the action again, and act only if
-  // the element is still this bubble.
-  safe(() => c.el.actions.byName("AXScrollToVisible").perform());
-  const L = parseLabel(String(safe(() => c.el.description(), "") || ""));
-  if (!L || L.time !== q.hhmm || !bodyIs(L.body, q.text) || actionNames(c.el)[i] !== q.action) {
+  // Elements are addressed by their place in the tree, and a scroll
+  // renumbers the rows: after one, the same path can name the neighbour
+  // (seen on 26.6). So a pass never scrolls and presses. It brings the
+  // bubble into view and says where it was; only a later pass that finds it
+  // at that same frame, with nothing moved in between, presses.
+  if (q.frame !== g.key) {
+    safe(() => c.el.actions.byName("AXScrollToVisible").perform());
+    out.error = "unsettled"; return JSON.stringify(out);
+  }
+  // Read it once more, just before the press. Which message and where come
+  // from one properties() call, a single Apple event: read apart, another
+  // message could slide into the spot between them (same frame, other
+  // label) or an identical twin into the row (same label, other frame).
+  // After it nothing but the press.
+  if (actionNames(c.el)[i] !== q.action) { out.error = "moved"; return JSON.stringify(out); }
+  const P = safe(() => c.el.properties(), null) || {};
+  const L = parseLabel(String(P.description || ""));
+  const at = P.position && P.size ? [P.position[0], P.position[1], P.size[0], P.size[1]].join(",") : "";
+  if (!L || L.time !== q.hhmm || !bodyIs(L.body, q.text) || at !== g.key) {
     out.error = "moved"; return JSON.stringify(out);
   }
-  try { c.el.actions()[i].perform(); out.ok = true; } catch (e) { out.error = "perform-failed"; out.detail = String(e).slice(0, 200); }
+  try { c.el.actions.at(i).perform(); out.ok = true; } catch (e) { out.error = "perform-failed"; out.detail = String(e).slice(0, 200); }
   return JSON.stringify(out);
 }
 """
@@ -528,21 +541,29 @@ def jxa(request: dict) -> dict:
     return answer if isinstance(answer, dict) else {"ok": False, "error": "osascript"}
 
 
-def perform(target: dict, action: str, copy: int = 0, frame: str = "", run=jxa, deadline=None) -> dict:
+def perform(target: dict, action: str, run=jxa, deadline=None) -> dict:
     """Find the bubble and perform `action` on it once. Pages the transcript
     down to the newest message if it is parked above it, then up while the
-    target is not rendered, and only from the newest message. Paging is the
-    only thing repeated, and it stops at `deadline` (time.monotonic())."""
+    target is not rendered, and only from the newest message. A pass that
+    finds it brings it into view ("unsettled"); the press waits for a pass
+    that finds it where the last one did. Paging and settling are the only
+    things repeated, and they stop at `deadline` (time.monotonic())."""
     request = {"text": target["text"], "from_me": target["from_me"], "hhmm": target["hhmm"],
                "ordinal": target["ordinal"], "newest": target["newest"], "actions": ACTIONS,
-               "action": action, "copy": copy, "frame": frame, "mode": "perform"}
-    down = up = 0
+               "action": action, "frame": "", "mode": "perform"}
+    down = up = settles = 0
     looked_again = bottom_seen = False
     while True:
         r = run(request)
+        late = deadline is not None and time.monotonic() >= deadline
+        if r.get("error") == "unsettled" and settles < MAX_SETTLES and not late:
+            settles += 1
+            request = {**request, "frame": r.get("frame", "")}
+            time.sleep(SETTLE_PAUSE)
+            continue
         if r.get("error") != "not-rendered":
             return r
-        if deadline is not None and time.monotonic() >= deadline:
+        if late:
             return dict(r, detail=f"still not found after {RUN_LIMIT:.0f} s")
         bottom_seen = bottom_seen or bool(r.get("atBottom"))
         if not bottom_seen and down < MAX_PAGES_DOWN:
@@ -605,7 +626,7 @@ def system_events_consent(path: str = USER_TCC) -> str:
 # --------------------------------------------------------------------- run
 
 def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, run=jxa) -> dict:
-    """Steps 3-4 and the one retry (see the module docstring). `ui` is the
+    """Steps 3-4: one press, then chat.db (see the module docstring). `ui` is the
     imsg-read module (lock, selection, focus); tests pass a stand-in."""
     action = TAPBACKS_BY_KIND[kind]
     expected = plan(current_kind(my_rows(con, target["guids"], self_handles)), kind, remove)
@@ -629,16 +650,12 @@ def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, ru
             raise Stop("unavailable", EX_UNAVAILABLE, why)
         since = apple_now()
         r = perform(target, action, run=run, deadline=deadline)
-        row = landed(con, r, action, target, self_handles, since)
-        if row is None and r.get("copies", 1) > 1:
-            row = wait_for_row(con, target["guids"], self_handles, since, seconds=0)   # the last look
-            if row is None:
-                r = perform(target, action, copy=1, frame=r["frame"], run=run, deadline=deadline)
-                row = landed(con, r, action, target, self_handles, since)
-                if row is not None:
-                    time.sleep(ROW_SETTLE)
-                    row = my_rows(con, target["guids"], self_handles, since)[-1]
+        if not r.get("ok") and r.get("error") not in MAYBE_PERFORMED:
+            raise failure(r, action)   # nothing was pressed
+        row = answer(con, target, self_handles, since)
         if row is None:
+            if not r.get("ok"):
+                raise failure(r, action)
             raise Stop("no-row", EX_TEMPFAIL, f"'{action}' was performed but no tapback row reached chat.db")
         if row["type"] != expected:
             raise Stop("unexpected", EX_TEMPFAIL, f"chat.db shows tapback type {row['type']}, not {expected}",
@@ -647,21 +664,6 @@ def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, ru
         ui.restore_front(prev)
     return {"ok": True, "result": "removed" if expected >= 3000 else "added", "type": expected,
             "seconds": round(time.monotonic() - started, 1)}
-
-
-def landed(con, r: dict, action: str, target: dict, self_handles: list, since: int):
-    """chat.db's answer to one perform: this account's first row on the
-    target, or None. An answer that pressed nothing is raised at once; one
-    that may have pressed (MAYBE_PERFORMED) waits for chat.db like a press,
-    so a row on the target is success and one elsewhere a stray."""
-    if not r.get("ok") and r.get("error") not in MAYBE_PERFORMED:
-        raise failure(r, action)
-    row = wait_for_row(con, target["guids"], self_handles, since)
-    if row is None:
-        stray(con, target, self_handles, since)
-        if not r.get("ok"):
-            raise failure(r, action)
-    return row
 
 
 def failure(r: dict, action: str) -> Stop:

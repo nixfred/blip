@@ -46,7 +46,7 @@ jobs:
         run: python3 bridge/mac/test_blip_check.py
       - name: read pushes address groups and restore focus (no macOS needed)
         run: python3 bridge/mac/test_read.py
-      - name: tapbacks are verified by chat.db and retried at most once (no macOS needed)
+      - name: tapbacks are verified by chat.db, pressed once and never mid-scroll (no macOS needed)
         run: python3 bridge/mac/test_react.py
       - name: hide Spam / unknown senders (no macOS needed)
         run: python3 bridge/mac/test_filtered.py

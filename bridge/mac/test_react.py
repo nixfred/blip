@@ -124,7 +124,7 @@ class NoSelf:
     detect_self_handles = staticmethod(list)
 
 
-OK = {"ok": True, "atBottom": True, "seen": 3, "frame": "10,20,100,30", "copies": 1}
+OK = {"ok": True, "atBottom": True, "seen": 3, "frame": "10,20,100,30"}
 
 
 class Resolve(unittest.TestCase):
@@ -306,57 +306,18 @@ class React(unittest.TestCase):
         self.assertEqual(len(messages.performs), 1)
         self.assertEqual(self.ui.restored, ["Previous app"])
 
-    def test_one_copy_and_no_row_gives_up_without_retry(self):
+    def test_no_row_is_reported_and_never_pressed_again(self):
+        # A second press could land after a late first row and toggle it back.
         stop, messages = self.run_react([OK])
         self.assertEqual((stop.exit_code, stop.result["code"]), (react.EX_TEMPFAIL, "no-row"))
         self.assertEqual(len(messages.performs), 1)
 
-    def test_a_ghost_copy_gets_exactly_one_retry_at_the_same_frame(self):
-        result, messages = self.run_react([{**OK, "copies": 2}, {**OK, "copies": 2, "lands": 2000}])
-        self.assertEqual(result["result"], "added")
-        first, second = messages.performs
-        self.assertEqual((first["copy"], first["frame"]), (0, ""))
-        self.assertEqual((second["copy"], second["frame"]), (1, "10,20,100,30"))
-
-    def test_no_second_retry(self):
-        stop, messages = self.run_react([{**OK, "copies": 2}, {**OK, "copies": 2}])
-        self.assertEqual(stop.result["code"], "no-row")
-        self.assertEqual(len(messages.performs), 2)
-
-    def test_a_late_row_is_not_toggled_back(self):
-        # The row lands during the last look: no retry may undo it.
-        messages = FakeMessages(self.con, 1, "M", [{**OK, "copies": 2}])
-        looks = []
-
-        def wait(con, guids, handles, since, seconds=None):
-            looks.append(seconds)
-            if len(looks) == 2:
-                tapback(self.con, 1, "M", 2000)
-            return (react.my_rows(con, guids, handles, since) or [None])[0]
-
-        with patch.object(react, "wait_for_row", wait):
-            result = react.react(self.con, self.target, 0, False, [], self.ui, run=messages)
-        self.assertEqual(result["result"], "added")
-        self.assertEqual(looks, [None, 0])
-        self.assertEqual(len(messages.performs), 1)
-
-    def test_retry_that_finds_another_frame_does_nothing(self):
-        stop, messages = self.run_react([{**OK, "copies": 2}, {"ok": False, "error": "moved"}])
-        self.assertEqual((stop.exit_code, stop.result["code"]), (react.EX_TEMPFAIL, "moved"))
-        self.assertEqual(len(messages.performs), 2)
-
-    def test_a_tapback_on_another_message_is_named_and_never_retried(self):
+    def test_a_tapback_on_another_message_is_named(self):
         add(self.con, 1, "N", "other", False, T0 + 1)
-        stop, messages = self.run_react([{**OK, "copies": 2, "lands": 2000, "lands_on": "N"}])
+        stop, messages = self.run_react([{**OK, "lands": 2000, "lands_on": "N"}])
         self.assertEqual((stop.exit_code, stop.result["code"], stop.result["guid"]), (react.EX_TEMPFAIL, "stray", "N"))
         self.assertEqual(len(messages.performs), 1)
         self.assertEqual(self.ui.restored, ["Previous app"])
-
-    def test_a_stray_after_the_retry_is_named_too(self):
-        add(self.con, 1, "N", "other", False, T0 + 1)
-        stop, messages = self.run_react([{**OK, "copies": 2}, {**OK, "copies": 2, "lands": 2000, "lands_on": "N"}])
-        self.assertEqual((stop.result["code"], stop.result["guid"]), ("stray", "N"))
-        self.assertEqual(len(messages.performs), 2)
 
     def test_only_this_accounts_rows_in_this_conversation_are_strays(self):
         add(self.con, 1, "N", "other", False, T0 + 1)
@@ -367,16 +328,6 @@ class React(unittest.TestCase):
         stop, _ = self.run_react([OK])
         self.assertEqual(stop.result["code"], "no-row")
 
-    def test_after_a_retry_the_latest_row_is_the_verdict(self):
-        # The first action landed after the last look; the retry toggled it back.
-        def settle(seconds):
-            if seconds == react.ROW_SETTLE:
-                tapback(self.con, 1, "M", 3000)
-
-        with patch.object(react.time, "sleep", side_effect=settle):
-            stop, _ = self.run_react([{**OK, "copies": 2}, {**OK, "copies": 2, "lands": 2000}])
-        self.assertEqual((stop.result["code"], stop.result["type"]), ("unexpected", 3000))
-
     def run_late(self, answer, on):
         """`answer`, with the row landing on `on` only once chat.db is waited
         on, a moment after osascript gave up, as it would on the Mac."""
@@ -386,6 +337,17 @@ class React(unittest.TestCase):
                 tapback(self.con, 1, pending.pop(), 2000, from_me=True)
         with patch.object(react.time, "sleep", side_effect=sleep):
             return self.run_react([answer])
+
+    def test_a_late_stray_after_a_press_is_named_not_no_row(self):
+        add(self.con, 1, "N", "other", False, T0 + 1)
+        stop, _ = self.run_late(OK, "N")
+        self.assertEqual((stop.result["code"], stop.result["guid"]), ("stray", "N"))
+
+    def test_a_stray_is_named_even_when_the_target_got_its_row(self):
+        add(self.con, 1, "N", "other", False, T0 + 1)
+        tapback(self.con, 1, "N", 2001, date=react.apple_now() + MINUTE)
+        stop, _ = self.run_react([{**OK, "lands": 2000}])
+        self.assertEqual((stop.result["code"], stop.result["guid"]), ("stray", "N"))
 
     def test_an_osascript_failure_may_have_pressed_so_chat_db_decides(self):
         result, _ = self.run_late({"ok": False, "error": "perform-failed"}, "M")
@@ -401,9 +363,18 @@ class React(unittest.TestCase):
         self.assertEqual((stop.exit_code, stop.result["code"]), (react.EX_TEMPFAIL, "perform-failed"))
 
     def test_an_answer_that_pressed_nothing_does_not_wait(self):
-        with patch.object(react, "wait_for_row") as waited:
-            stop, _ = self.run_react([{"ok": False, "error": "moved"}])
-        self.assertEqual(stop.result["code"], "moved")
+        for error in ["moved", "ambiguous", "not-offered"]:
+            with patch.object(react, "answer") as waited:
+                stop, _ = self.run_react([{"ok": False, "error": error}])
+            self.assertEqual(stop.result["code"], error)
+            waited.assert_not_called()
+
+    def test_a_bubble_that_keeps_moving_is_never_pressed(self):
+        moving = {"ok": False, "error": "unsettled", "frame": "10,20,100,30"}
+        with patch.object(react, "answer") as waited:
+            stop, messages = self.run_react([dict(moving) for _ in range(react.MAX_SETTLES + 1)])
+        self.assertEqual((stop.exit_code, stop.result["code"]), (react.EX_TEMPFAIL, "unsettled"))
+        self.assertEqual(len(messages.performs), react.MAX_SETTLES + 1)
         waited.assert_not_called()
 
     def test_no_consent_touches_nothing(self):
@@ -542,6 +513,21 @@ class Paging(unittest.TestCase):
         self.assertEqual((result["error"], len(requests)), ("not-rendered", 1))
         self.assertIn("not found", result["detail"])
 
+    def test_presses_only_where_the_last_pass_left_it(self):
+        # Each pass that saw the bubble somewhere new scrolled it; the next
+        # must find it at that frame before anything is pressed.
+        requests = []
+        answers = [{"ok": False, "error": "unsettled", "frame": "0,500,100,30"},
+                   {"ok": False, "error": "unsettled", "frame": "0,300,100,30"}, OK]
+
+        def run(request):
+            requests.append(request)
+            return answers.pop(0)
+
+        with patch.object(react.time, "sleep"):
+            self.assertEqual(react.perform(self.TARGET, "Heart", run=run), OK)
+        self.assertEqual([r["frame"] for r in requests], ["", "0,500,100,30", "0,300,100,30"])
+
     def test_other_errors_end_the_search(self):
         self.assertEqual(self.perform([{"ok": False, "error": "ambiguous"}])[0]["error"], "ambiguous")
 
@@ -558,6 +544,17 @@ class Boundaries(unittest.TestCase):
             self.assertEqual(react.jxa({"text": "secret words"}), {"ok": True})
         self.assertNotIn("secret words", " ".join(seen["args"]))
         self.assertIn("secret words", seen["input"].decode())
+
+    def test_a_pass_that_scrolls_never_presses(self):
+        # AX paths name places in the tree and a scroll renumbers the rows: a
+        # press in the pass that scrolled can land on the neighbour.
+        run = react.JXA[react.JXA.index("function run()"):]
+        self.assertEqual(run.count("AXScrollToVisible"), 1)
+        start = run.index("if (q.frame !== g.key) {")
+        branch = run[start:run.index("\n  }\n", start)]
+        self.assertIn("AXScrollToVisible", branch)
+        self.assertIn('out.error = "unsettled"; return', branch)
+        self.assertLess(start, run.index("out.ok = true"))
 
     def test_osascript_failure_is_an_error_not_a_crash(self):
         def fake_run(args, input=None, **kw):

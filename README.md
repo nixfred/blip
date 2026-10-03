@@ -535,7 +535,7 @@ Success is the tapback row appearing in `chat.db`, never the screen. Your
 choice shows on the bubble at once, dimmed, until the conversation reloads with
 what `chat.db` says; a failure takes it away and says why on the status line,
 once. A bubble that does not offer the action is reported
-and left alone; there is no guess at a neighbouring action and no blind retry. It works on 1:1 conversations and
+and left alone; there is no guess at a neighbouring action and no retry. It works on 1:1 conversations and
 text bubbles only (no groups, pictures, links or cards yet), with an
 English-language Mac. Messages comes to the front for a few seconds while it
 runs: anyone typing on the Mac just then types into that conversation, as with
