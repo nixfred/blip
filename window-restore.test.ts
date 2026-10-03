@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  hasRealMonitor,
+  moveIsSafe,
   workspaceLives,
   homeRule,
   isLiveBlipTitle,
@@ -89,4 +91,25 @@ describe("a home workspace that no longer exists", () => {
   test("no saved home is not a live one", () => {
     expect(workspaceLives("", live)).toBe(false);
   });
+});
+
+test("no stray return while every output is gone", () => {
+  expect(hasRealMonitor([{ name: "DP-1", width: 3840, height: 1080, disabled: false }])).toBe(true);
+  expect(hasRealMonitor([])).toBe(false);
+  expect(hasRealMonitor(null)).toBe(false);
+  expect(hasRealMonitor([{ name: "FALLBACK", width: 1920, height: 1080 }])).toBe(false);
+  expect(hasRealMonitor([{ name: "DP-1", width: 3840, height: 1080, disabled: true }])).toBe(false);
+  expect(hasRealMonitor([{ name: "", width: 0, height: 0 }])).toBe(false);
+});
+
+test("a floating move waits until the target workspace has a live monitor", () => {
+  const dp1 = [{ name: "DP-1", width: 3840, height: 1080 }];
+  const homed = [{ id: 1, name: "1", monitor: "DP-1" }];
+  const orphaned = [{ id: 1, name: "1", monitor: "?" }, { id: 11, name: "11", monitor: "FALLBACK" }];
+  expect(moveIsSafe("1", dp1, homed)).toBe(true);
+  expect(moveIsSafe("4", dp1, homed)).toBe(true);
+  expect(moveIsSafe("1", dp1, orphaned)).toBe(false);
+  expect(moveIsSafe("1", [{ name: "FALLBACK", width: 1920, height: 1080 }], orphaned)).toBe(false);
+  expect(moveIsSafe("1", dp1, null)).toBe(false);
+  expect(moveIsSafe("", dp1, homed)).toBe(false);
 });

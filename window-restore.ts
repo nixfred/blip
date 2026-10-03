@@ -75,6 +75,42 @@ export function workspaceLives(workspace: unknown, live: unknown): boolean {
   return live.some((w: any) => String(w?.name ?? "") === target || String(w?.id ?? "") === target);
 }
 
+/**
+ * Is any real output connected? A display that drops off DisplayPort when it
+ * sleeps leaves Hyprland with no monitors, and moving a window to a workspace
+ * then segfaults Hyprland 0.56 (null monitor in moveWindowToWorkspace,
+ * 2026-10-02). Unknown or unreadable: treat as none, so a stray return waits
+ * for the monitor to come back instead of taking the session down.
+ */
+export function hasRealMonitor(monitors: unknown): boolean {
+  if (!Array.isArray(monitors)) return false;
+  return monitors.some((m: any) => typeof m?.name === "string" && m.name !== "" && m.name !== "FALLBACK"
+    && m.disabled !== true && Number(m.width) > 0 && Number(m.height) > 0);
+}
+
+/**
+ * May a floating window be moved onto that workspace right now? Hyprland 0.56
+ * dereferences the target workspace's monitor when moving a floating window,
+ * and a workspace whose output vanished keeps a null monitor until the output
+ * returns (reproduced in a nested Hyprland, 2026-10-03). So: a real output
+ * must exist, and an existing target must sit on one of them. A target that
+ * does not exist yet is created on a live output. Unknown state: no.
+ */
+export function moveIsSafe(workspace: unknown, monitors: unknown, workspaces: unknown): boolean {
+  if (!hasRealMonitor(monitors) || !Array.isArray(workspaces)) return false;
+  const target = typeof workspace === "string" ? workspace : "";
+  if (!target) return false;
+  const names = new Set((monitors as any[]).filter(m => hasRealMonitor([m])).map(m => String(m.name)));
+  const ws = workspaces.find((w: any) => String(w?.name ?? "") === target || String(w?.id ?? "") === target);
+  return !ws || names.has(String((ws as any).monitor ?? ""));
+}
+
+function liveMonitors(): unknown {
+  const result = spawnSync("hyprctl", ["monitors", "-j"], { encoding: "utf8", timeout: 3000 });
+  if (result.status !== 0) return null;
+  try { return JSON.parse(String(result.stdout)); } catch { return null; }
+}
+
 function liveWorkspaces(): unknown {
   const result = spawnSync("hyprctl", ["workspaces", "-j"], { encoding: "utf8", timeout: 3000 });
   if (result.status !== 0) return null;
@@ -101,6 +137,8 @@ if (import.meta.main) {
     process.exit(0);
   }
   if (action === "return") {
+    // No output, no move: the next monitoradded sends the window home.
+    if (!moveIsSafe(process.argv[3], liveMonitors(), liveWorkspaces())) process.exit(0);
     const lua = silentMove(process.argv[3], process.argv[4]);
     if (!lua || !hyprDispatch(lua)) {
       console.error("Blip could not return the window to its workspace");

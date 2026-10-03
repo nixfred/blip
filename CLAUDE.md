@@ -385,7 +385,9 @@ what it is handed. Keep it that way.
   home rule so a remap returns where the window was.
   With no real screen there is no leader, so no window: Qt's placeholder
   (empty name, 0x0) gets a bar when the last monitor goes, and mapping the
-  window then segfaults Hyprland 0.56 (`screen-leader.ts`).
+  window then segfaults Hyprland 0.56 (`screen-leader.ts`). Moving it back
+  segfaults the same way: a workspace whose output vanished keeps a null
+  monitor, so `return` runs only when `moveIsSafe()` (`window-restore.ts`).
 - **After an Omarchy plugin HOT-RELOAD, `qs ipc` keeps serving the OLD
   BarWidget.** Proved 2026-08-31 with a build tag (A after reload to B; C
   after D): the destroyed widget's IpcHandler stays bound to the target,

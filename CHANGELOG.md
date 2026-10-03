@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **A monitor that sleeps off DisplayPort no longer crashes Hyprland a second
+  way.** When the only monitor disappears, Hyprland reports its workspaces with
+  no monitor until it comes back. Blip saw the monitor change, tried to move its
+  window back home onto one of those workspaces, and Hyprland 0.56 segfaulted.
+  Now Blip moves the window only while a real monitor exists and the target
+  workspace sits on one; when the monitor returns, the window goes home as
+  before.
 - **Search no longer drops a reply that matches your own (#126, Greyforge
   Labs).** In a group, your "yes" and another member's "yes" in the same
   second came back as one hit, and a note to yourself could show as incoming

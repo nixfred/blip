@@ -106,6 +106,15 @@ FloatingWindow {
     for (var i = 0; i < arguments.length; i++) args.push(String(arguments[i]))
     Quickshell.execDetached(args)
   }
+  // With every output gone Hyprland 0.56 segfaults moving a floating window,
+  // so a stray waits for monitoradded (window-restore.ts moveIsSafe()).
+  function hasRealScreen() {
+    for (var i = 0; i < Quickshell.screens.length; i++) {
+      var s = Quickshell.screens[i]
+      if (s && s.name && s.width > 0 && s.height > 0) return true
+    }
+    return false
+  }
   function applyWorkspaceDecision(incoming, reason, addr) {
     if (restoring) return
     var decision = workspaceDecision(incoming, reason)
@@ -113,7 +122,7 @@ FloatingWindow {
       savedWorkspace = incoming
       saveWinState()
       if (savedWorkspace !== "") runRestore("home", savedWorkspace)
-    } else if (decision === "return" && savedWorkspace !== "") {
+    } else if (decision === "return" && savedWorkspace !== "" && hasRealScreen()) {
       runRestore("return", savedWorkspace, addr || ourAddress())
     }
   }
