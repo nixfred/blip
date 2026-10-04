@@ -91,6 +91,23 @@ def detect_self_handles() -> list[str]:
     return handles
 
 
+# An unanswered Automation prompt becomes a denial after about two minutes.
+OSASCRIPT_TIMEOUT = 150
+AUTOMATION_TIMEOUT = (
+    "Messages did not answer. On the Mac, allow Automation for the process "
+    "that runs Blip, then send again."
+)
+
+
+def run_osascript(args: list[str], script: str | None = None) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            args, input=script, capture_output=True, text=True, timeout=OSASCRIPT_TIMEOUT
+        )
+    except subprocess.TimeoutExpired:
+        sys.exit(AUTOMATION_TIMEOUT)
+
+
 def list_services() -> list[dict]:
     """Enumerate Messages services. Some macOS versions reject `name of`,
     so we ask per-service and skip ones that error."""
@@ -105,9 +122,7 @@ def list_services() -> list[dict]:
       return out
     end tell
     """
-    proc = subprocess.run(
-        ["osascript", "-e", src], capture_output=True, text=True, timeout=15
-    )
+    proc = run_osascript(["osascript", "-e", src])
     if proc.returncode != 0:
         sys.exit(f"osascript error: {proc.stderr.strip()}")
     services = []
@@ -405,9 +420,7 @@ def has_existing_chat(handle: str, service_name: str) -> bool:
 def run_applescript(script: str) -> tuple[int, str, str]:
     # Script on STDIN, not `-e`: the body would otherwise sit in osascript's
     # argv for every `ps` on the Mac (audit #4).
-    proc = subprocess.run(
-        ["osascript", "-"], input=script, capture_output=True, text=True, timeout=30
-    )
+    proc = run_osascript(["osascript", "-"], script)
     return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
 
 
@@ -553,10 +566,7 @@ def main() -> None:
         staged = stage_stdin_file(args.name, args.file_bytes)
         consent_banner(recipient, f"[file: {os.path.basename(staged)}]")
         baseline = _max_attachment_rowid()
-        try:
-            rc, out, err = run_applescript(build("file", staged))
-        except subprocess.TimeoutExpired:
-            rc, err = 1, "osascript timed out"
+        rc, out, err = run_applescript(build("file", staged))
         if rc != 0:
             unstage(staged)
             parts_failed.append(f"file ({err})")
@@ -578,10 +588,7 @@ def main() -> None:
                 print("file: sent (staged copy retained for GC).")
     if text:
         consent_banner(recipient, text)
-        try:
-            rc, out, err = run_applescript(build("text", text))
-        except subprocess.TimeoutExpired:
-            rc, out, err = 1, "", "osascript timed out"
+        rc, out, err = run_applescript(build("text", text))
         if rc != 0:
             parts_failed.append(f"text ({err})")
         else:

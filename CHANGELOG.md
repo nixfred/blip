@@ -19,6 +19,9 @@
   because an extensionless program does not start.
 - **One Windows tray.** A second launch opens the window that is already
   running and then exits.
+- **A send waits for the Automation prompt.** `imsg-send` waits 150 seconds
+  for Messages, the same budget as the rest of the bridge. A timeout exits
+  with one sentence that tells you to allow Automation on the Mac.
 
 - **A monitor that sleeps off DisplayPort no longer crashes Hyprland a second
   way.** When the only monitor disappears, Hyprland reports its workspaces with
