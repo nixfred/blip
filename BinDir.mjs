@@ -12,10 +12,14 @@ function parseBinDir(conf, home) {
     if (pre)
       v = home + v.slice(pre[1].length);
   }
-  v = v.replace(/\/+$/, "");
-  if (!/^\/[A-Za-z0-9._\/-]+$/.test(v) || /(^|\/)\.\.(\/|$)/.test(v))
+  v = v.replace(/[\/\\]+$/, "");
+  if (/(^|[\\/])\.\.([\\/]|$)/.test(v))
     return fallback;
-  return v;
+  if (/^\/[A-Za-z0-9._\/-]+$/.test(v))
+    return v;
+  if (/^[A-Za-z]:[\\/][A-Za-z0-9._\\/-]+$/.test(v))
+    return v;
+  return fallback;
 }
 export {
   parseBinDir

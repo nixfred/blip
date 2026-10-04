@@ -14,8 +14,15 @@ export function shimDir(home: string = process.env.HOME ?? homedir()): string {
   return parseBinDir(conf, home);
 }
 
+/** CreateProcess runs `imsg.exe`. An extensionless file is ENOENT on Windows.
+ *  Linux keeps the bare name the bash shim is installed as. */
+export function toolFile(dir: string, tool: string): string {
+  const path = `${dir}/${tool}`;
+  return process.platform === "win32" ? `${path}.exe` : path;
+}
+
 export function shimPath(tool: ShimTool, home: string = process.env.HOME ?? homedir()): string {
-  return `${shimDir(home)}/${tool}`;
+  return toolFile(shimDir(home), tool);
 }
 
 /** What to spawn for `tool` on one conversation (or handle), routed by
@@ -27,5 +34,6 @@ export function bridgeFor(
   home: string = process.env.HOME ?? homedir(),
 ): { cmd: string; args: string[] } {
   const [cmd, ...args] = bridgeArgv(chat, tool, shimDir(home));
-  return { cmd: cmd!, args };
+  const file = cmd && process.platform === "win32" && !cmd.endsWith(".exe") ? `${cmd}.exe` : cmd!;
+  return { cmd: file, args };
 }

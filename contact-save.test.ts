@@ -279,13 +279,14 @@ test('the save spawns the shim where bin_dir= put it, not a hard-coded ~/bin',()
     const spawned: string[] = [];
     const capture: any = (cmd: string)=>{spawned.push(cmd); return {status:0,stdout:JSON.stringify(success)};};
     expect(saveContact(request,capture)).toEqual({ok:true,name:'Example Person'});
-    expect(spawned).toEqual([`${home}/bin/contact-save`]);
+    const ext = process.platform === "win32" ? ".exe" : "";
+    expect(spawned).toEqual([`${home}/bin/contact-save${ext}`]);
 
     mkdirSync(join(home,'.config','blip'),{recursive:true});
     writeFileSync(join(home,'.config','blip','bridge.conf'),'host=me@mac\nbin_dir=~/.local/bin\n');
     spawned.length = 0;
     expect(saveContact(request,capture)).toEqual({ok:true,name:'Example Person'});
-    expect(spawned).toEqual([`${home}/.local/bin/contact-save`]);
+    expect(spawned).toEqual([`${home}/.local/bin/contact-save${ext}`]);
   } finally {
     if (previous === undefined) delete process.env.HOME; else process.env.HOME = previous;
   }

@@ -56,7 +56,8 @@ describe("stock Blip: every conversation goes to the Mac", () => {
     mkdirSync(join(home, ".config", "blip"), { recursive: true });
     writeFileSync(join(home, ".config", "blip", "bridge.conf"), "host=me@mac\nbin_dir=~/.local/bin\n");
     for (const tool of TOOLS) {
-      expect(bridgeFor("chat1", tool, home)).toEqual({ cmd: `${home}/.local/bin/${tool}`, args: [] });
+      const ext = process.platform === "win32" ? ".exe" : "";
+      expect(bridgeFor("chat1", tool, home)).toEqual({ cmd: `${home}/.local/bin/${tool}${ext}`, args: [] });
     }
   });
 

@@ -29,12 +29,21 @@ test("a commented-out bin_dir is ignored", () => {
   expect(parseBinDir("# bin_dir=/opt/blip\n", H)).toBe("/home/u/bin");
 });
 
+test("a Windows drive path is accepted and a climb is not", () => {
+  const home = "C:/Users/example";
+  expect(parseBinDir("bin_dir=~/.local/bin", home)).toBe("C:/Users/example/.local/bin");
+  expect(parseBinDir("bin_dir=C:/Tools/blip", home)).toBe("C:/Tools/blip");
+  expect(parseBinDir("bin_dir=C:/Tools/../blip", home)).toBe("C:/Users/example/bin");
+  expect(parseBinDir("bin_dir=C:/Tools/$(id)", home)).toBe("C:/Users/example/bin");
+});
+
 test("shimPath reads bin_dir from the user's bridge.conf", () => {
+  const ext = process.platform === "win32" ? ".exe" : "";
   const home = mkdtempSync(join(tmpdir(), "blip-bin-"));
-  expect(shimPath("imsg", home)).toBe(`${home}/bin/imsg`);
+  expect(shimPath("imsg", home)).toBe(`${home}/bin/imsg${ext}`);
   mkdirSync(join(home, ".config", "blip"), { recursive: true });
   writeFileSync(join(home, ".config", "blip", "bridge.conf"), "host=me@mac\nbin_dir=~/.local/bin\n");
-  expect(shimPath("imsg-send", home)).toBe(`${home}/.local/bin/imsg-send`);
+  expect(shimPath("imsg-send", home)).toBe(`${home}/.local/bin/imsg-send${ext}`);
 });
 
 test("the deployed QML module agrees with bin-dir.ts", async () => {

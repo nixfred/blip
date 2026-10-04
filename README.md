@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.6.2-0a84ff?style=flat-square">
+  <img alt="version" src="https://img.shields.io/badge/version-3.0.0-0a84ff?style=flat-square">
   <img alt="Omarchy" src="https://img.shields.io/badge/Omarchy-plugin-5fd7ff?style=flat-square">
   <img alt="QuickShell" src="https://img.shields.io/badge/QuickShell-QML-0a84ff?style=flat-square">
   <img alt="bun" src="https://img.shields.io/badge/bun-TypeScript-f9f1e1?style=flat-square">
@@ -45,6 +45,26 @@
     reserved for fiction. The link card is a real fetch of a real public page.
   </sub>
 </p>
+
+## Windows
+
+Blip 3.0 adds a system-tray client for Windows 11. The message logic is the
+same bun collector. The window is a WinForms shell, and a small .NET shim
+stands in for `blip-shim`. A real iMessage still needs your Mac. With no
+`host=` in `bridge.conf`, the installer uses `host=fixture` and the invented
+people in `scripts/demo`, so the tray opens on a machine that has no Mac yet.
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File scripts/win/install.ps1
+```
+
+The installer adds a Start menu shortcut named Blip. That shortcut and the
+tray icon are a blue phone with an arrow. A second launch opens the window
+that is already running. Left-click opens the list and
+does not mark anything read. Focusing the compose box marks the open thread.
+Right-click marks everything read. The Windows build does not toast, because
+notification history would keep message text. OTP, tapbacks, attachments,
+link cards, and contact review stay on the Omarchy client.
 
 ## Blip 2.3
 

@@ -2,3 +2,6 @@ node_modules/
 *.log
 __pycache__/
 !CHANGE.log
+windows/**/bin/
+windows/**/obj/
+windows/publish/

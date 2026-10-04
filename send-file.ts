@@ -13,7 +13,7 @@
  * filesystem paths, so a remote caller can never exfiltrate Mac files.
  */
 
-import { bridgeFor } from "./shim-path";
+import { bridgeFor, toolFile } from "./shim-path";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -37,6 +37,30 @@ export function resolveTarget(
     return { args: ["--chat-id", guid], error: "" };
   }
   return { args: ["--to", chat], error: "" };
+}
+
+export type TextSendPlan =
+  | { ok: true; cmd: string; args: string[] }
+  | { ok: false; error: string };
+
+/** Argv for one text send. The body is not an argument.
+ *  A group with no cached guid is a refusal, never `--to` the last speaker. */
+export function planTextSend(
+  chat: string,
+  service: string,
+  groups: Record<string, { guid?: string } | undefined>,
+  binDir: string,
+): TextSendPlan {
+  const target = resolveTarget(chat, groups);
+  if (target.error) return { ok: false, error: target.error };
+  const sms = !target.args.includes("--chat-id") && /^(SMS|RCS)$/i.test(service)
+    ? ["--service", service.toUpperCase()]
+    : [];
+  return {
+    ok: true,
+    cmd: toolFile(binDir, "imsg-send"),
+    args: [...target.args, ...sms, "--yes", "--text-stdin", "--keep-dashes"],
+  };
 }
 
 export interface SendFileResult { ok: boolean; online: boolean; error: string }

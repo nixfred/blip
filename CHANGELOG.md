@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased
+## 3.0.0 — 2026-10-04
+
+- **Windows tray.** Blip runs in the Windows 11 system tray. The window is
+  WinForms. `bun collector.ts` and `bun thread.ts` are still the message
+  plane. A .NET shim installs as `imsg.exe` and the other bridge names.
+  `scripts/win/install.ps1` publishes it for the current user and registers
+  it to start at login.
+- **No Mac yet uses the demo.** If `bridge.conf` has no `host=`, the
+  installer sets `host=fixture` and `push_read=off`. The shim then serves
+  `scripts/demo/fake-imsg` and discards anything you send. A real `host=`
+  is left alone.
+- **Windows does not toast.** Notification history would store message text.
+  The tray shows the unread count and the window. OTP, tapbacks, attachments,
+  link cards, and contact review stay on Omarchy.
+- **Text send has one argv plan.** `planTextSend` chooses `--to` or
+  `--chat-id`. The body stays on stdin. On Windows the shim file is `imsg.exe`,
+  because an extensionless program does not start.
+- **One Windows tray.** A second launch opens the window that is already
+  running and then exits.
 
 - **A monitor that sleeps off DisplayPort no longer crashes Hyprland a second
   way.** When the only monitor disappears, Hyprland reports its workspaces with
