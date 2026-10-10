@@ -193,6 +193,14 @@ class Deadlines(unittest.TestCase):
         self.assertEqual(cmd[-2:], ["you@your-mac",
                                     "PATH=/opt/homebrew/bin:/usr/local/bin:$PATH python3 $HOME/.blip/bin/imsg serve"])
 
+    def test_the_dedicated_key_channel_refuses_agent_keys(self):
+        # An agent-held key outranks -i, would get a shell instead of
+        # blip-dispatch, and `imsg serve` would run unconfined.
+        with tempfile.NamedTemporaryFile() as key:
+            cmd = bridged.ssh_command(conf(key=key.name))
+        self.assertIn("IdentityAgent=none", cmd)
+        self.assertEqual(cmd[-1], "imsg serve")
+
 
 class PoolLimits(unittest.TestCase):
     def pool(self, *modes, max_queued=0):

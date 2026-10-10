@@ -287,9 +287,10 @@ def ssh_command(conf: dict) -> list[str]:
         # The dedicated key is enrolled with command="blip-dispatch", so the
         # remote command is bare and dispatch execs the tool. Its own
         # ControlMaster socket: sharing the general key's master would
-        # silently bypass the forced command.
+        # silently bypass the forced command. IdentityAgent=none for the same
+        # reason as blip-shim: an agent-held key outranks -i whatever the order.
         ssh = ["ssh", "-i", conf["key"], "-o", "IdentitiesOnly=yes",
-               "-o", "ControlMaster=auto",
+               "-o", "IdentityAgent=none", "-o", "ControlMaster=auto",
                "-o", f"ControlPath={os.path.expanduser('~')}/.ssh/cm-blip-%r@%h:%p",
                "-o", "ControlPersist=10m"]
         remote = "imsg serve"

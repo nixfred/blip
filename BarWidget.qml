@@ -599,7 +599,7 @@ BarWidget {
       Qt.callLater(function() {
         if (!collector.sawExit && !collector.running) {
           root.online = false; root.healthy = false
-          root.lastError = "cannot start `bun` — install it (pacman -S bun) and restart the shell"
+          root.lastError = "cannot start `bun` — it may be installed but missing from the PATH the bar sees (the graphical session does not read your shell rc); link it into ~/.local/bin and restart the shell"
         }
       })
     }

@@ -85,7 +85,12 @@ else
   quoted_flags=""
 fi
 if [[ -r "$key" ]]; then
-  ssh=(ssh -i "$key" -o IdentitiesOnly=yes -o ControlMaster=auto
+  # IdentityAgent=none here is correctness, not speed: ssh prefers agent-held keys
+  # over on-disk ones whatever the order, so a user ssh_config pinning an agent key
+  # for this host would authenticate with THAT key. The forced command lives on the
+  # dedicated key's authorized_keys line, so the session would silently get a full
+  # shell and the confinement this script relies on would not apply.
+  ssh=(ssh -i "$key" -o IdentitiesOnly=yes -o IdentityAgent=none -o ControlMaster=auto
        -o "ControlPath=$HOME/.ssh/cm-blip-%r@%h:%p" -o ControlPersist=10m)
   remote="$tool$quoted_flags ${*@Q}"
 else
