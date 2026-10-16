@@ -232,7 +232,8 @@ if ssh -n -o ConnectTimeout=6 -o BatchMode=yes -- "$host" true 2>/dev/null; then
   key="$HOME/.ssh/blip_ed25519"
   [[ -f "$key" ]] || ssh-keygen -q -t ed25519 -N "" -C "blip@${HOSTNAME:-$(uname -n)}" -f "$key"
   pub="$(cut -d" " -f1,2 < "$key.pub")"
-  seen="$(ssh -n -- "$host" 'printf %s "${SSH_CONNECTION%% *}"')"
+  seen="$(ssh -n -- "$host" 'printf %s "$SSH_CONNECTION"')"
+  seen="${seen%% *}"
   from_opt="$(blip_key_from "$seen")"
   ssh -n "$host" "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; \
     grep -vF -- '$pub' ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.blip.tmp || true; \

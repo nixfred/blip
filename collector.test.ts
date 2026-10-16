@@ -2170,6 +2170,11 @@ describe("blip-setup: the key's from= pin", () => {
     expect(src).not.toContain("five bridge tools");
     expect(src).not.toContain("key_from=");   // no config knob: the pin follows the transport
   });
+  test("the remote address read survives a fish login shell on the Mac", () => {
+    const src = readFileSync(setup, "utf8");
+    expect(src).toContain(`seen="$(ssh -n -- "$host" 'printf %s "$SSH_CONNECTION"')"`);
+    expect(src).not.toContain("${SSH_CONNECTION");
+  });
 });
 
 // blip-setup pauses twice for a `read -r -p`. An ssh that runs a remote command
