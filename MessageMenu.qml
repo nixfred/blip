@@ -2,8 +2,11 @@ import "TapbackActions.mjs" as TapbackActions
 import QtQuick
 import QtQuick.Controls
 
-// One menu for text bubbles and link previews. Actions stay in BlipView,
-// using the same clipboard, browser and share-sheet paths as before. With
+// One menu for text bubbles, link previews and attachments. Actions stay in
+// BlipView, using the same clipboard, browser, share-sheet and fetch paths as
+// before. An attachment (picture or file chip) gets Open / Copy image / Save…
+// in place of the text rows; which rows show comes from
+// MessageActions.attachmentActions. With
 // tapbacks=on, a row of the six classic tapbacks leads it: 1–6 pick one, or
 // Left/Right move along the row and Enter/Space pick the marked one.
 Menu {
@@ -16,6 +19,10 @@ Menu {
     radius: 7
   }
   property string linkUrl: ""
+  /** The right-clicked attachment's rows ({open, copy, save, saveLabel}); null = none. */
+  property var attachmentRows: null
+  readonly property bool attachmentShown: !!menu.attachmentRows && menu.attachmentRows.open === true
+  readonly property bool textRowsShown: menu.linkUrl === "" && !menu.attachmentShown
   property bool canQuote: false
   property bool canCopy: false
   signal quoteRequested()
@@ -23,6 +30,9 @@ Menu {
   signal openRequested(string url)
   signal copyLinkRequested(string url)
   signal shareRequested(string url)
+  signal openAttachmentRequested()
+  signal copyImageRequested()
+  signal saveAttachmentRequested()
   // Tapbacks: shown only for a bubble imsg-react acts on; the one you have is
   // highlighted, and choosing it again takes it back. One at a time.
   property bool tapbacksShown: false
@@ -123,15 +133,36 @@ Menu {
   }
 
   MenuItem {
+    text: "Open"
+    visible: menu.attachmentShown
+    enabled: visible
+    height: visible ? implicitHeight : 0
+    onTriggered: menu.openAttachmentRequested()
+  }
+  MenuItem {
+    text: "Copy image"
+    visible: menu.attachmentShown && menu.attachmentRows.copy === true
+    enabled: visible
+    height: visible ? implicitHeight : 0
+    onTriggered: menu.copyImageRequested()
+  }
+  MenuItem {
+    text: menu.attachmentShown ? String(menu.attachmentRows.saveLabel || "Save…") : "Save…"
+    visible: menu.attachmentShown && menu.attachmentRows.save === true
+    enabled: visible
+    height: visible ? implicitHeight : 0
+    onTriggered: menu.saveAttachmentRequested()
+  }
+  MenuItem {
     text: "Quote and reply"
-    visible: menu.linkUrl === ""
+    visible: menu.textRowsShown
     height: visible ? implicitHeight : 0
     enabled: visible && menu.canQuote
     onTriggered: menu.quoteRequested()
   }
   MenuItem {
     text: "Copy message"
-    visible: menu.linkUrl === ""
+    visible: menu.textRowsShown
     height: visible ? implicitHeight : 0
     enabled: visible && menu.canCopy
     onTriggered: menu.copyRequested()

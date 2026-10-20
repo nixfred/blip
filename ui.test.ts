@@ -571,6 +571,22 @@ describe("QML safety invariants", () => {
     expect(panel).not.toContain("var onFirstLine");
   });
 
+  test("right-clicking an attachment saves the original through the picker, never a preview", () => {
+    // both the inline picture and the file chip open the attachment menu
+    expect(panel.split("onTapped: root.openAttachmentMenu(bubbleRow.modelData, chipRow.modelData)").length - 1).toBe(2);
+    expect(panel).toContain("attachmentRows: root.attachmentContext ? MessageActions.attachmentActions(root.attachmentContext) : null");
+    expect(panel).toContain("onCopyImageRequested: if (root.attachmentContext) root.copyAttachment(root.attachmentContext)");
+    const save = qmlFunction("saveAttachment");
+    expect(save).toContain("MessageActions.saveableMime(att.mime)");
+    expect(save).toContain('enqueueFetch(att, "save")');
+    // a gesture on a queued auto-pull drops its cap, so the ORIGINAL is fetched
+    expect(qmlFunction("enqueueFetch")).toContain("fetchQueue[i].auto = false");
+    // path and name ride as arguments to the script; nothing is executed or opened
+    expect(panel).toContain('saveProc.command = ["bun", root.saveAttachmentScript, String(d.path || ""), root.fetchJobName]');
+    const menu = readFileSync(new URL("./MessageMenu.qml", import.meta.url), "utf8");
+    expect(menu).toContain("readonly property bool textRowsShown: menu.linkUrl === \"\" && !menu.attachmentShown");
+  });
+
   test("bubble actions reuse the click handlers and never steal a real send", () => {
     // Enter/Ctrl+C/Ctrl+R act on the selection only with an empty field and
     // no queued file — a queued file's Enter is a send, and must stay one.
@@ -587,8 +603,8 @@ describe("QML safety invariants", () => {
     expect(panel).toContain(`'wl-copy --type "$1" < "$2"', "sh", mime, String(d.path || "")`);
     // HEIC arrives as JPEG (fetch.ts wantsJpeg): the clipboard type must say so
     expect(panel).toContain('root.fetchJobMime === "image/heic" || root.fetchJobMime === "image/heif" ? "image/jpeg"');
-    // the inline preview stays put while the original is fetched for the clipboard
-    expect(panel).toContain('var keepInline = root.fetchJobAction === "copy" && !!root.attFiles[id]');
+    // the inline preview stays put while the original is fetched for the clipboard (or a save)
+    expect(panel).toContain('var keepInline = (root.fetchJobAction === "copy" || root.fetchJobAction === "save") && !!root.attFiles[id]');
     expect(panel).not.toContain("fetchJobOpen");
     expect(qmlFunction("quoteBubble")).toContain("leaveBubbles()");
     // Empty status does not reserve a row; only failures are red.

@@ -27,6 +27,9 @@ ContactReview.qml                   compact review and scan, opened from convers
 collector.ts                        poll → {threads, unread, toast}. Pure functions + one spawn.
 thread.ts                           one conversation → decorated bubbles. Pure + one spawn.
 fetch.ts                            attachment id → ~/.cache/blip/att (0700/0600, 500MB LRU).
+save-attachment.ts                  Save image… / Save…: a fetched ORIGINAL (`-orig-`/`-jpg-`, never `-prev-`)
+                                    → zenity save picker → pinned-folder copy, 0600, link(2) so nothing is
+                                    ever replaced ("name (2).ext"). Offered only for openableMime types.
 send-file.ts                        local file + caption → imsg-send --file-stdin --text-stdin-bytes N
                                     (caption ahead of the bytes; NO message text in argv anywhere). Resolves
                                     group guid from state; REFUSES unknown groups.

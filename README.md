@@ -135,7 +135,7 @@ Linux side. If the Mac is asleep, the widget dims and says so.
 - **inline replies** quoted above the bubble · **Edited** tags · "unsent a message" tombstones
 - **link cards** — URL messages show the preview image, title, and host, like Messages. Apple only decorates some links; for the rest Blip fetches the page's own Open Graph card itself, so a bare URL still gets its picture. Click opens the link, **right-click opens the share sheet** (open · copy · QR for your phone · send to a device via LocalSend, Omarchy's share). `link_previews=off` in `bridge.conf` disables the fetching
 - **iMessage-app cards read as text** — Ask to Buy, Fitness sharing, Find My: the sentence Messages shows for them, instead of a replacement character
-- **photos render inline** — images ≤5MB auto-fetch over SSH (HEIC converted on the Mac); click opens full-size. PDFs/videos are chips — click fetches and opens them
+- **photos render inline** — images ≤5MB auto-fetch over SSH (HEIC converted on the Mac); click opens full-size. PDFs/videos are chips — click fetches and opens them. **Right-click a photo** for Open · Copy image (the picture itself, on the clipboard) · Save image… (a file picker starting in Downloads with the original name; the full original is saved, and an existing file is never replaced — a taken name becomes `name (2).jpg`). Media and PDF chips get Open · Save…
 - **send files** — Ctrl+V an image into the compose box, type `/attach <path>`, or drag-and-drop; a caption rides along
 - select text and Ctrl+C · right-click a bubble to copy it whole · right-click a **link** in a bubble for the share sheet
 - the share sheet **opens itself** for a link you send, and for one that arrives while Blip is open
@@ -300,7 +300,7 @@ reports the live value as `scroll_gain=`.
 - Linux: [Omarchy](https://omarchy.org) (Hyprland + the Omarchy shell), and on
   the box: `bun`, `jq`, `openssh`, `libnotify`, `wl-clipboard`, `xdg-utils`.
   `blip-setup` checks for each and prints the `pacman` line for what's missing.
-  The optional **Save vCard…** action also uses `zenity` for its folder picker.
+  The optional **Save vCard…** and **Save image…** actions also use `zenity` for their file pickers.
 
 > **Honest note on dependencies.** Blip is not a drop-in marketplace plugin
 > the way a clock widget is: it needs `bun` on the Linux side, a Mac you own

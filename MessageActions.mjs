@@ -19,8 +19,21 @@ function bubbleIndexByGuid(bubbles, guid) {
     return -1;
   return (bubbles || []).findIndex((b) => String(b?.guid || "") === guid);
 }
+function saveableMime(mime) {
+  const m = String(mime || "").toLowerCase();
+  return m.startsWith("image/") || m.startsWith("video/") || m.startsWith("audio/") || m === "application/pdf" || m === "text/plain" || m === "text/vcard" || m === "text/calendar";
+}
+function attachmentActions(att) {
+  const id = String(att?.id ?? "");
+  if (!id)
+    return { open: false, copy: false, save: false, saveLabel: "" };
+  const image = String(att?.mime || "").toLowerCase().startsWith("image/");
+  return { open: true, copy: image, save: saveableMime(att?.mime), saveLabel: image ? "Save image…" : "Save…" };
+}
 export {
+  attachmentActions,
   bubbleIndexByGuid,
   quoteText,
-  quotedDraft
+  quotedDraft,
+  saveableMime
 };

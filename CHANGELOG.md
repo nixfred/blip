@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Right-click a photo to copy or save it.** A picture in a conversation now
+  has its own menu: Open, Copy image (the picture itself on the clipboard,
+  the same path as Ctrl+C on a picture bubble) and Save image…, which fetches
+  the full original, opens a file picker in Downloads with the attachment's
+  own name, and writes a copy that never replaces an existing file. Media and
+  PDF chips get Open and Save…; anything Blip would not open is not offered
+  for saving either. The picker is `zenity`, as for Save vCard….
+
 - **"Mark all read" is there when Blip says ALL CAUGHT UP.** Under the default
   `push_read=all`, reading a conversation in Blip clears Blip's dot and tells your
   iPhone nothing, so the phone could show unread dots beside a caught-up Blip,

@@ -129,6 +129,9 @@ FocusScope {
   readonly property string searchScript:
     decodeURIComponent(Qt.resolvedUrl("search.ts").toString().replace(/^file:\/\//, ""))
 
+  readonly property string saveAttachmentScript:
+    decodeURIComponent(Qt.resolvedUrl("save-attachment.ts").toString().replace(/^file:\/\//, ""))
+
   readonly property string contactScript:
     decodeURIComponent(Qt.resolvedUrl("contact-search.ts").toString().replace(/^file:\/\//, ""))
 
@@ -1103,14 +1106,17 @@ FocusScope {
   }
 
   /** action: "" = just cache it, "open" = xdg-open when it lands, "copy" =
-   *  put it on the clipboard when it lands. */
+   *  put it on the clipboard when it lands, "save" = hand the original to
+   *  save-attachment.ts (picker, then a copy that never overwrites). */
   function enqueueFetch(att, action, auto) {
     var id = String(att.id || "")
     if (id === "" || fetchingId === id) return
     if (attFiles[id] !== undefined && !action) return
     for (var i = 0; i < fetchQueue.length; i++) {
       if (fetchQueue[i].id === id) {
-        if (action) fetchQueue[i].action = action
+        // A gesture on a queued auto-pull wants the ORIGINAL: drop the
+        // transfer cap, or a save is handed the -prev- preview it refuses.
+        if (action) { fetchQueue[i].action = action; fetchQueue[i].auto = false }
         return
       }
     }
@@ -1122,12 +1128,14 @@ FocusScope {
 
   property string fetchJobAction: ""
   property string fetchJobMime: ""
+  property string fetchJobName: ""
   function pumpFetch() {
     if (fetchProc.running || fetchQueue.length === 0) return
     var job = fetchQueue.shift()
     fetchingId = job.id
     fetchJobAction = job.action
     fetchJobMime = job.mime
+    fetchJobName = job.name
     // Auto-pulls carry a hard transfer cap: claimed metadata is not the limit.
     fetchProc.command = ["bun", root.fetchScript, job.id, job.name, job.mime, job.auto ? "5242880" : ""]
     fetchProc.running = true
@@ -1175,6 +1183,18 @@ FocusScope {
   function copyAttachment(att) {
     if (String(att.id || "") === "") return
     enqueueFetch(att, "copy")
+  }
+  /** Save image… / Save… from the attachment menu: fetch the ORIGINAL (the
+   *  same non-auto fetch as Copy image, never the inline preview), then
+   *  save-attachment.ts shows the picker. One picker at a time. Only the
+   *  types openableMime would open are offered (MessageActions.saveableMime). */
+  function saveAttachment(att) {
+    if (String(att.id || "") === "" || !MessageActions.saveableMime(att.mime)) return
+    if (saveProc.running) { root.note = "a save dialog is already open"; return }
+    // enqueueFetch drops a request for the id already in flight (the inline
+    // preview being pulled); say so instead of doing nothing.
+    if (fetchingId === String(att.id)) { root.note = "still loading — try Save again in a moment"; return }
+    enqueueFetch(att, "save")
   }
 
   // ------------------------------------------------------ compose attachment
@@ -1928,7 +1948,7 @@ FocusScope {
           // A copy fetches the ORIGINAL for the clipboard; the bubble keeps
           // the preview it already draws. Swapping its source and metrics
           // re-decodes and re-lays out the picture under the reader's eyes.
-          var keepInline = root.fetchJobAction === "copy" && !!root.attFiles[id]
+          var keepInline = (root.fetchJobAction === "copy" || root.fetchJobAction === "save") && !!root.attFiles[id]
           var m = Object.assign({}, root.attFiles)
           if (!keepInline) m[id] = d.ok === true ? String(d.url || "") : ""
           root.attFiles = m
@@ -1951,6 +1971,13 @@ FocusScope {
             Quickshell.execDetached(["sh", "-c", 'wl-copy --type "$1" < "$2"', "sh", mime, String(d.path || "")])
             root.note = "copied"
             noteTimer.restart()
+          } else if (d.ok === true && root.fetchJobAction === "save") {
+            // Path and name are arguments; the script only accepts a fetched
+            // original inside the media cache and writes without replacing.
+            if (!saveProc.running) {
+              saveProc.command = ["bun", root.saveAttachmentScript, String(d.path || ""), root.fetchJobName]
+              saveProc.running = true
+            } else root.note = "a save dialog is already open"
           } else if (d.ok === true && root.fetchJobAction === "open") {
             if (String(root.fetchJobMime || "").indexOf("audio/") === 0) {
               root.toggleAudio(String(d.path || ""))
@@ -1976,6 +2003,21 @@ FocusScope {
     onExited: function(code, status) {
       root.fetchingId = ""
       Qt.callLater(root.pumpFetch)
+    }
+  }
+
+  // Save image… / Save…: zenity picker + no-overwrite copy (save-attachment.ts).
+  Process {
+    id: saveProc
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          var r = JSON.parse(text.trim())
+          root.note = r.ok === true ? String(r.detail || "saved") : "save failed — " + String(r.error || "unknown error")
+        } catch (e) {
+          root.note = "save failed"
+        }
+      }
     }
   }
 
@@ -3539,6 +3581,10 @@ FocusScope {
 
                       HoverHandler { cursorShape: Qt.PointingHandCursor }
                       TapHandler { onTapped: root.openAttachment(chipRow.modelData) }
+                      TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: root.openAttachmentMenu(bubbleRow.modelData, chipRow.modelData)
+                      }
                     }
 
                     Rectangle {
@@ -3565,6 +3611,10 @@ FocusScope {
                       }
                       HoverHandler { cursorShape: Qt.PointingHandCursor }
                       TapHandler { onTapped: root.openAttachment(chipRow.modelData) }
+                      TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: root.openAttachmentMenu(bubbleRow.modelData, chipRow.modelData)
+                      }
                     }
                     Item { Layout.fillWidth: true; visible: !bubbleRow.mine }
                   }
@@ -4117,8 +4167,11 @@ FocusScope {
   }
 
   property var messageContext: null
+  /** The right-clicked attachment; null for the text and link menus. */
+  property var attachmentContext: null
   function openMessageMenu(message, url) {
     messageContext = message
+    attachmentContext = null
     messageMenu.linkUrl = url
     messageMenu.keyHints = false
     messageMenu.popup()
@@ -4127,6 +4180,7 @@ FocusScope {
    *  tapbacks' number keys shown. Closing it hands the keys back to the draft. */
   function openMessageMenuAt(message, item) {
     messageContext = message
+    attachmentContext = null
     messageMenu.linkUrl = ""
     messageMenu.keyHints = true
     // placed under the bubble but parented to the view: a reload rebuilds the
@@ -4135,6 +4189,16 @@ FocusScope {
       var at = item.mapToItem(root, Math.max(0, (item.width - messageMenu.implicitWidth) / 2), item.height)
       messageMenu.popup(root, at.x, at.y)
     } else messageMenu.popup()
+  }
+
+  /** Right-click on a picture or file chip: Open / Copy image / Save… (plus
+   *  the message's tapback row), the same menu as a text bubble. */
+  function openAttachmentMenu(message, att) {
+    messageContext = message
+    attachmentContext = att
+    messageMenu.linkUrl = ""
+    messageMenu.keyHints = false
+    messageMenu.popup()
   }
 
   // ---- outgoing tapbacks: tapbacks=on in bridge.conf, the Mac's imsg-react
@@ -4177,12 +4241,17 @@ FocusScope {
     onOpenRequested: function(url) { root.openLink(url) }
     onCopyLinkRequested: function(url) { root.copyText(url) }
     onShareRequested: function(url) { root.openShare(url) }
+    attachmentRows: root.attachmentContext ? MessageActions.attachmentActions(root.attachmentContext) : null
+    onOpenAttachmentRequested: if (root.attachmentContext) root.openAttachment(root.attachmentContext)
+    onCopyImageRequested: if (root.attachmentContext) root.copyAttachment(root.attachmentContext)
+    onSaveAttachmentRequested: if (root.attachmentContext) root.saveAttachment(root.attachmentContext)
     tapbacksShown: root.tapbacksOn && TapbackActions.canTapback(root.messageContext, root.activeIsGroup)
     tapbacksBusy: root.tapbacksBusy
     myTapback: TapbackActions.myTapback(root.messageContext)
     onTapbackRequested: function(kind) { if (root.messageContext) root.sendTapback(root.messageContext, kind) }
     onClosed: {
       root.messageContext = null
+      root.attachmentContext = null
       if (keyHints) composeField.forceActiveFocus()
     }
   }
