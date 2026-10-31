@@ -352,6 +352,16 @@ what it is handed. Keep it that way.
   `_group_cluster_map` folds those like re-keyed groups, `pin_order_for`
   sees every id in the cluster, and `selectThread` keeps alias DM rows the
   way it already keeps group alias rows.
+- **A mute lives in two places, and both are read.** Up to macOS 26 Hide
+  Alerts is `chat.properties.ignoreAlertsFlag`; macOS 27 writes NOTHING
+  there and keeps it in `com.apple.MobileSMS.CKDNDList` (`CKDNDListKey`,
+  identifier → expiry in seconds since 2001, `dnd_ids`). Reading only the
+  flag made every 27 mute look unmuted and a mute that worked look failed
+  (#132, 2026-10-28). The chat list reads the plist FILE; `imsg-read`
+  verifies through `defaults export`, because cfprefsd writes the file a few
+  seconds late. 27 has no Show Alerts: one Hide Alerts item TOGGLES, so
+  `--mute`/`--unmute` read the state first and click nothing when it is
+  unknown — a toggle clicked in the wrong state does the opposite.
 - **`chat:null` exists.** Use `chatKey()`; never `String(m.chat)`. A row with
   neither chat nor handle is a leftover of a deleted conversation (iCloud keeps
   the row, the chat and the join are gone); `fetchMessages` drops it

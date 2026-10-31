@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Hide Alerts works on macOS 27 (#132).** Messages on 27 no longer records a mute in
+  `chat.properties`: it keeps it in `com.apple.MobileSMS.CKDNDList` (`CKDNDListKey`, handle → expiry,
+  `distantFuture` for "until I turn it back on"). Blip read only the old flag, so a 27 mute was
+  invisible to the chat list, and a Hide Alerts that had worked was reported as "clicked but the
+  conversation is not muted". The note above that Messages does not mute on 27 was this misreading.
+  `imsg chats` now reads the DND list as well as the flag, and `imsg-read` verifies against it through
+  `defaults export` (cfprefsd), because the plist file on disk trails the change by a few seconds. 27 also
+  has no Show Alerts item: one Hide Alerts item toggles, so `--unmute` falls back to it, and
+  `--mute`/`--unmute` now read the state before opening anything: already in place is success without
+  touching Messages, and unknown clicks nothing, because a toggle clicked in the wrong state does the
+  opposite. Verified on a macOS 27.0.1 gateway: mute, mute again, unmute, unmute again all exit 0 with
+  the DND list agreeing each time and the front app unchanged, and a chat muted from the Mac that Blip
+  used to list as unmuted now lists as muted. Pin on 27 is still open on #132. Deploy `bridge/mac/imsg`
+  and `bridge/mac/imsg-read` to the Mac (re-run `blip-setup` or `install.sh`).
+
 - **Hide Alerts is readable again on chats macOS 27 stamps with a year-1 date (#132, thanks
   @ianswope).** macOS 27 writes `upiExpiryDate` as Foundation's `distantPast`, two days older than
   the oldest date Python's `datetime` can hold, so the Mac's stock Python 3.9 refused the whole

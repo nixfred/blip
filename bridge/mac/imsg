@@ -50,6 +50,10 @@ PINNING_PLIST_PATHS = (
         "com.apple.messages.pinning.plist"
     ),
 )
+# Hide Alerts on macOS 27 (dnd_ids). One file: there is no container copy.
+DND_LIST_PATHS = (
+    os.path.expanduser("~/Library/Preferences/com.apple.MobileSMS.CKDNDList.plist"),
+)
 APPLE_EPOCH = 978307200  # 2001-01-01 UTC
 # chat.db leaves mime_type EMPTY on some rows and only the UTI says what the
 # file is: every iPhone voice message ("Audio Message.caf") is uti
@@ -1482,6 +1486,52 @@ def alerts_flag(blob) -> bool | None:
     return bool(props.get("ignoreAlertsFlag")) if isinstance(props, dict) else None
 
 
+def dnd_ids(data) -> set[str] | None:
+    """Identifiers muted in Messages' DND list, from the plist's top level.
+
+    macOS 27 stores Hide Alerts here and NOT in chat.properties: Hide Alerts
+    on a 27.0.1 Mac added `CKDNDListKey = {"<handle>": 64092211200.0}` (an
+    expiry in seconds since 2001; that one is Foundation's distantFuture) and
+    left ignoreAlertsFlag absent, so every 27 mute read as "alerts on" (#132).
+    An expiry in the past is alerts on again. None for a layout this does not
+    know: unknown, never "nobody is muted"."""
+    if not isinstance(data, dict):
+        return None
+    entries = data.get("CKDNDListKey", {})
+    if not isinstance(entries, dict):
+        return None
+    now = dt.datetime.now(dt.timezone.utc).timestamp() - APPLE_EPOCH
+    out = set()
+    for key, until in entries.items():
+        if isinstance(until, dt.datetime):
+            until = until.replace(tzinfo=until.tzinfo or dt.timezone.utc).timestamp() - APPLE_EPOCH
+        if isinstance(until, bool) or not isinstance(until, (int, float)):
+            return None
+        if isinstance(key, str) and key and until > now:
+            out.add(key)
+    return out
+
+
+def dnd_list() -> set[str] | None:
+    """The DND list as the plist file on disk has it. A Mac that never muted
+    anything has no file, which is nobody muted. cfprefsd writes the file a
+    few seconds after the change, which is fine for the chat list; imsg-read
+    verifies a write through `defaults` instead."""
+    out = set()
+    for path in DND_LIST_PATHS:
+        try:
+            with open(path, "rb") as f:
+                ids = dnd_ids(plistlib.load(f))
+        except FileNotFoundError:
+            continue
+        except (OSError, plistlib.InvalidFileException, ValueError, TypeError):
+            return None
+        if ids is None:
+            return None
+        out |= ids
+    return out
+
+
 def muted_conversations(con, clusters: dict) -> set[str]:
     """Canonical chat ids whose conversation has Hide Alerts on ANY of its rows.
 
@@ -1489,10 +1539,12 @@ def muted_conversations(con, clusters: dict) -> set[str]:
     and the flag lands on whichever row Messages had selected. imsg-read
     verifies Hide/Show Alerts over the same cluster, so the list and the
     write agree on what "muted" means. Every row is read, not the sidebar
-    LIMIT, so a quiet alias still counts."""
+    LIMIT, so a quiet alias still counts. Before macOS 27 the flag is in
+    chat.properties; from 27 it is the DND list, keyed by the identifier
+    itself (dnd_ids). Both are read, so either Mac reports its mutes."""
+    out = {clusters.get(cid, cid) for cid in (dnd_list() or ())}
     if "properties" not in {row[1] for row in con.execute("PRAGMA table_info(chat)")}:
-        return set()
-    out = set()
+        return out
     for cid, blob in con.execute("SELECT chat_identifier, properties FROM chat"):
         if cid and alerts_flag(blob) is True:
             out.add(clusters.get(cid, cid))

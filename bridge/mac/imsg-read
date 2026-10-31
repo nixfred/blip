@@ -357,9 +357,30 @@ def chat_muted(handle: str) -> Optional[bool]:
     if not rows:
         return None
     flags = [mod.alerts_flag(row["properties"]) for row in rows]
-    if True in flags:
+    dnd = dnd_list_now(mod)
+    if True in flags or (dnd is not None and dnd & set(ids)):
         return True
-    return None if None in flags else False
+    return None if None in flags or dnd is None else False
+
+
+def dnd_list_now(mod) -> Optional[set]:
+    """macOS 27's Hide Alerts list (imsg.dnd_ids), asked of cfprefsd.
+
+    The plist file trails the change by a few seconds, longer than
+    settle_flag waits, so a verified Show Alerts could read the old file and
+    fail. `defaults export` answers from cfprefsd, and a domain that was never
+    written exports as an empty dictionary: nobody muted, not unknown."""
+    try:
+        r = subprocess.run(["defaults", "export", "com.apple.MobileSMS.CKDNDList", "-"],
+                           capture_output=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        return mod.dnd_ids(plistlib.loads(r.stdout))
+    except (plistlib.InvalidFileException, ValueError, TypeError):
+        return None
 
 
 def pin_list():
@@ -459,6 +480,12 @@ ACTIONS = {
     "--mute": ("Hide Alerts", "chat_muted", True, "muted"),
     "--unmute": ("Show Alerts", "chat_muted", False, "unmuted"),
 }
+# macOS 27 has no Show Alerts: one Hide Alerts item toggles, its state shown
+# only while Messages is in front ("Hide Alerts, On" on the sidebar row).
+# Clicked only after chat_muted said the alerts are off, so it turns them on.
+TOGGLES = {"--unmute": "Hide Alerts"}
+# A toggle clicked in the wrong state does the opposite, so these check first.
+CHECK_FIRST = ("--mute", "--unmute")
 
 
 def conversation_action(flag: str, handle: str) -> None:
@@ -475,6 +502,15 @@ def conversation_action(flag: str, handle: str) -> None:
     if GROUP_ID.fullmatch(handle):
         sys.stderr.write(f"imsg-read: {flag} is for direct messages; this is a group\n")
         sys.exit(64)
+    if flag in CHECK_FIRST:
+        now = probe(handle)
+        if now is want:
+            print(word)
+            return
+        if now is None:
+            sys.stderr.write(f"imsg-read: Messages' records cannot say whether the conversation "
+                             f"is muted, so {item} was not clicked\n")
+            sys.exit(75)
     before = unread_on_mac(handle)
     prev = frontmost()
     selected = False
@@ -489,6 +525,8 @@ def conversation_action(flag: str, handle: str) -> None:
         if not ok and not err:
             wake_messages()
             ok, err = click(item)
+        if not ok and not err and flag in TOGGLES:
+            ok, err = click(TOGGLES[flag])
         if err:
             sys.stderr.write(f"imsg-read: {err}\n")
             sys.exit(1)

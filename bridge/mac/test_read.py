@@ -19,6 +19,7 @@ loader = importlib.machinery.SourceFileLoader("imsg_read", str(Path(__file__).wi
 spec = importlib.util.spec_from_loader(loader.name, loader)
 read = importlib.util.module_from_spec(spec)
 loader.exec_module(read)
+DND_LIST_NOW = read.dnd_list_now   # ActionProbes patches the module's copy
 
 FOUNDATION_DISTANT_PAST = -63114076800.0   # NSDate.distantPast, as macOS 27 stores upiExpiryDate
 
@@ -284,12 +285,15 @@ class ConversationActions(unittest.TestCase):
              "--unmute": ("Show Alerts", "chat_muted", False, "unmuted")}
 
     WANT = object()   # the probe reports exactly what the action asked for
+    OPPOSITE = object()   # ... or the state the action is meant to change
 
     def run_action(self, flag, probe=WANT, unread=(0,), select_error="", clicks=((True, ""),),
-                   front=("Previous app", "Messages"), handle=DM):
-        """Run main() for one action. Returns (exit code, stdout, stderr, calls)."""
+                   front=("Previous app", "Messages"), handle=DM, start=OPPOSITE):
+        """Run main() for one action. Returns (exit code, stdout, stderr, calls).
+        `start` is what Hide/Show Alerts' pre-check reads (read.CHECK_FIRST)."""
         item, probe_name, want, _ = self.FLAGS[flag]
         calls = []
+        checked = []
         fronts = list(front)
         clicks = list(clicks)
         unread = list(unread)
@@ -314,6 +318,10 @@ class ConversationActions(unittest.TestCase):
             calls.append(f"restore:{prev}")
 
         def check(handle):
+            if flag in read.CHECK_FIRST and not checked:
+                checked.append(True)
+                calls.append("precheck")
+                return (not want) if start is self.OPPOSITE else start
             calls.append("verify")
             return want if probe is self.WANT else probe
 
@@ -433,6 +441,46 @@ class ConversationActions(unittest.TestCase):
         self.assertIn("click:Mark as Unread", calls)
 
 
+    def test_hide_or_show_alerts_already_in_place_never_opens_messages(self):
+        for flag in ("--mute", "--unmute"):
+            with self.subTest(flag=flag):
+                want = self.FLAGS[flag][2]
+                code, out, _, calls = self.run_action(flag, start=want)
+                self.assertEqual(code, 0)
+                self.assertEqual(out.strip(), self.FLAGS[flag][3])
+                self.assertEqual(calls, ["precheck"])
+
+    def test_an_unknown_mute_state_never_clicks_a_toggle(self):
+        """On macOS 27 Hide Alerts toggles: clicked while already muted it unmutes."""
+        for flag in ("--mute", "--unmute"):
+            with self.subTest(flag=flag):
+                code, out, err, calls = self.run_action(flag, start=None)
+                self.assertEqual(code, 75)
+                self.assertEqual(out, "")
+                self.assertIn("was not clicked", err)
+                self.assertEqual(calls, ["precheck"])
+
+    def test_macos_27_show_alerts_is_the_hide_alerts_toggle(self):
+        """27 has no Show Alerts item; the muted chat's Hide Alerts turns them back on."""
+        code, out, _, calls = self.run_action("--unmute", clicks=((False, ""), (False, ""), (True, "")))
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "unmuted")
+        clicks = [c for c in calls if c.startswith("click:")]
+        self.assertEqual(clicks, ["click:Show Alerts", "click:Show Alerts", "click:Hide Alerts"])
+        self.assertLess(calls.index("precheck"), calls.index(f"select:{self.DM}"))
+        self.assertEqual(calls[-1], "restore:Previous app")
+
+    def test_hide_alerts_has_no_fallback(self):
+        code, _, err, calls = self.run_action("--mute", clicks=((False, ""), (False, "")))
+        self.assertEqual(code, 1)
+        self.assertIn("'Hide Alerts' was not available", err)
+        self.assertEqual([c for c in calls if c.startswith("click:")], ["click:Hide Alerts"] * 2)
+
+    def test_pins_are_not_checked_first(self):
+        _, _, _, calls = self.run_action("--pin")
+        self.assertNotIn("precheck", calls)
+
+
 class ActionProbes(unittest.TestCase):
     """The verifiers read Messages' own records with synthetic fixtures."""
 
@@ -465,9 +513,13 @@ class ActionProbes(unittest.TestCase):
         """)
         con.commit()
         con.close()
+        self.dnd_file = root / "com.apple.MobileSMS.CKDNDList.plist"
+        self.dnd = set()   # what cfprefsd answers; None = `defaults` failed
         mod = read.imsg_module()
         mod._COLS = None
         for target, name, value in ((read, "DB_PATH", self.db),
+                                    (read, "dnd_list_now", lambda _mod: self.dnd),
+                                    (mod, "DND_LIST_PATHS", (str(self.dnd_file),)),
                                     (mod, "PINNING_PLIST_PATHS", (str(self.pins),))):
             p = patch.object(target, name, value)
             p.start()
@@ -559,6 +611,74 @@ class ActionProbes(unittest.TestCase):
         canon = clusters.get("+15550100001", "+15550100001")
         self.assertIn(canon, muted)
         self.assertNotIn("+15550100002", muted)
+
+
+    DISTANT_FUTURE = 64092211200.0   # what Hide Alerts wrote on a macOS 27.0.1 Mac
+
+    def macos27_list(self, entries):
+        """The DND list the way macOS 27 keeps it (`defaults export`, 2026-10-28)."""
+        return {"CKDNDListKey": entries, "CKDNDMigrationKey": 2, "CatalystDNDMigrationVersion": 2}
+
+    def test_a_macos_27_mute_is_in_the_dnd_list_not_chat_properties(self):
+        """#132: Hide Alerts on 27 left ignoreAlertsFlag absent and added the handle here."""
+        mod = read.imsg_module()
+        self.set_props(1, year_one_props({"wasDetectedAsSMSSpam": True}))
+        self.dnd = mod.dnd_ids(self.macos27_list({"pat@example.com": self.DISTANT_FUTURE}))
+        self.assertIs(read.chat_muted("+15550100001"), True)      # the merged DM's other handle
+        self.assertIs(read.chat_muted("+15550100002"), False)
+        self.dnd = mod.dnd_ids(self.macos27_list({}))             # Show Alerts removed it
+        self.assertIs(read.chat_muted("+15550100001"), False)
+
+    def test_an_unreadable_dnd_list_is_unknown_unless_the_flag_says_muted(self):
+        self.dnd = None
+        self.assertIsNone(read.chat_muted("+15550100001"))
+        self.set_props(2, plistlib.dumps({"ignoreAlertsFlag": True}, fmt=plistlib.FMT_BINARY))
+        self.assertIs(read.chat_muted("+15550100001"), True)
+
+    def test_dnd_ids_reads_expiries(self):
+        mod = read.imsg_module()
+        now = datetime.datetime.now(datetime.timezone.utc)
+        self.assertEqual(mod.dnd_ids(self.macos27_list({
+            "+15550100001": self.DISTANT_FUTURE,
+            "+15550100002": (now - datetime.timedelta(hours=1)).timestamp() - mod.APPLE_EPOCH,
+            "pat@example.com": now.replace(tzinfo=None) + datetime.timedelta(hours=1),
+        })), {"+15550100001", "pat@example.com"})
+        self.assertEqual(mod.dnd_ids({}), set())                   # a domain never written
+        for bad in ([], {"CKDNDListKey": []}, {"CKDNDListKey": {"+15550100001": "forever"}},
+                    {"CKDNDListKey": {"+15550100001": True}}):
+            with self.subTest(bad=bad):
+                self.assertIsNone(mod.dnd_ids(bad))
+
+    def test_the_verifier_asks_cfprefsd_not_the_lagging_file(self):
+        mod = read.imsg_module()
+        xml = plistlib.dumps(self.macos27_list({"+15550100001": self.DISTANT_FUTURE}))
+        empty = plistlib.dumps({})
+        cases = ((CompletedProcess([], 0, xml, b""), {"+15550100001"}),
+                 (CompletedProcess([], 0, empty, b""), set()),
+                 (CompletedProcess([], 1, b"", b"boom"), None),
+                 (CompletedProcess([], 0, b"not a plist", b""), None))
+        for result, want in cases:
+            with self.subTest(want=want), patch.object(read.subprocess, "run", return_value=result) as run:
+                self.assertEqual(DND_LIST_NOW(mod), want)
+                self.assertEqual(run.call_args.args[0][:3], ["defaults", "export", "com.apple.MobileSMS.CKDNDList"])
+
+    def test_the_chat_list_reads_the_dnd_list_file(self):
+        mod = read.imsg_module()
+        con = read.open_db()
+        try:
+            clusters = mod._group_cluster_map(con)
+            self.assertEqual(mod.muted_conversations(con, clusters), set())   # no file: nobody
+            with open(self.dnd_file, "wb") as fh:
+                plistlib.dump(self.macos27_list({"pat@example.com": self.DISTANT_FUTURE}), fh,
+                              fmt=plistlib.FMT_BINARY)
+            muted = mod.muted_conversations(con, clusters)
+            self.assertIn(clusters.get("+15550100001", "+15550100001"), muted)
+            self.assertNotIn("+15550100002", muted)
+            self.dnd_file.write_bytes(b"not a plist")                         # flags still count
+            self.set_props(3, plistlib.dumps({"ignoreAlertsFlag": True}))
+            self.assertEqual(mod.muted_conversations(con, clusters), {"+15550100002"})
+        finally:
+            con.close()
 
 
 class PlistDateTolerance(unittest.TestCase):
