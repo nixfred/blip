@@ -25,11 +25,52 @@ reconstructed on Sunday from memory.
 
 ---
 
-## 2026-W44 (Mon 26 Oct to Sun 1 Nov): OPEN, post due Sun 1 Nov
+## 2026-W45 (Mon 2 Nov to Sun 8 Nov): OPEN, post due Sun 8 Nov (this one also covers W44)
 
 ### What people said this week (quote with attribution in the post)
 
-- Nothing new yet. A reply from @coltonfitzgerald on #146 is awaited (X handle asked, 28 Oct).
+- Nothing new from outside since Ian's two notes on #132 on 28 Oct (quoted under W44). Comment sweep
+  of issues and PRs done Wed 4 Nov.
+
+### Tue 3 Nov: #149 merged
+
+- **#149 Hide Alerts works on macOS 27.** Ian Swope (https://x.com/ianfs). On 27 Messages writes nothing to
+  chat.properties when you mute; it keeps the mute in `com.apple.MobileSMS.CKDNDList` (handle to expiry,
+  distantFuture for "until I turn it back on"). Blip read only the old flag, so every 27 mute looked
+  unmuted and a Hide Alerts that had worked was reported as "clicked but the conversation is not muted",
+  which is how Fred's own 28 Oct round trip on 27.2 read. Fix: `imsg chats` reads the DND list as well as the
+  flag, `imsg-read` verifies through `defaults export` because the plist file trails the change by a few
+  seconds, and 27's single Hide Alerts item is treated as a toggle that is clicked only after the state has
+  been read. The story is Ian's end to end: he reported #132 after testing #122 on 27.0.1, found the mute's
+  real home with an Accessibility round trip on his own mini, and wrote and live-tested the fix. His PR:
+  10 new tests, each part of the fix undone in turn makes at least one fail, and a four-step live table
+  (mute, mute again, unmute, unmute again, all exit 0, front app unchanged). Checked by Larry after the
+  merge: 790 bun tests and the bridge suites pass, and the gateway Mac's imsg, imsg-read and read_state.py
+  are byte-identical to main. NOT checked: a Hide Alerts click on Fred's own 27.2 gateway since #149 (the
+  only live round trip there was before the fix). Groups stay DM-only. Pin on 27 is still open on #132: Ian
+  found each sidebar row carries custom actions (`Pin <name>`, Mark as Unread, Hide Alerts, Delete...)
+  readable with Messages in the background; the list is lazy, so only rows in view carry them, and he found no
+  Unpin action. Asked him on #132 whether he wants to take Pin as a PR.
+
+### Wed 4 Nov: late thanks and triage
+
+- Late thank-you comments posted on five PRs that merged on 6 and 10 Sep without a visible comment from
+  Fred: Fileri on #68 (14 PRs: #37 #38 #41 #42 #46 #56 #57 #58 #63 #64 #65 #66 #67 #68), jondkinney on #61 (8 PRs:
+  #50 #51 #52 #53 #55 #59 #60 #61), jefehoser on #48 (#40 #48), zachwilke on #43, joshuaswarren on #49.
+  One comment per person, each listing what their PRs did, so nobody got 14 notifications.
+- Still waiting on people: #129 (mikev1963, four questions asked 8 Oct, no reply). Parked on purpose: #125,
+  #112, #78.
+
+## 2026-W44 (Mon 26 Oct to Sun 1 Nov): ROLLED INTO W45, no separate post
+
+### What people said this week (quote with attribution in the post)
+
+- **Ian Swope (https://x.com/ianfs) on #132, Wed 28 Oct.** On why he digs into this: "I want you to know
+  how much I actually use what you've built: Blip is open on my desk every single day, it's how I do iMessage
+  now, and BurnBar sits in my bar right next to it, also literally daily." And, after a live round trip on his
+  macOS 27.0.1 mini, the finding that became #149: "Hide Alerts does work on macOS 27; the mute just isn't
+  stored in chat.db anymore."
+- A reply from @coltonfitzgerald on #146 is awaited (X handle asked, 28 Oct).
 
 ### Wed 28 Oct: #132 half fixed (issue stays open)
 

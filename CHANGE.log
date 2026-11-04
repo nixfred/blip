@@ -51,6 +51,14 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-11-03  #149 Hide Alerts works on macOS 27 (the Hide Alerts half of #132): Messages on 27 keeps a mute in
+                 com.apple.MobileSMS.CKDNDList, not in chat.properties, so `imsg chats` now reads that list, `imsg-read`
+                 verifies against it through `defaults export` (cfprefsd), and --unmute falls back to 27's single Hide Alerts
+                 toggle after reading the state first (already in place is success, unknown clicks nothing). Pin on 27 is
+                 still open on #132. Ian Swope, github.com/ianswope, X https://x.com/ianfs: found where 27 stores the mute
+                 with an Accessibility round trip on his macOS 27.0.1 mini (28 Oct), then wrote and live-tested the fix.
+                 Merged by Fred 3 Nov. Checked by Larry 4 Nov after the merge: 790 bun tests and the bridge suites pass,
+                 and the gateway Mac's imsg, imsg-read and read_state.py are byte-identical to main.
 2026-10-28  #132 (half fixed, issue stays open) Hide Alerts is readable again on chats macOS 27 stamps with a year-1 date: out-of-range
                  dates in a chat.properties binary plist are clamped in place before plistlib reads it, so alerts_flag() no
                  longer answers "unknown" (164 of 3,309 chat rows on a real macOS 27.2 gateway before, 0 after, muted count

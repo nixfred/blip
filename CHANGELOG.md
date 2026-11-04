@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Hide Alerts works on macOS 27 (#132).** Messages on 27 no longer records a mute in
+- **Hide Alerts works on macOS 27 (#132, #149, thanks @ianswope).** Messages on 27 no longer records a mute in
   `chat.properties`: it keeps it in `com.apple.MobileSMS.CKDNDList` (`CKDNDListKey`, handle → expiry,
   `distantFuture` for "until I turn it back on"). Blip read only the old flag, so a 27 mute was
   invisible to the chat list, and a Hide Alerts that had worked was reported as "clicked but the

@@ -21,7 +21,8 @@ no pomp, no em dashes. Plain text below the marker; X renders no markdown.
 | 5 | DRAFT 2026-10-28 (was due Sun 11 Oct) | 2026-W40 + W41 | Mon 28 Sep to Sun 11 Oct: 19 PRs from 8 people, plus 1 cherry-picked (tapbacks, warm channel, durable read sync, macOS 27), incl. the "What people said" quotes |
 | 6 | DRAFT 2026-10-28 (was due Sun 18 Oct) | 2026-W42 | Mon 12 Oct to Sun 18 Oct: #140 ssh agent fix (John Zetterman), #141 and #142 (ours) |
 | 7 | DRAFT 2026-10-28 (was due Sun 25 Oct) | 2026-W43 | Mon 19 Oct to Sun 25 Oct: #145, #147, #143, #148, and #146 (merged 28 Oct), incl. quotes |
-| W44 | OPEN, post due Sun 1 Nov | 2026-W44 | notes in WEEKLY-NOTES.md |
+| W44 | ROLLED INTO W45 (Larry, 2026-11-04): nothing outside merged after Post 7's PRs, only the #132 half fix | 2026-W44 | notes in WEEKLY-NOTES.md |
+| W45 | OPEN, post due Sun 8 Nov (covers W44 + W45) | 2026-W45 | #149 Hide Alerts on macOS 27 (Ian Swope) and the #132 story from his report to the fix; notes in WEEKLY-NOTES.md |
 
 ---
 

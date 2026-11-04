@@ -13,7 +13,7 @@ tags are at the bottom.
 
 | Person | GitHub | X | PRs | How verified |
 |---|---|---|---|---|
-| Ian Swope | ianswope | https://x.com/ianfs | 14 | GitHub profile + social accounts; replies to @NixFred about Omarchy. NOT @IanSwope |
+| Ian Swope | ianswope | https://x.com/ianfs | 22 | GitHub profile + social accounts; replies to @NixFred about Omarchy. NOT @IanSwope |
 | Jon Kinney | jondkinney | https://x.com/jondkinney | 12 | GitHub profile |
 | Danny Cecil | jefehoser | https://x.com/jefehoser | 8 | same login on X, posts Omarchy; confirmed by Fred 2026-09-16 |
 | Adam Gamble | adamgamble | https://x.com/adamgamble | 5 | GitHub profile |
