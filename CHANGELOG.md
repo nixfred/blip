@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Pin and Unpin work on macOS 27 (#132).** Messages on 27 dropped Pin and Unpin from the Conversation
+  menu, so `imsg-read --pin`/`--unpin` found nothing to click. The sidebar still offers both, as
+  Accessibility custom actions on the selected conversation: a row carries `Pin <short name>`, a pinned
+  tile carries a bare `Unpin`, and both work with Messages in the background. After the menu, `imsg-read`
+  now falls back to those actions. It asks only the sidebar list's own entries, and only the one Messages
+  reports as selected, because a message bubble also offers a bare `Pin` (which pins the message). It
+  goes through the Accessibility API from JXA rather than System Events: walking the same tree
+  through System Events took 3 to 27 s, this takes about 0.4 s. The pin list trailed the action by 4.4 to 5.5 s, so a pin waits up
+  to 15 s for it. Verified on a macOS 27.0.1 gateway: six pin/unpin round trips all verified, then the
+  shipped script pinned and unpinned with exit 0, front app unchanged, pins left as they were.
+  Deploy `bridge/mac/imsg-read` to the Mac (re-run `blip-setup` or `install.sh`).
+
 - **Hide Alerts works on macOS 27 (#132, #149, thanks @ianswope).** Messages on 27 no longer records a mute in
   `chat.properties`: it keeps it in `com.apple.MobileSMS.CKDNDList` (`CKDNDListKey`, handle → expiry,
   `distantFuture` for "until I turn it back on"). Blip read only the old flag, so a 27 mute was
