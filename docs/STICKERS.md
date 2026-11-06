@@ -105,6 +105,17 @@ an image send; it does not place a native sticker on a selected message.
 An Accessibility route through Messages' sticker picker needs separately
 verified target and sticker identities before it can safely be offered.
 
+A separate synthetic feasibility probe found a possible standalone route:
+public ImageIO encoded a transparent HEIC with `tiff:DocumentName` and
+`dc:description`; AppKit accepted it as `NSAdaptiveImageGlyph`, and its
+identifier survived an attributed-string RTFD roundtrip. Plain PNG and
+untagged HEIC were not accepted. Apple's
+[Genmoji API overview](https://developer.apple.com/videos/play/wwdc2024/10220/)
+documents rich-text and pasteboard support, but the probe did not access the
+clipboard, open Messages, or send. A native Messages receipt and exact target
+handling remain unverified, so no native sticker-send control is shipped.
+Bubble placement is a further capability beyond standalone glyph transport.
+
 Media uses the existing private attachment cache (directory `0700`, files
 `0600`, 500 MB LRU). Automatic transfers retain the five-MB output ceiling;
 the absolute source/transport ceiling remains 100 MB. Conversion inputs are
