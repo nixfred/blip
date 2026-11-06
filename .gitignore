@@ -2,3 +2,6 @@ node_modules/
 *.log
 __pycache__/
 !CHANGE.log
+
+# Local development scratch and private test-session artifacts.
+/work/
