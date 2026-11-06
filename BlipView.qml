@@ -513,6 +513,12 @@ FocusScope {
   function isGroupId(c) { c = String(c || ""); return c !== "" && !/^\+?[0-9]{3,15}$/.test(c) && c.indexOf("@") < 0 }
   readonly property bool activeIsGroup: inThread && isGroupId(active.chat)
 
+  SharedCity {
+    id: sharedCity
+    chat: root.inThread ? String(root.active.chat) : ""
+    active: root.surfaceOpen && root.inThread && !root.activeIsGroup
+  }
+
   /**
    * DMs send --to the chat id (a phone/email). Groups send --chat-id with the
    * full AppleScript GUID ("any;+;<id>") that `imsg groups` supplies; a group
@@ -3238,7 +3244,7 @@ FocusScope {
             meta: root.inThread
               ? (root.activeIsGroup
                   ? (root.isSendable(root.active) ? "group" : "group · read-only (id unknown)")
-                  : String(root.active.handle))
+                  : (sharedCity.city || String(root.active.handle)))
               : ""
             detail: root.inThread && root.loading ? "loading…" : ""
             foreground: root.foreground

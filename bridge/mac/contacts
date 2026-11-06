@@ -15,6 +15,9 @@ Subcommands:
                                 candidate lookup, a store fingerprint, a bulk
                                 handle audit, and opening one matching card
                                 in Contacts.app
+  shared-city, bounded JSON {handle} on stdin; fresh coarse Find My city only.
+                                Optional, requires existing Accessibility access
+                                and Find My's People tab. No message reads.
   dump [--json], full dump of every contact
   sources, list configured Contacts sources
 
@@ -707,6 +710,24 @@ def cmd_resolve(args):
             raise SystemExit(1)
 
 
+def cmd_shared_city(args):
+    # Loaded only for this explicitly requested feature: ordinary Contacts
+    # lookups neither load AX frameworks nor launch Find My.
+    try:
+        from findmy_city import shared_city
+        raw = sys.stdin.buffer.read(1025)
+        if len(raw) > 1024:
+            raise ValueError("invalid request")
+        request = json.loads(raw.decode("utf-8"))
+        if not isinstance(request, dict) or set(request) != {"handle"}:
+            raise ValueError("invalid request")
+        emit_resolve(shared_city(request["handle"], sys.modules[__name__], enabled=True), 1024)
+    except Exception:
+        # Paths, Contacts names and AX strings must never escape an error.
+        emit_resolve({"ok": False, "error": "Shared city unavailable"}, 1024)
+        raise SystemExit(1)
+
+
 def fetch_contacts(con: sqlite3.Connection) -> list[dict]:
     """Pull all contacts from one source DB, with phones + emails aggregated."""
     rows = con.execute(
@@ -926,6 +947,7 @@ def main() -> None:
     s = sub.add_parser("find");    s.add_argument("query"); s.add_argument("n", nargs="?", type=int, default=20); s.set_defaults(func=cmd_find)
     s = sub.add_parser("lookup");  s.add_argument("handle"); s.set_defaults(func=cmd_lookup)
     s = sub.add_parser("resolve");  s.set_defaults(func=cmd_resolve)
+    s = sub.add_parser("shared-city"); s.set_defaults(func=cmd_shared_city)
     s = sub.add_parser("dump");    s.set_defaults(func=cmd_dump)
     s = sub.add_parser("sources"); s.set_defaults(func=cmd_sources)
 
