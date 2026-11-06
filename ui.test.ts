@@ -523,7 +523,7 @@ describe("QML safety invariants", () => {
     expect(panel).toContain('root.enqueueFetch(att, "audio-play", false)');
     expect(panel).toContain("root.audioPlaying = !root.audioPlaying");
     expect(panel).toContain("String(root.active.chat) === root.pendingAudioChat");
-    expect(panel).toContain("root.settleAudioFetch(id, d.ok === true)");
+    expect(panel).toContain("root.settleAudioFetch(id, d.ok === true, d.error)");
     expect(panel).toContain("resetToken: root.audioResetToken");
     expect(panel).toContain("metadata.playable === true");
     expect(panel).toContain("focusedAudio !== null || actionFocused");

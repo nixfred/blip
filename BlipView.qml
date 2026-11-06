@@ -1164,7 +1164,7 @@ FocusScope {
     // An in-flight auto-fetch also satisfies this captured play intent.
     root.enqueueFetch(att, "audio-play", false)
   }
-  function settleAudioFetch(id, ok) {
+  function settleAudioFetch(id, ok, error) {
     if (root.pendingAudioId !== id) return
     var belongsHere = root.surfaceOpen && root.inThread
       && String(root.active.chat) === root.pendingAudioChat
@@ -1176,6 +1176,10 @@ FocusScope {
         root.playingAudio = id
         root.audioPlaying = true
       } else root.note = "Audio preview unavailable — right-click to save the file"
+    } else if (!ok && belongsHere) {
+      // Play can attach to an automatic fetch whose action remains empty.
+      // Its captured intent still deserves the failure reason before clearing.
+      root.note = "fetch failed — " + String(error || "could not load audio message").replace(/^error:\s*/, "")
     }
   }
   function failAudio(id) {
@@ -2121,7 +2125,7 @@ FocusScope {
               root.note = "saved, not opened (" + (root.fetchJobMime || "unknown type") + "): " + String(d.path || "")
             }
           }
-          root.settleAudioFetch(id, d.ok === true)
+          root.settleAudioFetch(id, d.ok === true, d.error)
           if (root.fetchJobSticker && root.fetchJobAction === "open" && !root.attFiles[id]) {
             var previewAtt = { id: id, name: root.fetchJobName, mime: root.fetchJobMime, sticker: {} }
             Qt.callLater(function() { root.enqueueFetch(previewAtt, "preview", true) })

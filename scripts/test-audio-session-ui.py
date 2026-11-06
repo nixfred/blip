@@ -35,13 +35,15 @@ Item {
   property string pendingAudioId: ""
   property string pendingAudioChat: ""
   property string note: ""
+  property string fetchingId: ""
+  property string fetchJobAction: ""
   property var requests: []
-  function enqueueFetch(att, action, auto) { requests = requests.concat([{id:att.id,action:action,auto:auto}]) }
+  function enqueueFetch(att, action, auto) { if (fetchingId === att.id) return; requests = requests.concat([{id:att.id,action:action,auto:auto}]) }
   @FUNCTIONS@
   TestCase {
     name: "AudioSession"
     function init() {
-      root.stopAudio(); root.requests = []; root.attFiles = ({}); root.attMetrics = ({});
+      root.stopAudio(); root.requests = []; root.note = ""; root.fetchingId = ""; root.fetchJobAction = ""; root.attFiles = ({}); root.attMetrics = ({});
       root.surfaceOpen = true; root.inThread = true; root.active = ({chat:"synthetic-a"});
     }
     function complete(id, ok) {
@@ -77,6 +79,15 @@ Item {
     function test_failure_settles_intent_and_retry_fetches_again() {
       root.toggleAudio({id:"a"}); complete("a",false); verify(!root.audioPlaying); compare(root.pendingAudioId,"");
       root.toggleAudio({id:"a"}); compare(root.requests.length,2);
+    }
+    function test_play_during_auto_fetch_reports_its_failure_reason() {
+      root.fetchingId="a"; root.fetchJobAction="";
+      root.toggleAudio({id:"a"}); compare(root.requests.length,0); compare(root.pendingAudioId,"a");
+      root.settleAudioFetch("a",false,"error: attachment exceeds transfer limit");
+      compare(root.note,"fetch failed — attachment exceeds transfer limit"); compare(root.pendingAudioId,""); verify(!root.audioPlaying);
+      // A conversation switch cancels the captured request and its error UI.
+      root.note=""; root.toggleAudio({id:"a"}); root.active=({chat:"synthetic-b"});
+      root.settleAudioFetch("a",false,"old error"); compare(root.note,"");
     }
     function test_decoder_failure_clears_source_and_allows_same_url_retry() {
       root.toggleAudio({id:"a"}); complete("a",true); root.failAudio("a");
