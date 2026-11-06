@@ -8,6 +8,10 @@ Favorites use equal-width tiles and short personal names; matching first names
 include a surname initial. Group names and the full conversation header stay
 intact.
 
+**New Message** sits at the upper-left of the conversation pane, just across
+the sidebar divider. In the compact popout it remains at the top-right of the
+conversation list. The `n` shortcut remains available.
+
 Click **+** beside the composer to select up to ten local files. They remain
 queued attachments until you send. Click the **smiley** for searchable emoji;
 choosing one inserts it at the draft's cursor or replaces selected text, without sending. The blue arrow

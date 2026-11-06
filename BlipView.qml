@@ -84,7 +84,7 @@ FocusScope {
   /** An editor owns the keyboard — the host's key catcher must stand down. */
   readonly property bool editorActive:
     messageMenu.visible || emojiPopup.visible || contactMenu.visible || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused || focusedAudio !== null || actionFocused
-  readonly property bool actionFocused: markAllBtn.activeFocus || newMessageButton.activeFocus || appWindowButton.activeFocus
+  readonly property bool actionFocused: newMessageButton.activeFocus || compactNewMessageButton.activeFocus || appWindowButton.activeFocus
     || backButton.activeFocus || conversationActions.activeFocus || attachmentButton.activeFocus || emojiButton.activeFocus || sendButton.activeFocus
   property var focusedAudio: null
   readonly property alias composeEditor: composeField
@@ -2589,21 +2589,11 @@ FocusScope {
           Layout.preferredHeight: Style.space(32)
           spacing: Style.space(8)
           Item { Layout.fillWidth: true }
+          // A single-pane popout keeps its compose action beside Open App.
+          // The app's compose action lives across the divider in its header.
           ComposerButton {
-            id: markAllBtn
-            visible: root.canMarkAllRead
-            iconName: "check"
-            tooltipText: "Mark all conversations read"
-            Accessible.name: "Mark all conversations read"
-            foreground: root.foreground
-            accent: root.accent
-            motionDuration: Style.duration(120)
-            font.family: root.fontFamily
-            onClicked: root.markAllRead()
-          }
-          ComposerButton {
-            id: newMessageButton
-            visible: root.online && !root.newMode
+            id: compactNewMessageButton
+            visible: !root.splitView && root.online && !root.newMode
             iconName: "compose"
             tooltipText: "New message (n)"
             Accessible.name: "New message"
@@ -3344,6 +3334,21 @@ FocusScope {
         Item {
           Layout.fillWidth: true
           Layout.preferredHeight: root.inThread ? Style.space(82) : Style.space(50)
+          ComposerButton {
+            id: newMessageButton
+            visible: root.splitView && root.online && !root.newMode
+            anchors.left: parent.left
+            anchors.top: parent.top
+            iconName: "compose"
+            fill: root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.76) : Qt.alpha(root.foreground, 0.10)
+            tooltipText: "New message (n)"
+            Accessible.name: "New message"
+            foreground: root.foreground
+            accent: root.accent
+            motionDuration: Style.duration(120)
+            font.family: root.fontFamily
+            onClicked: root.startNew()
+          }
           ComposerButton {
             id: backButton
             visible: root.inThread && !root.splitView
@@ -4284,7 +4289,7 @@ FocusScope {
           ComposerButton {
             id: attachmentButton
             Layout.alignment: Qt.AlignBottom
-            Layout.bottomMargin: Style.space(3)
+            Layout.bottomMargin: Style.space(1)
             implicitWidth: Style.space(34)
             iconName: "plus"
             motionDuration: Style.duration(120)
@@ -4472,7 +4477,7 @@ FocusScope {
           ComposerButton {
             id: emojiButton
             Layout.alignment: Qt.AlignBottom
-            Layout.bottomMargin: Style.space(3)
+            Layout.bottomMargin: Style.space(1)
             implicitWidth: Style.space(34)
             iconName: "emoji"
             motionDuration: Style.duration(120)
@@ -4489,12 +4494,13 @@ FocusScope {
 
           ComposerButton {
             id: sendButton
-            Layout.alignment: Qt.AlignVCenter
+            Layout.alignment: Qt.AlignBottom
+            Layout.bottomMargin: Style.space(1)
             readonly property bool armed: composeField.text.trim() !== "" || root.attachCount > 0
-            implicitWidth: Style.space(32)
+            implicitWidth: Style.space(34)
             iconName: "send"
             tooltipText: "Send message"
-            foreground: armed ? "#ffffff" : root.canvasDim
+            foreground: armed ? "#ffffff" : root.foreground
             fill: armed ? root.mineFill : root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.76) : Qt.alpha(root.foreground, 0.10)
             accent: root.accent
             motionDuration: Style.duration(120)

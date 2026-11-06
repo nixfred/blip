@@ -29,7 +29,7 @@ AbstractButton {
   contentItem: Item {
     LineIcon {
       anchors.centerIn: parent
-      width: Math.min(22, root.width * 0.60); height: width
+      width: Math.round(Math.min(22, root.width * 0.60)); height: width
       visible: root.iconName !== ""
       name: root.iconName
       color: root.foreground

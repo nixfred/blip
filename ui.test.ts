@@ -1230,17 +1230,38 @@ test("a toast click strips the + and falls back to open()", () => {
 describe("mark all read is not gated on Blip's own unread count", () => {
   const view = readFileSync(new URL("./BlipView.qml", import.meta.url), "utf8");
 
-  test("the function and toolbar button share one gate that only push_read=off closes", () => {
+  test("the retained keyboard action respects the push-read gate without a toolbar button", () => {
     expect(view).toMatch(/readonly property bool canMarkAllRead: root\.online && \(root\.unread > 0 \|\| !hostWidget \|\| hostWidget\.readPush !== "off"\)/);
     expect(view).toMatch(/function markAllRead\(\) \{\s*if \(!root\.hostWidget \|\| !root\.canMarkAllRead\) return/);
-    expect(view).toMatch(/id: markAllBtn\s*visible: root\.canMarkAllRead/);
-    const button = view.slice(view.indexOf("id: markAllBtn"), view.indexOf("id: markAllBtn") + 450);
-    expect(button).toContain("onClicked: root.markAllRead()");
-    expect(button).toContain('Accessible.name: "Mark all conversations read"');
+    expect(view).toContain('if (text === "a" || text === "A") { markAllRead(); return true }');
+    expect(view).not.toContain("id: markAllBtn");
   });
 
   test("nothing in the view still short-circuits mark-all on a zero count", () => {
     expect(view).not.toMatch(/markAllRead\(\) \{[^}]*root\.unread === 0/);
     expect(view).not.toMatch(/id: markAllBtn\s*visible: root\.unread > 0/);
   });
+});
+
+test("New Message sits across the sidebar divider with a compact popout fallback", () => {
+  const action = panel.indexOf("id: newMessageButton");
+  expect(action).toBeGreaterThan(panel.indexOf("id: conversationPane"));
+  const headerAction = panel.slice(action, panel.indexOf("onClicked: root.startNew()", action));
+  expect(headerAction).toContain("visible: root.splitView && root.online && !root.newMode");
+  expect(headerAction).toContain("anchors.left: parent.left");
+  expect(headerAction).toContain("anchors.top: parent.top");
+  const compact = panel.indexOf("id: compactNewMessageButton");
+  expect(compact).toBeLessThan(panel.indexOf("id: conversationPane"));
+  expect(panel.slice(compact, compact + 200)).toContain("visible: !root.splitView && root.online && !root.newMode");
+  expect(panel).toContain("newMessageButton.activeFocus || compactNewMessageButton.activeFocus");
+});
+
+test("composer emoji and send controls share size and bottom alignment", () => {
+  for (const id of ["attachmentButton", "emojiButton", "sendButton"]) {
+    const start = panel.indexOf("id: " + id);
+    const button = panel.slice(start, panel.indexOf("onClicked:", start));
+    expect(button).toContain("Layout.alignment: Qt.AlignBottom");
+    expect(button).toContain("Layout.bottomMargin: Style.space(1)");
+    expect(button).toContain("implicitWidth: Style.space(34)");
+  }
 });
