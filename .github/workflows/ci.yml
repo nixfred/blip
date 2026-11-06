@@ -22,6 +22,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -q qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript qml6-module-qtquick-controls qml6-module-qtquick-templates qml6-module-qtquick-layouts
           python3 scripts/test-read-ui.py
+          python3 scripts/test-reaction-ui.py
+          python3 scripts/test-background-ui.py
+          python3 scripts/test-sticker-ui.py
       - name: OTP desktop adapter (no desktop needed)
         run: |
           python3 -m py_compile otp-desktop.py
@@ -42,6 +45,8 @@ jobs:
         run: python3 bridge/mac/test_unsent.py
       - name: a voice message gets its MIME from the UTI (no macOS needed)
         run: python3 bridge/mac/test_attachment_mime.py
+      - name: sticker metadata and association folding (synthetic SQLite)
+        run: python3 bridge/mac/test_stickers.py
       - name: a waiting Send Later is flagged, never "sent" (no macOS needed)
         run: python3 bridge/mac/test_scheduled.py
       - name: conversation cluster pins (no macOS needed)

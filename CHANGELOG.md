@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.7.0-private.1 — Messages-style continuation
+
+This private build retains the recovered upstream history and MIT credits.
+It is not an official upstream release; see [provenance](docs/CONTINUATION.md).
+
+- Remove the app's redundant status/version banner and outer padding. Add a
+  centered circular contact photo/name, rounded composer controls, clearer sans
+  typography, and a more compact conversation layout.
+- Choose a local PNG/JPEG background for a conversation or as a default. Imports
+  are private, metadata-stripped copies; settings stay in `bridge.conf` and are
+  local to this client, not synchronized to other participants.
+- Render attributed stickers without photo framing, fold attached stickers onto
+  their target, preserve transparent media, and decode supported animated sticker
+  containers. Unknown placement remains a separate sticker rather than hiding it.
+  See [sticker formats and limits](docs/STICKERS.md).
+- Add a searchable emoji picker for the composer and right-click Tapbacks.
+  Native custom reactions require exact accessible Mac controls and a matching
+  database receipt. Existing target restrictions apply; unsupported native paths
+  report failure. See [reaction evidence and limits](docs/reactions.md).
+- Add synthetic bridge, media-conversion, keyboard, and background-race checks.
+  Real native behavior is reported separately from synthetic validation.
+
 ## Unreleased
 
 - **Hide Alerts works on macOS 27 (#132, #149, thanks @ianswope).** Messages on 27 no longer records a mute in
