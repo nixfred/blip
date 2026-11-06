@@ -54,8 +54,12 @@ Item {
     asynchronous: true
     autoTransform: true
     fillMode: Image.PreserveAspectFit
-    sourceSize.width: 640
-    sourceSize.height: 640
+    // AnimatedImage.sourceSize was read-only in Qt 6.4. A static assignment
+    // prevents the whole component from loading there. Newer Qt can bound
+    // decoder output; older Qt still receives validated <=2048px rasters.
+    Component.onCompleted: {
+      try { motion.sourceSize = Qt.size(640, 640) } catch (error) { }
+    }
     cache: false
     smooth: true
   }
