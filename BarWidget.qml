@@ -1230,7 +1230,7 @@ BarWidget {
     enabled: root.leader
     function status(): string {
       var w = windowLoader.item
-      return "online=" + root.online + " unread=" + root.unread + " leader=" + root.leader
+      return "version=" + root.version + " online=" + root.online + " unread=" + root.unread + " leader=" + root.leader
         + " window=" + (w && w.visible ? (w.focused ? "focused" : "unfocused") : "hidden")
         + " threads=" + root.threads.length + " healthy=" + root.healthy
         + " watch=" + root.watchAlive
