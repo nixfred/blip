@@ -3,9 +3,13 @@ on:
   pull_request:
   push:
     branches: [main]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -13,19 +17,24 @@ jobs:
           bun-version: latest
       - name: local background raster conversion
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -q imagemagick ffmpeg
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -q imagemagick ffmpeg
       - name: unit tests (collector, thread, tier2, ui invariants)
         run: bun test
       - name: QML badge regression (synthetic data, no desktop needed)
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -q qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript qml6-module-qtquick-controls qml6-module-qtquick-templates qml6-module-qtquick-layouts qt6-image-formats-plugins qml6-module-qtmultimedia
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -q qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript qml6-module-qtquick-controls qml6-module-qtquick-templates qml6-module-qtquick-layouts qt6-image-formats-plugins qml6-module-qtmultimedia pulseaudio pulseaudio-utils
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=blip_test >/dev/null
+          pactl set-default-sink blip_test
           python3 scripts/test-read-ui.py
           python3 scripts/test-reaction-ui.py
           python3 scripts/test-background-ui.py
           python3 scripts/test-composer-emoji-ui.py
           python3 scripts/test-sticker-ui.py
+          python3 scripts/test-audio-ui.py
+          python3 scripts/test-audio-session-ui.py
       - name: OTP desktop adapter (no desktop needed)
         run: |
           python3 -m py_compile otp-desktop.py
@@ -79,5 +88,5 @@ jobs:
       - name: shell scripts (bash -n + shellcheck)
         run: |
           bash -n bridge/linux/blip-shim scripts/blip-setup scripts/sync-bridge.sh scripts/demo/blip-shots bridge/mac/install.sh
-          sudo apt-get install -y -q shellcheck >/dev/null
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -q shellcheck >/dev/null
           shellcheck -S warning bridge/linux/blip-shim scripts/blip-setup scripts/sync-bridge.sh bridge/mac/install.sh

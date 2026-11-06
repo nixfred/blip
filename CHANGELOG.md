@@ -7,7 +7,8 @@ It is not an official upstream release; see [provenance](docs/CONTINUATION.md).
 
 - Remove the app's redundant status/version banner and outer padding. Add a
   centered circular contact photo/name, rounded composer controls, clearer sans
-  typography, and a more compact conversation layout.
+  typography, and a more compact conversation layout. Polish favorites spacing,
+  avatar sizes, and glass-style buttons with consistent line icons.
 - Choose a local PNG/JPEG background for a conversation or as a default. Imports
   are private, metadata-stripped copies; settings stay in `bridge.conf` and are
   local to this client, not synchronized to other participants.
@@ -21,6 +22,9 @@ It is not an official upstream release; see [provenance](docs/CONTINUATION.md).
   report failure. See [reaction evidence and limits](docs/reactions.md).
 - Add synthetic bridge, media-conversion, keyboard, and background-race checks.
   Real native behavior is reported separately from synthetic validation.
+- Show audio messages inline with measured waveforms, playback progress,
+  play/pause, duration, and seeking. Switching conversations stops playback;
+  starting a second message pauses the first. See [audio formats](docs/AUDIO.md).
 
 ## Unreleased
 

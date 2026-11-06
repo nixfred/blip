@@ -1,4 +1,4 @@
-> **Private continuation:** This repository preserves the recovered Blip 2.6.2 history and develops a Messages-style interface. It is not an official upstream release. See [provenance and development notes](docs/CONTINUATION.md). See [appearance and backgrounds](docs/APPEARANCE.md), [stickers](docs/STICKERS.md), and [reactions](docs/reactions.md) for the new features and their limits. The remaining upstream documentation is retained.
+> **Private continuation:** This repository preserves the recovered Blip 2.6.2 history and develops a Messages-style interface. It is not an official upstream release. See [provenance and development notes](docs/CONTINUATION.md). See [appearance and backgrounds](docs/APPEARANCE.md), [stickers](docs/STICKERS.md), [audio messages](docs/AUDIO.md), and [reactions](docs/reactions.md) for the new features and their limits. The remaining upstream documentation is retained.
 
 <p align="center">
   <img src="docs/blip-hero@2x.png" alt="Blip: iMessage. On Linux. For real." width="920">
@@ -17,7 +17,7 @@
   <img alt="Omarchy" src="https://img.shields.io/badge/Omarchy-plugin-5fd7ff?style=flat-square">
   <img alt="QuickShell" src="https://img.shields.io/badge/QuickShell-QML-0a84ff?style=flat-square">
   <img alt="bun" src="https://img.shields.io/badge/bun-TypeScript-f9f1e1?style=flat-square">
-  <img alt="tests" src="https://img.shields.io/badge/tests-840%20passing-2ea043?style=flat-square">
+  <img alt="tests" src="https://img.shields.io/badge/tests-847%20passing-2ea043?style=flat-square">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
@@ -30,7 +30,7 @@
 > thin client. **No Mac, no Blip.** When the Mac sleeps, Blip dims and waits.
 
 <p align="center">
-  <img src="docs/img/app.png" alt="The Blip app window: conversation list on the left, thread with a link card, reply, attachment and read receipt on the right" width="920">
+  <img src="docs/img/app.png" alt="Blip with glass controls, a contact grid, a custom background, transparent stickers, and audio waveforms" width="920">
 </p>
 
 <p align="center">
