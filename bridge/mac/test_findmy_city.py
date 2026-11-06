@@ -410,13 +410,48 @@ console.log('PASS');
     def test_no_private_error_or_identity_fields_cross_boundary(self):
         output = city.shared_city(HANDLE, None, enabled=True, row_reader=lambda **kw: [row()],
                                   card_loader=lambda module: [card()], now=NOW)
-        self.assertEqual(set(output), {"ok", "handle", "city", "observedAt", "expiresAt"})
+        self.assertEqual(set(output), {"ok", "handle", "city", "observedAt", "expiresAt", "reason"})
+        self.assertEqual(output["reason"], "available")
         self.assertNotIn("Rivera", json.dumps(output))
         for kwargs in ({"row_reader": mock.Mock(side_effect=RuntimeError("private AX text"))},
                        {"row_reader": lambda **kw: [row()],
                         "card_loader": mock.Mock(side_effect=RuntimeError("private path"))}):
             self.assertEqual(city.shared_city(HANDLE, None, enabled=True, **kwargs),
-                             {"ok": True, "handle": HANDLE, "city": None})
+                             {"ok": True, "handle": HANDLE, "city": None,
+                              "reason": "source-unavailable"})
+
+    def test_diagnostic_reasons_are_bounded_and_revalidate_after_refresh(self):
+        cases = [
+            ([], "source-unavailable"),
+            (None, "source-unavailable"),
+            ([row("Other Person")], "no-match"),
+            (["Alex Rivera · No location found"], "location-unavailable"),
+            (["Alex Rivera · 1 mi · No location found"], "location-unavailable"),
+            ([row(place="Address unavailable")], "unsupported-location"),
+            ([row(place="Home")], "unsupported-location"),
+            ([row(age="Unknown")], "unsupported-location"),
+            ([row(age="24 hr. ago")], "observation-too-old"),
+            ([row()], "available"),
+        ]
+        for rows, reason in cases:
+            with self.subTest(reason=reason, rows=rows):
+                result = city.shared_city(HANDLE, None, enabled=True,
+                    row_reader=lambda **kwargs: rows, card_loader=lambda module: [card()],
+                    refresher=lambda **kwargs: rows, now=NOW)
+                self.assertEqual(result["reason"], reason)
+                self.assertEqual(result["city"] is not None, reason == "available")
+                self.assertNotIn("Rivera", json.dumps(result))
+        reader = mock.Mock()
+        result = city.shared_city(HANDLE, None, enabled=False, row_reader=reader)
+        self.assertEqual(result, {"ok": True, "handle": HANDLE, "city": None, "reason": "disabled"})
+        reader.assert_not_called()
+        for rows, reason in (([], "source-unavailable"), ([row("Other Person")], "no-match"),
+                             (["Alex Rivera · No location found"], "location-unavailable")):
+            result = city.shared_city(HANDLE, None, enabled=True,
+                row_reader=lambda **kwargs: [row(age="Paused")], card_loader=lambda module: [card()],
+                refresher=lambda **kwargs: rows, now=NOW)
+            self.assertEqual(result["reason"], reason)
+            self.assertIsNone(result["city"])
 
     def test_direct_handle_does_not_read_contacts_and_disabled_reads_nothing(self):
         loader = mock.Mock()
@@ -457,7 +492,7 @@ console.log('PASS');
                         contacts.cmd_shared_city(None)
                 self.assertEqual(json.loads(output.getvalue()), {"ok": False, "error": "Shared city unavailable"})
             output = io.StringIO()
-            response = {"ok": True, "handle": HANDLE, "city": None}
+            response = {"ok": True, "handle": HANDLE, "city": None, "reason": "location-unavailable"}
             with mock.patch.object(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(json.dumps({"handle": HANDLE}).encode()))), \
                     mock.patch.object(city, "shared_city", return_value=response) as shared, redirect_stdout(output):
                 contacts.cmd_shared_city(None)

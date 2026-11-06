@@ -14,7 +14,16 @@ Item {
   property int epoch: 0
   property bool pending: false
   property bool ready: false
+  property int lastExitCode: -1
   readonly property string city: active ? City.citySubtitle(record, chat, clock) : ""
+  readonly property string stateLabel: active ? City.cityStateLabel(record, chat, clock) : ""
+
+  function diagnostic() {
+    return { version: 3, active: active, ready: ready, hasChat: chat !== "",
+      running: lookup.running, pending: pending, received: lookup.received,
+      currentRequest: epoch === lookup.requestEpoch, lastExitCode: lastExitCode,
+      policy: City.cityDiagnostics(record, chat, Date.now()) }
+  }
 
   Component.onCompleted: { root.ready = true; Qt.callLater(root.invalidate) }
 
@@ -35,6 +44,7 @@ Item {
     lookup.requestChat = chat
     lookup.requestEpoch = epoch
     lookup.received = false
+    lastExitCode = -1
     lookup.command = ["bun", script]
     lookup.stdinEnabled = true
     lookup.running = true
@@ -74,6 +84,7 @@ Item {
     // Never forward bridge stderr to the shell journal.
     stderr: StdioCollector {}
     onExited: function(exitCode, exitStatus) {
+      root.lastExitCode = exitCode
       if (lookup.belongsHere() && (!received || exitCode !== 0)) root.record = null
       if (root.pending) Qt.callLater(root.reload)
     }

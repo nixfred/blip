@@ -2,6 +2,21 @@
 var CITY_TTL_MS = 5 * 60 * 1000;
 var CITY_MAX_LOCATION_AGE_MS = 24 * 60 * 60 * 1000;
 var CITY_CLOCK_SKEW_MS = 5000;
+var CITY_REASONS = [
+  "available",
+  "disabled",
+  "not-direct",
+  "no-match",
+  "location-unavailable",
+  "source-unavailable",
+  "unsupported-location",
+  "observation-too-old",
+  "bridge-failed",
+  "invalid-response"
+];
+function cityReason(value) {
+  return typeof value === "string" && CITY_REASONS.indexOf(value) >= 0 ? value : "";
+}
 function cityIdentity(value) {
   if (typeof value !== "string" || value.length > 254 || value !== value.trim())
     return "";
@@ -56,11 +71,46 @@ function citySubtitle(record, chat, now = Date.now()) {
   const age = minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} hr ago`;
   return `${city} · ${age}`;
 }
+function cityDiagnostics(record, chat, now = Date.now()) {
+  const data = record && typeof record === "object" && !Array.isArray(record) ? record : null;
+  const eligible = !!cityIdentity(chat);
+  const visible = !!visibleCity(data, chat, now);
+  let reason = eligible ? "waiting" : "not-direct";
+  if (data) {
+    if (!eligible || cityIdentity(data.chat) !== cityIdentity(chat))
+      reason = "invalid-response";
+    else if (visible)
+      reason = "available";
+    else if (!data.ok)
+      reason = cityReason(data.reason) || "bridge-failed";
+    else if (!data.city)
+      reason = cityReason(data.reason) || "location-unavailable";
+    else if (utcMillis(data.expiresAt) <= now)
+      reason = "expired";
+    else
+      reason = "invalid-response";
+  }
+  return {
+    eligible,
+    hasRecord: !!data,
+    responseOk: data?.ok === true,
+    hasCity: typeof data?.city === "string" && data.city.length > 0,
+    visible,
+    reason
+  };
+}
+function cityStateLabel(record, chat, now = Date.now()) {
+  const status = cityDiagnostics(record, chat, now);
+  return status.eligible && status.responseOk && !status.hasCity && status.reason === "location-unavailable" ? "Location unavailable" : "";
+}
 export {
   CITY_CLOCK_SKEW_MS,
   CITY_MAX_LOCATION_AGE_MS,
   CITY_TTL_MS,
+  cityDiagnostics,
   cityIdentity,
+  cityReason,
+  cityStateLabel,
   citySubtitle,
   parseSharedCity,
   visibleCity

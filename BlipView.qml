@@ -519,6 +519,14 @@ FocusScope {
     active: root.surfaceOpen && root.inThread && !root.activeIsGroup
   }
 
+  function cityStatus() {
+    return { surfaceOpen: surfaceOpen, inThread: inThread, group: activeIsGroup,
+      headerVisible: conversationHero.visible,
+      headerUsesCity: sharedCity.city !== "" && conversationHero.meta === sharedCity.city,
+      headerShowsLocationState: sharedCity.stateLabel !== "" && conversationHero.meta === sharedCity.stateLabel,
+      lookup: sharedCity.diagnostic() }
+  }
+
   /**
    * DMs send --to the chat id (a phone/email). Groups send --chat-id with the
    * full AppleScript GUID ("any;+;<id>") that `imsg groups` supplies; a group
@@ -3239,12 +3247,13 @@ FocusScope {
             onClicked: root.back()
           }
           PanelHero {
+            id: conversationHero
             Layout.fillWidth: true
             title: root.inThread ? String(root.active.name || root.active.chat) : "Select a conversation"
             meta: root.inThread
               ? (root.activeIsGroup
                   ? (root.isSendable(root.active) ? "group" : "group · read-only (id unknown)")
-                  : (sharedCity.city || String(root.active.handle)))
+                  : (sharedCity.city || sharedCity.stateLabel || String(root.active.handle)))
               : ""
             detail: root.inThread && root.loading ? "loading…" : ""
             foreground: root.foreground

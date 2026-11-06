@@ -11,6 +11,14 @@ export interface CityRecord {
   city: string | null;
   observedAt?: string;
   expiresAt?: string;
+  reason?: string;
+}
+
+const CITY_REASONS = ["available", "disabled", "not-direct", "no-match", "location-unavailable",
+  "source-unavailable", "unsupported-location", "observation-too-old", "bridge-failed", "invalid-response"];
+
+export function cityReason(value: unknown): string {
+  return typeof value === "string" && CITY_REASONS.indexOf(value) >= 0 ? value : "";
 }
 
 /** Exact identity only: a shared national-number suffix is not identity. */
@@ -76,4 +84,29 @@ export function citySubtitle(record: unknown, chat: unknown, now = Date.now()): 
   if (minutes < 5) return city;
   const age = minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} hr ago`;
   return `${city} · ${age}`;
+}
+
+/** Safe for status IPC: no handles, names, city text, or message metadata. */
+export function cityDiagnostics(record: unknown, chat: unknown, now = Date.now()) {
+  const data = record && typeof record === "object" && !Array.isArray(record) ? record as CityRecord : null;
+  const eligible = !!cityIdentity(chat);
+  const visible = !!visibleCity(data, chat, now);
+  let reason = eligible ? "waiting" : "not-direct";
+  if (data) {
+    if (!eligible || cityIdentity(data.chat) !== cityIdentity(chat)) reason = "invalid-response";
+    else if (visible) reason = "available";
+    else if (!data.ok) reason = cityReason(data.reason) || "bridge-failed";
+    else if (!data.city) reason = cityReason(data.reason) || "location-unavailable";
+    else if (utcMillis(data.expiresAt) <= now) reason = "expired";
+    else reason = "invalid-response";
+  }
+  return { eligible, hasRecord: !!data, responseOk: data?.ok === true,
+    hasCity: typeof data?.city === "string" && data.city.length > 0, visible, reason };
+}
+
+/** A matched Find My person without a location is different from no match. */
+export function cityStateLabel(record: unknown, chat: unknown, now = Date.now()): string {
+  const status = cityDiagnostics(record, chat, now);
+  return status.eligible && status.responseOk && !status.hasCity
+    && status.reason === "location-unavailable" ? "Location unavailable" : "";
 }

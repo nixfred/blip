@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { shimPath } from "./shim-path";
-import { cityIdentity, parseSharedCity, visibleCity, type CityRecord } from "./city-policy";
+import { cityIdentity, cityReason, parseSharedCity, visibleCity, type CityRecord } from "./city-policy";
 
 export const MAX_CITY_BYTES = 16 * 1024;
 export const MAX_CITY_REQUEST_BYTES = 2048;
@@ -24,15 +24,15 @@ export function loadCity(request: unknown, runner = spawnSync, options: CityOpti
   const chat = request && typeof request === "object" && !Array.isArray(request)
     && typeof (request as any).chat === "string" && (request as any).chat.length <= 254
     ? (request as any).chat as string : "";
-  const empty: CityRecord = { ok: true, chat, city: null };
-  if (!cityIdentity(chat)) return empty;
+  const empty: CityRecord = { ok: true, chat, city: null, reason: "disabled" };
+  if (!cityIdentity(chat)) return { ...empty, reason: "not-direct" };
   const home = options.home ?? process.env.HOME ?? homedir();
   let conf = options.conf ?? "";
   if (options.conf === undefined) {
     try { conf = readFileSync(`${home}/.config/blip/bridge.conf`, "utf8"); } catch { /* disabled */ }
   }
   if (!parseSharedCity(conf)) return empty;
-  const failed: CityRecord = { ok: false, chat, city: null };
+  const failed: CityRecord = { ok: false, chat, city: null, reason: "bridge-failed" };
   try {
     const response = runner(shimPath("contacts", home), ["--json", "shared-city"], {
       encoding: "utf8", input: JSON.stringify({ handle: chat }), timeout: 25000, maxBuffer: MAX_CITY_BYTES,
@@ -43,7 +43,7 @@ export function loadCity(request: unknown, runner = spawnSync, options: CityOpti
     const body = JSON.parse(output);
     if (!body || typeof body !== "object" || Array.isArray(body) || body.ok !== true
       || cityIdentity(body.handle) !== cityIdentity(chat)) return failed;
-    if (body.city === null) return empty;
+    if (body.city === null) return { ...empty, reason: cityReason(body.reason) || "location-unavailable" };
     if (!validCity(body.city)) return failed;
     const record: CityRecord = { ok: true, chat, city: body.city, observedAt: body.observedAt, expiresAt: body.expiresAt };
     return visibleCity(record, chat, options.now ?? Date.now()) ? record : failed;

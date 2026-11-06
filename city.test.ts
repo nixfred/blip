@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cityIdentity, parseSharedCity, visibleCity, citySubtitle, CITY_TTL_MS } from "./city-policy";
+import { cityIdentity, parseSharedCity, visibleCity, citySubtitle, cityDiagnostics, cityStateLabel, CITY_TTL_MS } from "./city-policy";
 import { loadCity, readCityRequest, validCity, MAX_CITY_BYTES, MAX_CITY_REQUEST_BYTES } from "./city";
 
 const chat = "+15551234567", now = Date.parse("2026-11-06T12:00:00Z");
@@ -74,13 +74,39 @@ describe("shared city policy", () => {
 });
 
 describe("shared city loader", () => {
+  test("runtime diagnostics explain empty cities without exposing identity or content", () => {
+    expect(cityDiagnostics(record, chat, now)).toEqual({ eligible: true, hasRecord: true,
+      responseOk: true, hasCity: true, visible: true, reason: "available" });
+    expect(cityDiagnostics(null, chat, now).reason).toBe("waiting");
+    expect(cityDiagnostics(null, "chat12345678", now).reason).toBe("not-direct");
+    for (const reason of ["no-match", "disabled", "location-unavailable", "source-unavailable", "unsupported-location", "observation-too-old"]) {
+      const empty = loadCity({ chat }, runner({ ...body, city: null, reason }), enabled);
+      const status = cityDiagnostics(empty, chat, now);
+      expect(status.reason).toBe(reason);
+      expect(JSON.stringify(status)).not.toContain(chat);
+      expect(JSON.stringify(status)).not.toContain(body.city);
+    }
+    const untrusted = loadCity({ chat }, runner({ ...body, city: null, reason: "private details" }), enabled);
+    expect(cityDiagnostics(untrusted, chat, now).reason).toBe("location-unavailable");
+    expect(cityDiagnostics(record, chat, Date.parse(body.expiresAt)).reason).toBe("expired");
+  });
+  test("only a matched unavailable location has a visible state label", () => {
+    const unavailable = { ok: true, chat, city: null, reason: "location-unavailable" };
+    expect(cityStateLabel(unavailable, chat, now)).toBe("Location unavailable");
+    expect(cityStateLabel(unavailable, "+15551234568", now)).toBe("");
+    expect(cityStateLabel(unavailable, "chat12345678", now)).toBe("");
+    expect(cityStateLabel({ ...unavailable, ok: false }, chat, now)).toBe("");
+    expect(cityStateLabel(record, chat, now)).toBe("");
+    for (const reason of ["disabled", "no-match", "source-unavailable", "unsupported-location", "bridge-failed"])
+      expect(cityStateLabel({ ...unavailable, reason }, chat, now)).toBe("");
+  });
   test("returns only a bounded, validated city over stdin", () => {
     expect(loadCity({ chat }, runner(), enabled)).toEqual({ ok: true, chat, city: body.city, observedAt: body.observedAt, expiresAt: body.expiresAt });
-    expect(loadCity({ chat }, runner({ ...body, city: null }), enabled)).toEqual({ ok: true, chat, city: null });
+    expect(loadCity({ chat }, runner({ ...body, city: null }), enabled)).toEqual({ ok: true, chat, city: null, reason: "location-unavailable" });
   });
   test("does not spawn for disabled settings, groups or malformed requests", () => {
     const never = (() => { throw new Error("must not spawn"); }) as any;
-    expect(loadCity({ chat }, never, { conf: "shared_city=off" })).toEqual({ ok: true, chat, city: null });
+    expect(loadCity({ chat }, never, { conf: "shared_city=off" })).toEqual({ ok: true, chat, city: null, reason: "disabled" });
     for (const request of [null, [], {}, { chat: "chat12345678" }, { chat: "a".repeat(32) }, { chat: "12345" }])
       expect(loadCity(request, never, enabled).ok).toBe(true);
   });
@@ -102,11 +128,11 @@ describe("shared city loader", () => {
     for (const value of [null, [], {}, { ...body, ok: false }, { ...body, handle: "+445551234567" },
       { ...body, handle: "+15551234568" }, { ...body, expiresAt: "2026-11-06T11:59:59Z" },
       { ...body, city: "12 Example Road" }, { ...body, city: "x".repeat(121) }])
-      expect(loadCity({ chat }, runner(value), enabled)).toEqual({ ok: false, chat, city: null });
+      expect(loadCity({ chat }, runner(value), enabled)).toEqual({ ok: false, chat, city: null, reason: "bridge-failed" });
     for (const response of [{ status: 1 }, { error: new Error("private transport details") },
       { stdout: "not JSON" }, { stdout: "x".repeat(MAX_CITY_BYTES + 1) }])
-      expect(loadCity({ chat }, runner(body, response), enabled)).toEqual({ ok: false, chat, city: null });
-    expect(loadCity({ chat }, (() => { throw new Error("private transport details"); }) as any, enabled)).toEqual({ ok: false, chat, city: null });
+      expect(loadCity({ chat }, runner(body, response), enabled)).toEqual({ ok: false, chat, city: null, reason: "bridge-failed" });
+    expect(loadCity({ chat }, (() => { throw new Error("private transport details"); }) as any, enabled)).toEqual({ ok: false, chat, city: null, reason: "bridge-failed" });
   });
   test("reads bounded JSON stdin and rejects oversized streams", async () => {
     async function* chunks(text: string) { yield Buffer.from(text.slice(0, 3)); yield Buffer.from(text.slice(3)); }

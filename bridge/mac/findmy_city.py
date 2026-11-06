@@ -466,15 +466,33 @@ def load_cards(contacts) -> list[dict]:
     return cards
 
 
+def unavailable_reason(target: object, now: datetime) -> str:
+    """A bounded diagnostic enum, never a contact or accessibility string."""
+    if target is None:
+        return "no-match"
+    if not isinstance(target, str):
+        return "unsupported-location"
+    parts = target.split("·")
+    if len(parts) in (2, 3):
+        return "location-unavailable"
+    if len(parts) != 4 or parse_row("·".join(parts[:-1]) + "·Now", now) is None:
+        return "unsupported-location"
+    seconds = age_seconds(parts[-1].strip())
+    if seconds is not None and seconds >= MAX_LOCATION_AGE_SECONDS:
+        return "observation-too-old"
+    return "unsupported-location"
+
+
 def shared_city(handle: object, contacts, *, enabled: bool, row_reader=read_rows,
                 card_loader=load_cards, refresher=foreground_rows, now=None) -> dict:
     canonical = normalize_handle(handle)
-    result = {"ok": True, "handle": canonical, "city": None}
+    result = {"ok": True, "handle": canonical, "city": None,
+              "reason": "source-unavailable" if enabled else "disabled"}
     if not enabled:
         return result
     try:
         rows = row_reader(enabled=True)
-        if not isinstance(rows, list) or len(rows) > MAX_ROWS:
+        if not isinstance(rows, list) or not rows or len(rows) > MAX_ROWS:
             return result
         # A handle shown directly by Find My needs no address-book lookup.
         direct = any(_same_handle(row_identity(row), canonical) for row in rows)
@@ -482,7 +500,7 @@ def shared_city(handle: object, contacts, *, enabled: bool, row_reader=read_rows
         target = matching_row(canonical, rows, cards)
         if needs_refresh(target, now or datetime.now(timezone.utc)):
             rows = refresher(enabled=True)
-            if not isinstance(rows, list) or len(rows) > MAX_ROWS:
+            if not isinstance(rows, list) or not rows or len(rows) > MAX_ROWS:
                 return result
             direct = any(_same_handle(row_identity(row), canonical) for row in rows)
             # Sharing, names, and the address book can change during refresh.
@@ -490,6 +508,10 @@ def shared_city(handle: object, contacts, *, enabled: bool, row_reader=read_rows
         city = select_city(canonical, rows, cards, now or datetime.now(timezone.utc))
         if city:
             result.update(city)
+            result["reason"] = "available"
+        else:
+            result["reason"] = unavailable_reason(matching_row(canonical, rows, cards),
+                                                  now or datetime.now(timezone.utc))
     except Exception:
         # Never return an exception containing a path, contact or AX payload.
         pass

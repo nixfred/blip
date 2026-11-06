@@ -3,7 +3,9 @@
 With `shared_city=on` in `$HOME/.config/blip/bridge.conf`, an open direct
 conversation shows the friend's shared city beneath their name. Observations
 older than five minutes include their age, such as `City, ST · 1 hr ago`. The
-phone or email returns when no city is available. Both the panel and app use
+phone or email returns when no city can be matched. When Find My matches the
+person but reports no location, the subtitle says **Location unavailable**.
+Both the panel and app use
 the same component. The setting defaults to off.
 
 The city comes from ongoing Find My sharing, not a saved Contacts address.
@@ -70,3 +72,13 @@ the Mac parser and accessibility adapter using synthetic fixtures.
 fake helper with Quickshell, checking conversation changes and stale replies.
 `scripts/demo/blip-shots` renders the shipping conversation UI with invented
 contacts, including a shared city. No real conversation is used.
+
+`python3 scripts/test-city-view.py` exercises the full shipping conversation
+header offscreen with synthetic panel, app, and unavailable-location cases.
+
+For a running instance, `qs -p /usr/share/omarchy/shell ipc call nixfred.blip citystatus`
+returns safe per-surface flags and a bounded lookup reason. It includes no chat
+identifier, name, city, or message text. `location-unavailable` means a person
+was matched in Find My but the Mac returned no location; `no-match` means no
+unambiguous sharing identity; `source-unavailable` means Find My could not be
+read. This command is read-only and does not open or mark a conversation read.
