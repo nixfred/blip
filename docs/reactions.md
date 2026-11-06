@@ -31,14 +31,31 @@ For a custom reaction, the bridge first looks for an exact emoji action on
 the matched bubble, or an enabled picker control whose AXIdentifier/AXValue
 is the requested Unicode sequence. A catalogue search can narrow results,
 but a name or grid position never authorizes the final press. There must be
-exactly one enabled matching button/cell. The original Tapback Picker's
-message label and Messages foreground state are checked again before a
-picker press. The custom catalogue is searched only inside a unique
-Messages-owned Accessibility popover while that original message label
-remains visible. A detached/inaccessible picker, ambiguous result, changed
-target, or unavailable exact emoji fails visibly. There is no guessed
-coordinate, numbered-grid navigation, Return-key fallback, or image-sticker
-substitution.
+exactly one enabled matching control. On macOS 27, a bounded stdlib ctypes
+helper uses the public Accessibility and CoreGraphics APIs. It finds the
+picker directly under its iOSContentGroup presentation, without traversing
+conversation text. Every selected-message label copy must match the target;
+macOS 27.2 exposes two copies in some states. The main window, title,
+presentation parent, foreground state and exact glyph are checked again
+before an action. An existing picker is reused rather than toggled closed.
+
+The custom catalogue can be detached from Messages' regular Accessibility
+tree. Only visible Messages-owned windows in the known picker size range
+are considered. An AX hit-test must resolve to a search field inside an
+AXPopover. This point is for discovery, not a click. The unique popover's
+search field receives the search name; a name never authorizes selection.
+
+CharacterPalette 27.2 exposes a result as an AXUnknown wrapper with an exact
+emoji description, one enabled static-text child carrying that same complete
+sequence, and AXPress. Its AXPress acknowledges without selecting the glyph.
+The bridge therefore uses one click at that verified glyph's current frame
+center. A global AX hit-test must resolve to the same wrapper or exact child;
+the target, identity, unchanged bounds and hit-test are rechecked immediately
+before the down/up gesture. A held modifier or mouse drag prevents it. The
+pointer returns to its original position only if the user has not moved it.
+No second gesture follows a missing receipt. An ambiguous result, changed
+target or unavailable exact emoji fails visibly. There is no guessed grid
+position, arrow-count/Return fallback, or image-sticker substitution.
 
 Success requires a new chat.db receipt on the intended GUID with type 2006
 (add) or 3006 (remove) **and the same emoji sequence**. The type alone cannot
@@ -66,12 +83,21 @@ focusing search, exact custom selection, grid navigation, composer mode,
 and expanded popup placement near the bottom of the window. Add
 `--screenshot PATH` for visual QA. All fixture message content is invented.
 
-The development Mac was inspected only for OS/tool versions, permission
-state, and Accessibility metadata. On macOS 27.2 it lacked the SSH client's
-Accessibility grant, so live custom-picker/send behavior has **not** been
-verified there. No real conversation was read and no live reaction was
-sent. Arbitrary emoji can be browsed and requested; availability of a safe
-native selection is established at runtime, not promised for every Mac.
+After the user granted Accessibility, live tests on macOS 27.2 used only
+fresh labeled messages to the user's explicitly authorized self-conversation.
+Verified receipts: classic Heart; a nonrecent 🪿 custom reaction (2006);
+replacement with nonrecent 🦦 (2006 with a different exact emoji); and removal
+of 🦦 (3006 with that exact emoji). A subsequent 🏳️‍🌈 addition verified the full
+variation-selector/ZWJ sequence with the final window/presentation guards.
+The custom additions took about six seconds.
+The existing composer draft was checked intact; clipboard contents were never
+changed. Test message content stayed in memory and Messages, never a Linux
+file or process argument. No unrelated conversation was used for those sends.
+
+Availability of a safe native selection remains a runtime check. Emoji that
+the Mac cannot expose exactly, including unsupported catalogue versions or
+variant controls, fail without substitution. Skin-tone variant selection and
+native sticker sending have not been verified by these tests.
 
 ## Implementation references
 

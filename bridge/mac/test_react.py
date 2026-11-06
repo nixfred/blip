@@ -788,5 +788,247 @@ class CustomEmojiTests(unittest.TestCase):
                 self.assertTrue(react.valid_emoji(emoji))
 
 
+class NativeEmojiPickerTests(unittest.TestCase):
+    def scene(self, emoji="🪿", recent=False):
+        def node(role, ident=None, description=None, children=None, **attrs):
+            return dict(AXRole=role, AXIdentifier=ident, AXDescription=description,
+                        AXChildren=children or [], AXEnabled=True, **attrs)
+        cell = node("AXButton", emoji)
+        picker = node("AXGroup", "TapbackPickerCollectionView", children=[cell] if recent else [])
+        # macOS 27.2 exposes two copies of the selected message in this
+        # presentation container. Both must agree; duplicates are not a race.
+        labels = [node("AXGroup", "Sticker", "Message, invented test") for _ in range(2)]
+        more = node("AXButton", description="Add custom emoji reaction")
+        container = node("AXGroup", children=[picker, *labels, more])
+        search = node("AXTextField", AXSubrole="AXSearchField")
+        popover = node("AXPopover", children=[search])
+
+        class FakeAX:
+            app = node("AXApplication", children=[container])
+            front = True
+            pressed = []
+            searched = []
+            popover_list = [popover]
+            after_search = None
+            fail_press = False
+            origin_matches = True
+            def attr(self, el, name):
+                return el.get(name)
+            def children(self, el):
+                return el["AXChildren"]
+            def walk(self, el, parent=None):
+                yield el, parent
+                for child in self.children(el):
+                    yield from self.walk(child, el)
+            def foreground(self):
+                return self.front
+            def origin(self, picker, container):
+                return "synthetic main window, title and presentation"
+            def same_origin(self, origin, picker, container):
+                return self.origin_matches
+            def pickers(self):
+                return [(el, parent) for el, parent in self.walk(self.app)
+                        if el.get("AXIdentifier") == "TapbackPickerCollectionView"]
+            def actions(self, el):
+                return ["AXPress"]
+            def press(self, el):
+                self.pressed.append(el)
+                return not self.fail_press
+            def click_glyph(self, el, validate):
+                if not validate():
+                    return {"ok": False, "error": "moved"}
+                self.pressed.append(el)
+                return {"ok": True}
+            def popovers(self):
+                return self.popover_list
+            def search(self, el, text):
+                self.searched.append(text)
+                popover["AXChildren"].append(cell)
+                if self.after_search:
+                    self.after_search()
+                return True
+        ax = FakeAX()
+        q = dict(emoji=emoji, name="goose", text="invented test", remove=False)
+        return ax, q, cell, picker, labels, more, popover
+
+    def run_picker(self, ax, q):
+        return react.native_emoji_picker(q, ax=ax, pause=lambda _: None)
+
+    def test_recent_identity_with_matching_duplicate_target_labels(self):
+        ax, q, cell, *_ = self.scene(recent=True)
+        self.assertEqual(self.run_picker(ax, q), {"ok": True})
+        self.assertEqual(ax.pressed, [cell])
+
+
+    def test_existing_picker_is_not_toggled_closed(self):
+        ax, q, cell, *_ = self.scene(recent=True)
+        def must_not_open():
+            raise AssertionError("menu would toggle the existing picker")
+        self.assertEqual(react.native_emoji_picker(q, ax=ax, pause=lambda _: None,
+                                                   open_picker=must_not_open), {"ok": True})
+        self.assertEqual(ax.pressed, [cell])
+
+    def test_absent_picker_is_opened_once_then_validated(self):
+        ax, q, cell, picker, *_ = self.scene(recent=True)
+        container = ax.app["AXChildren"][0]
+        container["AXChildren"].remove(picker)
+        opens = []
+        def open_picker():
+            opens.append(True)
+            container["AXChildren"].insert(0, picker)
+            return ""
+        self.assertEqual(react.native_emoji_picker(q, ax=ax, pause=lambda _: None,
+                                                   open_picker=open_picker), {"ok": True})
+        self.assertEqual(opens, [True])
+        self.assertEqual(ax.pressed, [cell])
+
+    def test_search_native_popover_then_press_exact_result(self):
+        ax, q, cell, picker, labels, more, popover = self.scene()
+        self.assertEqual(self.run_picker(ax, q), {"ok": True})
+        self.assertEqual(ax.pressed, [more, cell])
+        self.assertEqual(ax.searched, ["goose"])
+
+    def test_character_palette_glyph_requires_two_exact_sequence_fields(self):
+        ax, q, cell, picker, labels, more, _ = self.scene()
+        cell.update(AXRole="AXUnknown", AXIdentifier=None, AXDescription=q["emoji"], AXEnabled=None,
+                    AXChildren=[dict(AXRole="AXStaticText", AXValue=q["emoji"], AXEnabled=True, AXChildren=[])])
+        self.assertEqual(self.run_picker(ax, q), {"ok": True})
+        self.assertEqual(ax.pressed, [more, cell])
+        for change in ("child", "image", "label", "disabled", "child-disabled"):
+            ax, q, cell, picker, labels, more, _ = self.scene()
+            child = dict(AXRole="AXStaticText", AXValue=q["emoji"], AXEnabled=True, AXChildren=[])
+            cell.update(AXRole="AXUnknown", AXIdentifier=None, AXDescription=q["emoji"], AXEnabled=None, AXChildren=[child])
+            if change == "child":
+                child["AXValue"] = "🦆"
+            elif change == "image":
+                child["AXRole"] = "AXImage"
+            elif change == "label":
+                cell["AXDescription"] = "goose"
+            elif change == "disabled":
+                cell["AXEnabled"] = False
+            else:
+                child["AXEnabled"] = False
+            self.assertEqual(self.run_picker(ax, q)["error"], "emoji-not-offered")
+            self.assertEqual(ax.pressed, [more])
+
+    def test_conflicting_target_copy_refuses_before_any_press(self):
+        ax, q, cell, picker, labels, *_ = self.scene(recent=True)
+        labels[1]["AXDescription"] = "Message, different test"
+        self.assertEqual(self.run_picker(ax, q)["error"], "picker-elsewhere")
+        self.assertFalse(ax.pressed)
+
+    def test_target_or_foreground_change_during_search_refuses(self):
+        for change in ("target", "focus", "same-text-other-window"):
+            ax, q, cell, picker, labels, more, _ = self.scene()
+            def moved():
+                if change == "focus":
+                    ax.front = False
+                elif change == "same-text-other-window":
+                    ax.origin_matches = False
+                else:
+                    labels[0]["AXDescription"] = "Message, changed test"
+            ax.after_search = moved
+            self.assertEqual(self.run_picker(ax, q)["error"], "moved")
+            self.assertEqual(ax.pressed, [more])
+
+    def test_remove_never_opens_more(self):
+        ax, q, *_ = self.scene()
+        q["remove"] = True
+        self.assertEqual(self.run_picker(ax, q)["error"], "emoji-not-offered")
+        self.assertFalse(ax.pressed)
+
+    def test_disabled_duplicate_or_wrong_sequence_never_pressed(self):
+        for case in ("disabled", "duplicate", "skin", "zwj"):
+            ax, q, cell, picker, *_ = self.scene(recent=True)
+            q["remove"] = True
+            if case == "disabled":
+                cell["AXEnabled"] = False
+            elif case == "duplicate":
+                picker["AXChildren"].append(dict(cell))
+            elif case == "skin":
+                q["emoji"], cell["AXIdentifier"] = "👍🏽", "👍"
+            else:
+                q["emoji"], cell["AXIdentifier"] = "👩🏽‍💻", "👩‍💻"
+            self.assertFalse(self.run_picker(ax, q)["ok"])
+            self.assertFalse(ax.pressed)
+
+    def test_multiple_popovers_are_never_searched(self):
+        ax, q, cell, picker, labels, more, popover = self.scene()
+        ax.popover_list = [popover, dict(popover)]
+        self.assertEqual(self.run_picker(ax, q)["error"], "ambiguous-emoji")
+        self.assertFalse(ax.searched)
+        self.assertEqual(ax.pressed, [more])
+
+    def test_failed_final_press_is_uncertain_and_never_retried(self):
+        ax, q, cell, *_ = self.scene(recent=True)
+        ax.fail_press = True
+        self.assertEqual(self.run_picker(ax, q)["error"], "perform-failed")
+        self.assertEqual(ax.pressed, [cell])
+
+
+class NativeGlyphClickTests(unittest.TestCase):
+    def fake(self):
+        import ctypes as C
+        class Point(C.Structure):
+            _fields_ = [("x", C.c_double), ("y", C.c_double)]
+        ax = react.NativeAX.__new__(react.NativeAX)
+        ax.C, ax.Point, ax.app, ax.system = C, Point, 1, 2
+        ax.check = lambda: None
+        ax.own = lambda value: value
+        ax.frame = lambda _: (10, 20, 40, 40)
+        ax.children = lambda _: [99]
+        ax.equal = lambda a, b: a == b
+        def hit(app, x, y, out):
+            out._obj.value = 99
+            return 0
+        ax.hit = hit
+        ax.button_state = lambda *_: False
+        ax.flags_state = lambda *_: 0
+        ax.event = lambda _: 42
+        locations = iter([Point(1, 2), Point(30, 40)])
+        ax.location = lambda _: next(locations)
+        ax.mouse_event = lambda source, kind, point, button: kind
+        posted = []
+        ax.post_event = lambda where, event: posted.append(event)
+        return ax, posted
+
+    def test_one_verified_down_up_and_pointer_restore(self):
+        ax, posted = self.fake()
+        self.assertEqual(ax.click_glyph(98, lambda: True), {"ok": True})
+        self.assertEqual(posted, [1, 2, 5])
+
+    def test_no_click_when_target_bounds_hit_or_user_input_changes(self):
+        for case in ("context", "bounds", "hit", "drag", "modifier"):
+            ax, posted = self.fake()
+            if case == "bounds":
+                frames = iter([(10, 20, 40, 40), (11, 20, 40, 40)])
+                ax.frame = lambda _: next(frames)
+            elif case == "hit":
+                ax.equal = lambda *_: False
+            elif case == "drag":
+                ax.button_state = lambda *_: True
+            elif case == "modifier":
+                ax.flags_state = lambda *_: 1 << 20
+            self.assertEqual(ax.click_glyph(98, lambda: case != "context")["error"], "moved")
+            self.assertEqual(posted, [])
+
+    def test_user_pointer_movement_after_click_is_not_overwritten(self):
+        ax, posted = self.fake()
+        locations = iter([ax.Point(1, 2), ax.Point(200, 300)])
+        ax.location = lambda _: next(locations)
+        self.assertTrue(ax.click_glyph(98, lambda: True)["ok"])
+        self.assertEqual(posted, [1, 2])
+
+    def test_dispatch_error_is_uncertain_not_an_automatic_retry(self):
+        ax, posted = self.fake()
+        def post(where, event):
+            posted.append(event)
+            raise RuntimeError("synthetic dispatch error")
+        ax.post_event = post
+        self.assertEqual(ax.click_glyph(98, lambda: True)["error"], "perform-failed")
+        self.assertEqual(posted, [1, 2])  # always release; never a second down
+
+
+
 if __name__ == "__main__":
     unittest.main()
