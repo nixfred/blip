@@ -9,6 +9,7 @@ Item {
   property bool loading: false
   property bool failed: false
   property bool animated: false
+  property bool animationUnavailable: false
   property bool playing: true
   property bool compact: false
   property color textColor: "#8e8e93"
@@ -27,7 +28,8 @@ Item {
   activeFocusOnTab: true
   Accessible.role: Accessible.Button
   Accessible.name: String(attachment.sticker && attachment.sticker.label || "Sticker")
-  Accessible.description: failed || decodeFailed ? "Unavailable. Activate to retry." : "Open sticker"
+  Accessible.description: failed || decodeFailed ? "Unavailable. Activate to retry."
+    : animationUnavailable ? "Static preview; animation unavailable. Open sticker." : "Open sticker"
   Accessible.onPressAction: tapped()
 
   Image {

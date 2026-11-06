@@ -16,6 +16,12 @@ to their original message rather than appearing as duplicate message rows.
 | HEICS / HEIC sequence | Animated color and grayscale alpha tracks combined into lossless WebP when the container layout is recognized |
 | Sticker video | Bounded WebP animation; a separate grayscale alpha track is used when present |
 
+All inline sticker rasters, including static PNG/JPEG and converted HEIC
+stills, must have positive dimensions no larger than 2048 pixels per edge.
+Larger static assets show an unavailable placeholder; this path does not
+silently resize them. The table's original-pixel and full-size descriptions
+apply within that limit.
+
 HEICS conversion uses the animated pair in a four-track container. FFprobe
 checks dimensions, frame count, duration, and track layout before FFmpeg
 decodes it. Supported animations have at most 100 frames, eight seconds, a
