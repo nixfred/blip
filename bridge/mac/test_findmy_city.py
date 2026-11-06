@@ -50,13 +50,35 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(city.parse_row(row(age="2 min. ago"), NOW)["observedAt"],
                          "2026-11-06T11:57:01Z")
         self.assertEqual(city.parse_row(row(age="4 min. ago"), NOW)["expiresAt"],
-                         "2026-11-06T12:00:01Z")
+                         "2026-11-06T12:05:00Z")
         self.assertEqual(city.parse_row(row(age="30 sec. ago"), NOW)["observedAt"],
                          "2026-11-06T11:59:29Z")
-        for age in ("5 min. ago", "20 min. ago", "299 sec. ago", "1 hr. ago", "Yesterday",
+        self.assertEqual(city.parse_row(row(age="1 hr. ago"), NOW)["observedAt"],
+                         "2026-11-06T10:00:01Z")
+        for age in ("Yesterday",
                     "in 2 min.", "-2 min. ago", "Now · extra", "Maintenant", "5 min ago"):
             with self.subTest(age=age):
                 self.assertIsNone(city.parse_row(row(age=age), NOW))
+
+    def test_known_ages_keep_observation_time_and_five_minute_snapshot_lease(self):
+        for age, seconds in (("299 sec. ago", 300), ("7 min. ago", 479),
+                             ("1 hr. ago", 7199), ("20 min. ago", 1259)):
+            with self.subTest(age=age):
+                parsed = city.parse_row(row(age=age), NOW)
+                observed = datetime.fromisoformat(parsed["observedAt"].replace("Z", "+00:00"))
+                self.assertEqual((NOW - observed).total_seconds(), seconds)
+                self.assertEqual(parsed["expiresAt"], "2026-11-06T12:05:00Z")
+
+    def test_location_older_than_a_day_is_hidden_and_near_boundary_expires_early(self):
+        parsed = city.parse_row(row(age="23 hr. ago"), NOW)
+        self.assertEqual(parsed["observedAt"], "2026-11-05T12:00:01Z")
+        self.assertEqual(parsed["expiresAt"], "2026-11-06T12:00:01Z")
+        for age in ("24 hr. ago", "25 hr. ago", "999 hr. ago"):
+            with self.subTest(age=age):
+                self.assertIsNone(city.parse_row(row(age=age), NOW))
+        # A stale known row can request a refresh even after the display cap;
+        # only the new snapshot can make it displayable again.
+        self.assertTrue(city.needs_refresh(row(age="24 hr. ago"), NOW))
 
     def test_only_coarse_city_state_not_street_or_labels(self):
         for place in ("Home", "Work", "Home, MA", "123 Main Street, MA", "Main Street, MA",
@@ -99,6 +121,25 @@ class IdentityTests(unittest.TestCase):
         # Identical mirrored cards are one identity, without last-ten dedupe.
         self.assertIsNotNone(self.select(cards=[card(), card()]))
         self.assertIsNone(self.select(cards=[card(), card(phone="+445550100001")]))
+
+    def test_mirrored_cards_can_add_fields_but_must_all_bind_requested_handle(self):
+        rich = card(emails=["alex@example.test"])
+        rich["phones"].append({"number": OTHER})
+        self.assertIsNotNone(self.select(cards=[card(), rich]))
+        self.assertIsNotNone(self.select(cards=[rich, card()]))
+        # A same-name card without the shared handle still leaves identity
+        # unresolved, however many agreeing mirrors exist.
+        self.assertIsNone(self.select(cards=[card(), rich, card(phone=OTHER)]))
+        self.assertIsNone(self.select(cards=[card(), rich, card(phone=None)]))
+        self.assertIsNone(self.select(cards=[card(), rich, card(phone="+445550100001")]))
+
+    def test_exact_single_field_personal_names_without_shortening_full_names(self):
+        for person in (card(first="Alex", last=""), card(first="", last="Rivera")):
+            name = person["name"].strip()
+            self.assertIsNotNone(self.select(rows=[row(name)], cards=[person]))
+            other = dict(person, phones=[{"number": OTHER}])
+            self.assertIsNone(self.select(rows=[row(name)], cards=[person, other]))
+        self.assertIsNone(self.select(rows=[row("Alex")], cards=[card()]))
 
     def test_nickname_company_and_partial_names_do_not_qualify(self):
         for change in ({"first": "", "last": "", "nick": "Alex Rivera"},
@@ -204,6 +245,54 @@ class AXTests(unittest.TestCase):
 
 
 class BoundaryTests(unittest.TestCase):
+    def test_stale_known_city_refreshes_once_and_revalidates_identity(self):
+        for age in ("7 min. ago", "1 hr. ago", "299 sec. ago"):
+            with self.subTest(age=age):
+                refresher = mock.Mock(return_value=[row()])
+                loader = mock.Mock(return_value=[card()])
+                result = city.shared_city(HANDLE, None, enabled=True,
+                    row_reader=lambda **kwargs: [row(age=age)], card_loader=loader,
+                    refresher=refresher, now=NOW)
+                self.assertEqual(result["city"], "Boston, MA")
+                refresher.assert_called_once_with(enabled=True)
+                self.assertEqual(loader.call_count, 2)
+        # An unchanged last-known observation retains its old timestamp; the
+        # caller displays its age instead of inventing a fresh location.
+        for age in ("7 min. ago", "1 hr. ago"):
+            result = city.shared_city(HANDLE, None, enabled=True,
+                row_reader=lambda **kwargs: [row(age=age)],
+                card_loader=lambda module: [card()],
+                refresher=lambda **kwargs: [row(age=age)], now=NOW)
+            expected = city.parse_row(row(age=age), NOW)
+            self.assertEqual(result["city"], expected["city"])
+            self.assertEqual(result["observedAt"], expected["observedAt"])
+            self.assertEqual(result["expiresAt"], expected["expiresAt"])
+        self.assertIsNone(city.shared_city(HANDLE, None, enabled=True,
+            row_reader=lambda **kwargs: [row(age="7 min. ago")],
+            card_loader=lambda module: [card()],
+            refresher=lambda **kwargs: ["Alex Rivera · No location found"], now=NOW)["city"])
+        self.assertIsNone(city.shared_city(HANDLE, None, enabled=True,
+            row_reader=lambda **kwargs: [row(age="1 hr. ago")],
+            card_loader=lambda module: [card()],
+            refresher=lambda **kwargs: [row("Other Person")], now=NOW)["city"])
+        loader = mock.Mock(side_effect=[[card()], [card(), card(phone=OTHER)]])
+        self.assertIsNone(city.shared_city(HANDLE, None, enabled=True,
+            row_reader=lambda **kwargs: [row(age="7 min. ago")], card_loader=loader,
+            refresher=lambda **kwargs: [row()], now=NOW)["city"])
+
+    def test_fresh_unknown_and_unsupported_rows_do_not_activate_findmy(self):
+        for value in (row(), row(age="Live"), row(age="2 min. ago"),
+                      row(age="Yesterday"), row(age="5 min ago"),
+                      row(age="Unknown"), row(place="Home", age="Paused"),
+                      row(place="Address unavailable", age="7 min. ago"),
+                      "Alex Rivera · No location found"):
+            with self.subTest(value=value):
+                refresh = mock.Mock()
+                city.shared_city(HANDLE, None, enabled=True,
+                    row_reader=lambda **kwargs: [value], card_loader=lambda module: [card()],
+                    refresher=refresh, now=NOW)
+                refresh.assert_not_called()
+
     def test_paused_refresh_requires_unique_requested_identity_and_revalidates(self):
         paused = row(age="Paused")
         refresher = mock.Mock(return_value=[row()])

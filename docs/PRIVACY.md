@@ -10,12 +10,13 @@ inventory of what lands on disk.
 direct conversation requests a city once a minute. The Mac reads Find My's
 People accessibility labels and exact Contacts identities; only that handle,
 city, and observation/expiry timestamps return over SSH. City data stays in
-memory, expires within five minutes, and is cleared on a failed refresh,
+memory, each snapshot expires within five minutes, and is cleared on a failed refresh,
 conversation change, or close. Blip records no location history or
 screenshots, sends no coordinates to a geocoder, and never opens Messages
-for this lookup. A paused location for the exact sharing contact can briefly
+for this lookup. A stale or paused location for the exact sharing contact can briefly
 activate Find My and restore prior Mac focus. An empty private
 `$HOME/.blip/findmy-ui.lock` serializes that refresh; it contains no user data.
+Older observations are labeled with their age and hidden after 24 hours.
 See [shared city setup and limits](SHARED-CITY.md).
 
 | Path | Contains | Never contains |

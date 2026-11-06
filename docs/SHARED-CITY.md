@@ -1,7 +1,8 @@
 # Shared city in conversations
 
 With `shared_city=on` in `$HOME/.config/blip/bridge.conf`, an open direct
-conversation shows the friend's fresh shared city beneath their name. The
+conversation shows the friend's shared city beneath their name. Observations
+older than five minutes include their age, such as `City, ST · 1 hr ago`. The
 phone or email returns when no city is available. Both the panel and app use
 the same component. The setting defaults to off.
 
@@ -20,7 +21,7 @@ selected. Accessibility must already be granted to the SSH host process
 (`sshd-keygen-wrapper`), as for optional read pushes. Blip checks the existing
 grant without prompting. It can open Find My in the background, but never
 switches tabs, selects a person, or changes sharing. For an exactly matched
-person whose location says **Paused**, it briefly brings Find My forward to
+person whose location is stale or says **Paused**, it briefly brings Find My forward to
 refresh, then restores the previous Mac app unless you chose another app in
 the meantime. Enabling `shared_city` opts into this brief focus change. If Find My is opening
 for the first time, let it finish loading; the next refresh will try again.
@@ -35,14 +36,18 @@ decryption, Screen Recording, or disabled system protections are needed.
 ## Identity and freshness
 
 Phone numbers match all digits, including country code; emails match exactly
-without case. A Find My row displaying a name must match a unique full first
-and last name in the Mac's Contacts, and that card must contain the exact
-conversation handle. Nicknames, organizations, conflicting cards, duplicate
+without case. A Find My row displaying a name must match the exact saved personal
+name in the Mac's Contacts, including a name saved in just one field. Every card
+with that name must contain the exact conversation handle; mirrored cards can
+have different additional fields. Nicknames, organizations, conflicting cards, duplicate
 Find My rows, and incomplete lookups are suppressed.
 
-Blip checks the visible direct conversation once a minute. City observations
-expire after five minutes, including the age Find My reports. The UI checks
-expiry every second. A failed refresh removes the city; changing conversations
+Blip checks the visible direct conversation once a minute. Each successful
+snapshot expires within five minutes. Location observations up to 24 hours old
+can be shown with their age; older observations are hidden. Stale observations
+trigger a refresh attempt before being displayed, and retain their actual
+observation timestamp. The UI checks expiry and age every second.
+A failed refresh removes the city; changing conversations
 or closing the surface clears it immediately. Late replies from an earlier
 conversation are discarded, including when returning to that conversation.
 

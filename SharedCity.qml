@@ -14,7 +14,7 @@ Item {
   property int epoch: 0
   property bool pending: false
   property bool ready: false
-  readonly property string city: active ? City.visibleCity(record, chat, clock) : ""
+  readonly property string city: active ? City.citySubtitle(record, chat, clock) : ""
 
   Component.onCompleted: { root.ready = true; Qt.callLater(root.invalidate) }
 

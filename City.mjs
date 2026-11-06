@@ -1,5 +1,6 @@
 // city-policy.ts
 var CITY_TTL_MS = 5 * 60 * 1000;
+var CITY_MAX_LOCATION_AGE_MS = 24 * 60 * 60 * 1000;
 var CITY_CLOCK_SKEW_MS = 5000;
 function cityIdentity(value) {
   if (typeof value !== "string" || value.length > 254 || value !== value.trim())
@@ -41,14 +42,26 @@ function visibleCity(record, chat, now = Date.now()) {
   if (!identity || data.ok !== true || cityIdentity(data.chat) !== identity || !plainCity(data.city))
     return "";
   const observed = utcMillis(data.observedAt), expires = utcMillis(data.expiresAt);
-  if (!Number.isFinite(observed) || !Number.isFinite(expires) || observed > now + CITY_CLOCK_SKEW_MS || now - observed > CITY_TTL_MS || expires <= now || expires <= observed || expires > observed + CITY_TTL_MS)
+  if (!Number.isFinite(observed) || !Number.isFinite(expires) || observed > now + CITY_CLOCK_SKEW_MS || now - observed >= CITY_MAX_LOCATION_AGE_MS || expires <= now || expires <= observed || expires > now + CITY_TTL_MS + CITY_CLOCK_SKEW_MS || expires > observed + CITY_MAX_LOCATION_AGE_MS)
     return "";
   return data.city;
 }
+function citySubtitle(record, chat, now = Date.now()) {
+  const city = visibleCity(record, chat, now);
+  if (!city)
+    return "";
+  const minutes = Math.max(0, Math.floor((now - utcMillis(record.observedAt)) / 60000));
+  if (minutes < 5)
+    return city;
+  const age = minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} hr ago`;
+  return `${city} · ${age}`;
+}
 export {
   CITY_CLOCK_SKEW_MS,
+  CITY_MAX_LOCATION_AGE_MS,
   CITY_TTL_MS,
   cityIdentity,
+  citySubtitle,
   parseSharedCity,
   visibleCity
 };

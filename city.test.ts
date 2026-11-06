@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cityIdentity, parseSharedCity, visibleCity, CITY_TTL_MS } from "./city-policy";
+import { cityIdentity, parseSharedCity, visibleCity, citySubtitle, CITY_TTL_MS } from "./city-policy";
 import { loadCity, readCityRequest, validCity, MAX_CITY_BYTES, MAX_CITY_REQUEST_BYTES } from "./city";
 
 const chat = "+15551234567", now = Date.parse("2026-11-06T12:00:00Z");
@@ -48,11 +48,28 @@ describe("shared city policy", () => {
     expect(visibleCity(record, chat, Date.parse(body.expiresAt))).toBe("");
     expect(visibleCity(record, chat, now - CITY_TTL_MS)).toBe("");
     for (const changes of [{ ok: false }, { city: null }, { observedAt: "2026-11-06T12:00:06Z" },
-      { observedAt: "2026-11-06T11:54:59Z" }, { expiresAt: "2026-11-06T12:04:01Z" },
+      { observedAt: "2026-11-05T11:59:59Z" }, { expiresAt: "2026-11-06T12:05:06Z" },
       { expiresAt: body.observedAt }, { expiresAt: "2026-11-06T12:00:00Z" },
       { observedAt: "2026-02-30T11:59:00Z" }, { observedAt: "2026-11-06 11:59:00" },
       { expiresAt: "2026-11-06T12:04:00+00:00" }, { city: "<i>Sample City</i>" }])
       expect(visibleCity({ ...record, ...changes }, chat, now)).toBe("");
+  });
+  test("labels last-known observations and bounds both snapshot and observation lifetimes", () => {
+    expect(citySubtitle(record, chat, now)).toBe("Sample City");
+    for (const [observedAt, age] of [["2026-11-06T11:53:00Z", "7 min ago"], ["2026-11-06T10:59:00Z", "1 hr ago"]]) {
+      const lastKnown = { ...record, observedAt };
+      expect(visibleCity(lastKnown, chat, now)).toBe("Sample City");
+      expect(citySubtitle(lastKnown, chat, now)).toBe(`Sample City · ${age}`);
+      expect(loadCity({ chat }, runner({ ...body, observedAt }), enabled)).toEqual({
+        ok: true, chat, city: body.city, observedAt, expiresAt: body.expiresAt,
+      });
+      expect(citySubtitle(lastKnown, chat, Date.parse(body.expiresAt))).toBe("");
+    }
+    expect(citySubtitle({ ...record, observedAt: "2026-11-05T12:00:00Z" }, chat, now)).toBe("");
+    const nearLimit = { ...record, observedAt: "2026-11-05T12:01:00Z", expiresAt: "2026-11-06T12:01:00Z" };
+    expect(citySubtitle(nearLimit, chat, now)).toBe("Sample City · 23 hr ago");
+    expect(citySubtitle({ ...nearLimit, expiresAt: "2026-11-06T12:01:01Z" }, chat, now)).toBe("");
+    expect(citySubtitle(nearLimit, "+15551234568", now)).toBe("");
   });
 });
 

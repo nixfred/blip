@@ -26,6 +26,7 @@ MAX_CONTACTS = 20000
 MAX_NODES = 4096
 MAX_DEPTH = 24
 MAX_AGE_SECONDS = 300
+MAX_LOCATION_AGE_SECONDS = 24 * 60 * 60
 AX_TIMEOUT_SECONDS = 4
 _UNSAFE = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
@@ -63,8 +64,19 @@ def row_identity(description: object) -> str:
     return description.split("·", 1)[0].strip()
 
 
+def age_seconds(age: str) -> int | None:
+    """Conservatively preserve the old edge of Find My's rounded ages."""
+    if age in {"Now", "Live"}:
+        return 0
+    match = re.fullmatch(r"([0-9]{1,3}) (sec\.|min\.|hr\.) ago", age)
+    if not match:
+        return None
+    unit = {"sec.": 1, "min.": 60, "hr.": 3600}[match[2]]
+    return int(match[1]) * unit + (1 if unit == 1 else unit - 1)
+
+
 def parse_row(description: object, now: datetime) -> dict | None:
-    """Only the verified English city/state list format, with fresh ages.
+    """Only the verified English city/state list format, with a known age.
 
     Keep an age's rounding uncertainty on the old side: a displayed minute
     can be almost sixty seconds old. Never turn Home, a street or unavailable
@@ -89,18 +101,14 @@ def parse_row(description: object, now: datetime) -> dict | None:
                                 "lane", "boulevard", "drive", "apartment", "suite"}
                         for word in words):
         return None
-    age = parts[3]
-    if age in {"Now", "Live"}:
-        seconds = 0
-    else:
-        match = re.fullmatch(r"([0-9]{1,3}) (sec\.|min\.) ago", age)
-        if not match:
-            return None
-        seconds = int(match[1]) + 1 if match[2] == "sec." else int(match[1]) * 60 + 59
-    if seconds >= MAX_AGE_SECONDS:
+    seconds = age_seconds(parts[3])
+    if seconds is None or seconds >= MAX_LOCATION_AGE_SECONDS:
         return None
     observed = now - timedelta(seconds=seconds)
-    expires = observed + timedelta(seconds=MAX_AGE_SECONDS)
+    # The observation keeps its real age. A five-minute snapshot lease makes
+    # the next lookup verify sharing again without claiming a new observation.
+    expires = min(now + timedelta(seconds=MAX_AGE_SECONDS),
+                  observed + timedelta(seconds=MAX_LOCATION_AGE_SECONDS))
     stamp = lambda value: value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     return {"city": city, "observedAt": stamp(observed), "expiresAt": stamp(expires)}
 
@@ -121,11 +129,12 @@ def contact_handles(card: dict) -> frozenset[str]:
 
 
 def matching_row(handle: str, rows: list[str], cards: list[dict]) -> str | None:
-    """Match a handle itself, or one globally unique complete contact name.
+    """Match a handle itself, or an unambiguous saved personal contact name.
 
     Even unavailable/stale rows participate in ambiguity checks. Only exact
     phone digits match; a shared national suffix is not proof of identity.
-    Mirrored identical cards may collapse; homonyms with other handles may not.
+    Mirrored cards may differ in extra fields when every same-name card binds
+    the exact requested handle. Unexplained homonyms may not collapse.
     """
     if len(rows) > MAX_ROWS or len(cards) > MAX_CONTACTS:
         return None
@@ -138,23 +147,25 @@ def matching_row(handle: str, rows: list[str], cards: list[dict]) -> str | None:
             pass
     if direct:
         return direct[0] if len(direct) == 1 else None
-    by_name: dict[str, set[frozenset[str]]] = {}
+    by_name: dict[str, list[frozenset[str]]] = {}
     matches = set()
     for card in cards:
         first, last = name_key(card.get("first")), name_key(card.get("last"))
         full = name_key(card.get("name"))
         handles = contact_handles(card)
         if full:
-            by_name.setdefault(full, set()).add(handles)
-        # A nickname or organization alone never identifies a person.
-        if not first or not last or full != first + " " + last or full == name_key(card.get("org")):
+            by_name.setdefault(full, []).append(handles)
+        # A personal card can legitimately have just one name field. Match
+        # that exact saved display name, never a shortened version of a name.
+        personal = " ".join(part for part in (first, last) if part)
+        if not personal or full != personal or full == name_key(card.get("org")):
             continue
         if handle in handles:
             matches.add(full)
     if len(matches) != 1:
         return None
     wanted = next(iter(matches))
-    if len(by_name[wanted]) != 1:
+    if any(handle not in handles for handles in by_name[wanted]):
         return None
     matching_rows = [row for row in rows if name_key(row_identity(row)) == wanted]
     return matching_rows[0] if len(matching_rows) == 1 else None
@@ -163,6 +174,24 @@ def matching_row(handle: str, rows: list[str], cards: list[dict]) -> str | None:
 def select_city(handle: str, rows: list[str], cards: list[dict], now: datetime) -> dict | None:
     row = matching_row(handle, rows, cards)
     return parse_row(row, now) if row is not None else None
+
+
+def needs_refresh(description: object, now: datetime) -> bool:
+    """Refresh a recognized city row whose displayed age is stale or paused.
+
+    Validate identity text, distance and locality independently from age before
+    activating Find My. Unknown labels or unsupported places never trigger it.
+    """
+    if not row_identity(description):
+        return False
+    parts = description.split("·")
+    if len(parts) != 4 or parse_row("·".join(parts[:-1]) + "·Now", now) is None:
+        return False
+    age = parts[-1].strip()
+    if age == "Paused":
+        return True
+    seconds = age_seconds(age)
+    return seconds is not None and seconds >= MAX_AGE_SECONDS
 
 
 class AccessibilityReader:
@@ -451,7 +480,7 @@ def shared_city(handle: object, contacts, *, enabled: bool, row_reader=read_rows
         direct = any(_same_handle(row_identity(row), canonical) for row in rows)
         cards = [] if direct or not rows else card_loader(contacts)
         target = matching_row(canonical, rows, cards)
-        if target is not None and len(target.split("·")) == 4 and target.split("·")[-1].strip() == "Paused":
+        if needs_refresh(target, now or datetime.now(timezone.utc)):
             rows = refresher(enabled=True)
             if not isinstance(rows, list) or len(rows) > MAX_ROWS:
                 return result

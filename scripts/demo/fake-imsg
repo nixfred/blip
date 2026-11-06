@@ -161,9 +161,11 @@ function chatsRows(): Row[] {
 function main(): void {
   if (sub === "shared-city") {
     const request = JSON.parse(readFileSync(0, "utf8"));
-    const city = person(request.handle)?.city || null;
+    const contact = person(request.handle);
+    const city = contact?.city || null;
     console.log(JSON.stringify({ ok: true, handle: request.handle, city,
-      ...(city ? { observedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 300000).toISOString() } : {}) }));
+      ...(city ? { observedAt: new Date(Date.now() - (contact.city_age_minutes || 0) * 60000).toISOString(),
+        expiresAt: new Date(Date.now() + 300000).toISOString() } : {}) }));
     return;
   }
   if (sub === "chats") { console.log(JSON.stringify(chatsRows(), null, 2)); return; }

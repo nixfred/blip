@@ -37,6 +37,11 @@ ShellRoot {
     interval: 25; repeat: true; running: true
     onTriggered: {
       if (test.stage === 0 && lookup.city === "Portland, OR") {
+        var older = JSON.parse(JSON.stringify(lookup.record))
+        older.observedAt = new Date(Date.now() - 3600000).toISOString()
+        lookup.record = older
+        lookup.clock = Date.now()
+        if (!test.check(lookup.city === "Portland, OR · 1 hr ago", "last-known age label")) return
         var expired = JSON.parse(JSON.stringify(lookup.record))
         expired.expiresAt = new Date(Date.now() - 1).toISOString()
         lookup.record = expired
@@ -74,4 +79,4 @@ ShellRoot {
     output = result.stdout + result.stderr
     if result.returncode or 'CITY_UI_PASS' not in output or 'CITY_UI_FAIL' in output:
         raise SystemExit(output)
-    print('SharedCity QML: expiry, switching, close/reopen and late reply checks passed')
+    print('SharedCity QML: age labels, expiry, switching, close/reopen and late reply checks passed')
