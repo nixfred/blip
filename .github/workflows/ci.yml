@@ -11,6 +11,10 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: local background raster conversion
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -q imagemagick
       - name: unit tests (collector, thread, tier2, ui invariants)
         run: bun test
       - name: QML badge regression (synthetic data, no desktop needed)
