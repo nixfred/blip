@@ -84,6 +84,8 @@ sender survive. A type `2007` sticker occupies that sender's tapback slot for
 one body part; a later emoji replaces it, and type `3007` removes it. It never
 becomes a fabricated star emoji. Legacy sticker rows hidden by Recently
 Deleted stay hidden; other legacy removal encodings have not been verified.
+Type `2007` overlays carry `reaction: true` so the client can use a round
+reaction badge without putting ordinary placed stickers inside a bubble.
 Sticker metadata is fetched for loaded parents even when the associated event
 is outside the message window. A current sticker whose parent is outside the
 window remains visible on its own. Missing media remains a labeled unavailable
