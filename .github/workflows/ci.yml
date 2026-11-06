@@ -44,6 +44,7 @@ jobs:
           python3 scripts/test-audio-ui.py
           python3 scripts/test-audio-session-ui.py
           python3 scripts/test-conversation-menu-ui.py
+          python3 scripts/test-time-reveal-ui.py
       - name: OTP desktop adapter (no desktop needed)
         run: |
           python3 -m py_compile otp-desktop.py

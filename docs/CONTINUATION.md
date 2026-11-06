@@ -34,12 +34,15 @@ complete upstream check list. Desktop previews use the fake bridge in
 subprocess execution must run with those permissions; permission-denied failures
 in a restricted shell are not a successful validation run.
 
+Run `scripts/deploy-local` to install a committed HEAD into the live plugin. It
+restarts the shell, so preserve unsent drafts first.
+
 Do not test sends or reactions against other people. Native Mac behavior
 must be distinguished from Linux rendering and synthetic protocol tests.
 
 ## Handoff — November 6, 2026
 
-The private `2.7.0-private.1` build adds a Messages-style layout: contact
+The private `2.7.0-private.1` build added a Messages-style layout: contact
 photos and names, a cleaner favorites grid, glass controls, local conversation
 backgrounds, aligned composer buttons, and inline audio with measured waveforms,
 play/pause, progress, and seeking. The window is named Messages. New Message sits
@@ -60,7 +63,8 @@ Skin-tone variant selection remains unverified. See [reactions](reactions.md).
 
 Sending native stickers or sticker reactions is still unfinished. A public AppKit
 `NSAdaptiveImageGlyph`/HEIC/RTFD round trip worked in a source-only probe;
-no clipboard/paste/send path or native sticker receipt was verified. Do not
+no clipboard/paste/send path or native sticker receipt was verified. The probe is in
+[docs/research](research/native-glyph-probe.md). Do not
 present ordinary image attachments as native sticker sends. This is the main
 remaining feature to investigate before extending reaction target coverage.
 

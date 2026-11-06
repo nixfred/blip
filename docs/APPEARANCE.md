@@ -17,7 +17,9 @@ queued attachments until you send. Click the **smiley** for searchable emoji;
 choosing one inserts it at the draft's cursor or replaces selected text, without sending. The blue arrow
 or Enter sends, while Shift+Enter inserts a newline.
 
-Message timestamps appear on hover or keyboard selection. Delivery failures,
+Swipe left with two fingers to reveal message times, as in Messages; your
+bubbles slide aside and spring back when you stop. The keyboard cursor also
+shows its message's time. Delivery failures,
 sending/scheduled state, edits, and the latest read receipt remain visible.
 Photos preserve their aspect ratio and fit within a 240-pixel display height;
 open an attachment to see its original. Transparent stickers have no bubble

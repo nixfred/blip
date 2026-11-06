@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Install this checkout's HEAD into the live plugin, then restart and verify.
+#
+# The installed plugin is a git checkout, so it fast-forwards to HEAD instead of
+# being copied over, and nothing is pushed. Restarting the shell discards unsent
+# Blip drafts and queued attachments: they are memory-only.
+set -euo pipefail
+
+REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+LIVE=${BLIP_PLUGIN_DIR:-"$HOME/.config/omarchy/plugins/nixfred.blip"}
+
+[[ -z $(git -C "$REPO" status --porcelain) ]] || { echo "commit your changes first: this deploys HEAD" >&2; exit 1; }
+[[ -z $(git -C "$LIVE" status --porcelain) ]] || { echo "installed plugin has local changes: $LIVE" >&2; exit 1; }
+
+(cd "$REPO" && bun test --silent)
+
+# Outside plugins/ on purpose: a copy in there carries the same manifest id and
+# silently replaces the live plugin (CLAUDE.md).
+backup="$HOME/.local/state/omarchy/plugin-backups/blip-$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p -m 700 "$backup"
+cp -a "$LIVE" "$backup/source"
+[[ ! -f $HOME/.config/blip/bridge.conf ]] || cp -p "$HOME/.config/blip/bridge.conf" "$backup/"
+
+git -C "$LIVE" fetch -q "$REPO" HEAD
+git -C "$LIVE" merge -q --ff-only FETCH_HEAD
+echo "installed $(git -C "$LIVE" rev-parse --short HEAD); backup in $backup"
+
+omarchy-restart-shell   # always restart: a hot-reload leaves IPC on the old instance
+for _ in $(seq 1 30); do
+  status=$(qs -p /usr/share/omarchy/shell ipc call nixfred.blip status 2>/dev/null) && [[ -n $status ]] && break
+  sleep 1
+done
+echo "${status:-no status: check the shell log for QML errors}"
+[[ -n ${status:-} ]]

@@ -39,10 +39,7 @@ attempts trigger prompts on the Mac's screen.
 ## Deploying a change locally
 
 ```sh
-bun test
-cp -r *.qml *.ts *.mjs otp-desktop.py manifest.json icons ~/.config/omarchy/plugins/nixfred.blip/
-omarchy-restart-shell        # NOT a hot-reload: IPC would stay on the old instance
-qs -p /usr/share/omarchy/shell ipc call nixfred.blip status
+scripts/deploy-local        # tests, backup, fast-forward the plugin to HEAD, restart, status
 ```
 
 Mac-side tool changes: `scp bridge/mac/<tool> you@your-mac:~/.blip/bin/`.

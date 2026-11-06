@@ -73,7 +73,7 @@ export interface Bubble {
   groupStart: boolean;
   /** Last bubble of a run — carries the timestamp, like iMessage. */
   groupEnd: boolean;
-  /** "9:41 PM" (or whatever `timeFormat` says), shown only on groupEnd. */
+  /** "9:41 PM" (or whatever `timeFormat` says), revealed by a sideways swipe. */
   time: string;
   /** "Read 4:42 PM" — only on the NEWEST read from-me bubble, like iMessage. */
   receipt: string;
@@ -326,7 +326,7 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
       day: newDay ? dayLabel(m.ts, today, formats) : "",
       groupStart,
       groupEnd,
-      time: groupEnd ? clockLabel(m.ts, formats.time) : "",
+      time: clockLabel(m.ts, formats.time),
       receipt: i === receiptIdx ? receiptLabel(m.read_at!, today, formats) : "",
       tapbacks: m.tapbacks ?? [],
       // Belt to imsg 1.5.1's suspenders: link-preview payloads are not files.
@@ -411,7 +411,7 @@ const PENDING_SKEW_MS = PENDING_MAX_AGE_MS;
 
 /** The bubble for a send in flight, decorated against the bubble before it
  *  the way decorate() would: same run when it follows one of yours within
- *  the gap (that bubble then loses its time), a day divider when it starts one. */
+ *  the gap, a day divider when it starts one. */
 export function pendingBubble(prev: Bubble | undefined, send: PendingSend, today: string, formats = DEFAULT_FORMATS): { bubble: Bubble; prev: Bubble | undefined } {
   const ts = send.ts;
   const newDay = !prev || localDay(prev.ts) !== localDay(ts);
@@ -443,7 +443,7 @@ export function pendingBubble(prev: Bubble | undefined, send: PendingSend, today
     ...(send.localId ? { localId: send.localId } : {}),
     ...(send.failureReason ? { failureReason: send.failureReason } : {}),
   };
-  return { bubble, prev: prev && !groupStart ? { ...prev, groupEnd: false, time: "" } : prev };
+  return { bubble, prev: prev && !groupStart ? { ...prev, groupEnd: false } : prev };
 }
 
 /**

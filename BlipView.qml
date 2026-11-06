@@ -18,7 +18,7 @@ import qs.Ui
 //
 //   list         → every thread, newest first, unread marked
 //   conversation → bubbles: mine blue on the right, theirs grey on the left,
-//                  grouped by sender with one timestamp per run, day dividers,
+//                  grouped by sender, times revealed by a sideways swipe, day dividers,
 //                  compose box pinned at the bottom. Esc goes back.
 //
 // Reads its thread list from the host widget so there is exactly one poller.
@@ -1805,7 +1805,7 @@ FocusScope {
     var newDay = !prev || root.localDay(prev.ts) !== root.localDay(stamp)
     var gapMin = prev ? (root.stampMs(stamp) - root.stampMs(prev.ts)) / 60000 : Infinity
     var start = !prev || newDay || prev.from_me !== true || !(gapMin <= 15)
-    if (!start) { var p = Object.assign({}, prev); p.groupEnd = false; p.time = ""; out[out.length - 1] = p }
+    if (!start) { var p = Object.assign({}, prev); p.groupEnd = false; out[out.length - 1] = p }
     out.push({ localId: localId, ts: stamp, from_me: true, name: "", text: String(text).trim(), day: newDay ? "Today" : "",
                groupStart: start, groupEnd: true, time: Qt.formatTime(new Date(), root.timeFormat),
                receipt: "", tapbacks: [], attachments: [], replyText: "", replyMine: false, edited: false,
@@ -3490,6 +3490,12 @@ FocusScope {
             z: -1
             acceptedButtons: Qt.NoButton
             onWheel: function(wheel) {
+              // A sideways swipe reveals message times; see time-reveal.ts. A
+              // burst commits to one axis, so y can come back zero here.
+              var sideways = wheel.pixelDelta.x !== 0 ? wheel.pixelDelta.x : wheel.angleDelta.x
+              var vertical = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y : wheel.angleDelta.y
+              wheel.accepted = true
+              if (timeReveal.route(sideways, vertical) === 0) return
               var d = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * root.touchpadMultiplier : wheel.angleDelta.y * root.wheelMultiplier
               // the wheel bypasses Flickable movement signals — the helper
               // maintains the bottom-stick too
@@ -3499,6 +3505,12 @@ FocusScope {
             }
           }
 
+          TimeRevealGesture {
+            id: timeReveal
+            // room for the widest clock in this format, plus a gap from the bubble
+            maxOffset: Math.ceil(timeMetrics.advanceWidth(Qt.formatTime(new Date(2000, 0, 1, 12, 59), root.timeFormat))) + Style.space(14)
+            FontMetrics { id: timeMetrics; font.family: root.fontFamily; font.pixelSize: root.fontCaption }
+          }
           // The bubble cursor: one translucent band behind the selected row,
           // the list rows' fill. A sibling of `content`, not a child of the
           // layout, so no delegate carries a background of its own; the row's
@@ -3511,6 +3523,8 @@ FocusScope {
             radius: Style.cornerRadius
             color: root.hoverFill
           }
+          // Message times, behind the rows and sized to match them (see bubbleRow).
+          Item { id: timeLayer; width: content.width; height: content.height; visible: root.inThread }
           ColumnLayout {
             id: content
             width: parent.width
@@ -3541,19 +3555,42 @@ FocusScope {
                 readonly property var shownTapbacks: TapbackActions.shownTapbacks(modelData, root.pendingTapback)
                 readonly property var shownReactionStickers: Stickers.reactionStickers(modelData.stickers)
                 readonly property bool hasReactions: shownTapbacks.length > 0 || shownReactionStickers.length > 0
+                // The keyboard cursor pins its row's time open, so reading a
+                // time never depends on having a sideways-scrolling pointer.
+                readonly property real timeProgress: hasCursor ? 1 : timeReveal.progress
+                readonly property real timeOffset: timeReveal.maxOffset * timeProgress
+                // Like Messages: your bubbles make way, theirs stay put. Layout
+                // is untouched, so the transcript never reflows during a swipe.
+                transform: Translate { x: bubbleRow.mine ? -bubbleRow.timeOffset : 0 }
                 onHasCursorChanged: if (hasCursor) root.bubbleCursorItem = bubbleRow
 
                 Layout.fillWidth: true
                 spacing: Style.space(2)
-                HoverHandler { id: bubbleHover }
-                ToolTip.visible: (bubbleHover.hovered || bubbleRow.hasCursor) && String(modelData.time || "") !== ""
-                ToolTip.text: String(modelData.time || "")
-                ToolTip.delay: 450
-                ToolTip.timeout: 4000
+
+                // Lives in timeLayer because a layout child would take up a
+                // slot in this row. Loaded only while a reveal is showing it.
+                Loader {
+                  parent: timeLayer
+                  active: bubbleRow.timeProgress > 0 && String(bubbleRow.modelData.time || "") !== ""
+                  x: content.width - bubbleRow.timeOffset
+                  y: bubbleRow.y + (textBubbleRow.visible ? textBubbleRow.y + textBubbleRow.height / 2 : bubbleRow.height / 2) - height / 2
+                  width: timeReveal.maxOffset
+                  opacity: bubbleRow.timeProgress
+                  sourceComponent: Text {
+                    text: String(bubbleRow.modelData.time || "")
+                    textFormat: Text.PlainText
+                    horizontalAlignment: Text.AlignRight
+                    color: root.canvasDim
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fontCaption
+                  }
+                }
 
                 // day divider — "Today", "Yesterday", "Aug 28"
                 Text {
                   Layout.fillWidth: true
+                  // stays centered while your bubbles slide
+                  transform: Translate { x: bubbleRow.mine ? bubbleRow.timeOffset : 0 }
                   visible: String(modelData.day || "") !== ""
                   text: String(modelData.day || "")
                   textFormat: Text.PlainText
@@ -4113,8 +4150,8 @@ FocusScope {
                   Item { Layout.fillWidth: true; visible: !bubbleRow.mine }
                 }
 
-                // Only delivery/edit status occupies space; timestamps are available
-                // on hover and keyboard selection without shifting the transcript.
+                // Only delivery/edit status occupies space; times are revealed by a
+                // sideways swipe or keyboard selection without shifting the transcript.
                 RowLayout {
                   Layout.fillWidth: true
                   visible: modelData.edited === true || String(modelData.effect || "") !== "" ||

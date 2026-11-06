@@ -39,8 +39,7 @@ break and expensive to rediscover.
 bun test                                   # unit tests, ~70 ms
 bun collector.ts --deep | jq .unread       # live poll through your bridge
 bun thread.ts <chat-id> 40 | jq .bubbles   # one conversation
-cp -r *.qml *.ts *.mjs otp-desktop.py manifest.json icons ~/.config/omarchy/plugins/nixfred.blip/
-omarchy-restart-shell                      # QML changes need a restart, not a hot-reload (see CLAUDE.md)
+scripts/deploy-local                       # install HEAD into the live plugin and restart the shell
 ```
 
 UI changes: screenshot them (`grim`) and look. Every layout bug so far was

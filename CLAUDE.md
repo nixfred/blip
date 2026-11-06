@@ -388,6 +388,10 @@ what it is handed. Keep it that way.
   Flickable grabs every drag, and drag IS text selection in a bubble; a
   slightly-moving click on a link became a flick. Wheel scrolling never
   needed it (next invariant). Ctrl+C in a bubble goes through `wl-copy`.
+- **Message times are revealed by a sideways swipe, not a tooltip.** The
+  conversation's wheel handler routes each burst to one axis
+  (`time-reveal.ts`, `TimeRevealGesture.qml`). Rows slide with a transform, so
+  layout never reflows; the keyboard cursor pins its own row's time open.
 - **Wheel scrolling = `MouseArea.onWheel`, direct 1:1 by default, and
   INSTRUMENT before tuning.** A `WheelHandler` on the Flickable received ZERO
   events on this stack (proved by logging after four "fixes" that were
@@ -556,14 +560,14 @@ what it is handed. Keep it that way.
 bun test                                   # 620+ tests, ~1.5 s
 bun collector.ts --deep | jq .unread       # live against the Mac
 bun thread.ts <chat-id> 40 | jq .bubbles   # one conversation
-cp -r *.qml *.ts *.mjs otp-desktop.py manifest.json icons ~/.config/omarchy/plugins/nixfred.blip/
+scripts/deploy-local   # tests, backup, fast-forward the installed checkout to HEAD, restart, status
 # NEVER leave a backup copy INSIDE ~/.config/omarchy/plugins/ (nixfred.blip.bak-*): it carries the
 # same manifest id, PluginRegistry scans `plugins/*` in glob order and the LAST id wins, so the
 # backup silently replaces the live plugin. A .bak-113 dir ran on gus and vic from 23 to 25 Sep
 # while three deploys reported success; `status` still lacked a field the new file printed.
 # Back up to ~/.local/state/omarchy/plugin-backups/ instead, and after a deploy verify a field
 # the new code emits (e.g. `status` → scroll_gain=), not just "healthy=true".
-omarchy-restart-shell                      # ALWAYS restart (hot-reload leaves IPC on a zombie)
+# deploy-local ALWAYS restarts: a hot-reload leaves IPC on a zombie.
 # MANDATORY after every deploy — a QML syntax error kills BOTH surfaces silently (2.1.4 shipped one):
 qs log /run/user/1000/quickshell/by-id/$(basename $(readlink /run/user/1000/quickshell/by-pid/$(pgrep -x quickshell)))/log.qslog -t 400 | grep -iE 'nixfred.blip.*(error|warn|unavailable|token)'
 qs -p /usr/share/omarchy/shell ipc call nixfred.blip open   # and LOOK at it (grim)

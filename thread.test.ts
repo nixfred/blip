@@ -199,12 +199,12 @@ describe("decorate", () => {
     expect(b.map((x) => x.groupEnd)).toEqual([false, false, true]);
   });
 
-  test("only the last bubble of a group carries a timestamp", () => {
+  test("every bubble in a group carries its own time for the reveal", () => {
     const b = decorate(
       [msg({ ts: "2026-08-30T12:00:00Z" }), msg({ ts: "2026-08-30T12:01:00Z" })],
       today,
     );
-    expect(b[0]!.time).toBe("");
+    expect(b[0]!.time).toBe("12:00 PM");
     expect(b[1]!.time).toBe("12:01 PM");
   });
 
@@ -635,8 +635,8 @@ describe("pending sends (the bubble drawn before the Mac writes the row)", () =>
     expect(mine!.time).toBe("12:00 PM");
     expect(mine!.day).toBe("");                  // same day as the bubble before it
     expect(mine!.groupStart).toBe(false);
-    expect(prev!.groupEnd).toBe(false);          // the run continues, so the older bubble loses its time
-    expect(prev!.time).toBe("");
+    expect(prev!.groupEnd).toBe(false);          // the run continues; the older bubble keeps its own time
+    expect(prev!.time).not.toBe("");
     expect(r.pending).toEqual([send()]);
   });
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.0-private.2 — Swipe to reveal message times
+
+- Replace the hover tooltip with a Messages-style sideways swipe on a trackpad
+  or Magic Mouse. Every message now has a time, not only the last of a run. The
+  keyboard cursor shows its own message's time.
+- Add `scripts/deploy-local`. Remove the upstream's social-post drafts, weekly
+  notes and review tooling, which do not apply to this private continuation.
+
 ## 2.7.0-private.1 — Messages-style continuation
 
 This private build retains the recovered upstream history and MIT credits.
