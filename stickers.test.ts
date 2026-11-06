@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { decorate } from "./thread";
 import { dedupeSelfEcho, messagePreview, type ImsgMessage } from "./collector";
 import { MAX_VISIBLE_STICKERS, normalizeStickerAttachment, normalizeStickerMetadata,
-  normalizeStickerOverlays, normalizeStickerPlacement, placedStickers, unplacedStickers, stickerGeometry,
+  normalizeStickerOverlays, normalizeStickerPlacement, placedStickers, unplacedStickers, reactionStickers, stickerGeometry,
   type StickerOverlay } from "./stickers";
 import { CACHE_DIR, FETCH_MAX_BYTES, cacheFileName, fetchAttachment, imageAnimation, imageMetrics,
   stickerAnimationPreview, stickerSequencePreview, wantsStickerPng } from "./fetch";
@@ -70,6 +70,15 @@ describe("sticker presentation model", () => {
     expect(result.seen_ts).toBe("2026-11-06T10:01:00Z");
     expect(result.stickers[0]!.placement).toEqual(position);
     expect(result.tapbacks).toEqual([]);
+  });
+  test("native sticker reactions remain distinct from additive decorations", () => {
+    const input = [overlay(1), { ...overlay(2), reaction: true },
+      { ...overlay(3), reaction: "true" }, { ...overlay(4), reaction: true, part: 2 }];
+    const normalized = normalizeStickerOverlays(input).stickers;
+    expect(reactionStickers(normalized).map(s => s.guid)).toEqual(["S2", "S4"]);
+    expect(placedStickers(normalized).map(s => s.guid)).toEqual(["S1", "S3"]);
+    expect(unplacedStickers(normalized)).toEqual([]);
+    expect(decorate([message({ stickers: normalized })], "2026-11-06")[0]!.stickers[1]!.reaction).toBe(true);
   });
   test("an unsent parent hides sticker decoration", () => {
     const b = decorate([message({ stickers: [overlay()], retracted: true })], "2026-11-06")[0]!;

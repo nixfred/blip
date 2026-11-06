@@ -97,6 +97,7 @@ class Stickers(unittest.TestCase):
             kept, extra = self.enrich(window)
             self.assertEqual([r["ROWID"] for r in kept], [parent])
             self.assertEqual([s["attachment"]["id"] for s in extra[parent]["stickers"]], ["1", "2"])
+            self.assertTrue(all(not s.get("reaction") for s in extra[parent]["stickers"]))
             self.assertEqual(extra[parent]["activity_ts"], self.imsg.fmt_ts(T0 + 2_000_000_000))
 
     def test_sticker_tapback_never_becomes_star_and_can_be_removed(self):
@@ -107,6 +108,7 @@ class Stickers(unittest.TestCase):
         self.assertEqual(len(kept), 1)
         self.assertNotIn("tapbacks", extra[parent])
         self.assertEqual(len(extra[parent]["stickers"]), 1)
+        self.assertIs(extra[parent]["stickers"][0]["reaction"], True)
         self.message("R", 3007, "p:0/P", T0 + 2_000_000_000)
         extra = self.enrich([parent, sticker])[1]
         self.assertNotIn("stickers", extra[parent])

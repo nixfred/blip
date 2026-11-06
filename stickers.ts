@@ -26,6 +26,8 @@ export interface StickerOverlay {
   from_me: boolean;
   by: string | null;
   ts: string;
+  /** Native type 2007 occupies the sender's Tapback slot, unlike decoration 1000. */
+  reaction?: boolean;
   placement?: StickerPlacement;
 }
 
@@ -98,7 +100,7 @@ export function normalizeStickerOverlays(value: unknown): { stickers: StickerOve
       from_me: raw.from_me === true,
       by: label(raw.by, 160) || null,
       ts: typeof raw.ts === "string" ? raw.ts : "",
-    }, placement ? { placement } : {}));
+    }, raw.reaction === true ? { reaction: true } : {}, placement ? { placement } : {}));
   }
   return { stickers: valid, overflow: Math.max(0, total - valid.length) };
 }
@@ -120,11 +122,15 @@ export function mergeStickers(a?: StickerOverlay[] | null, b?: StickerOverlay[] 
  * range mapping. The renderer anchors it to text, or the first attachment.
  */
 export function placedStickers(stickers: StickerOverlay[] | undefined): StickerOverlay[] {
-  return (stickers ?? []).filter(s => s.part === 0 && !!normalizeStickerPlacement(s.placement));
+  return (stickers ?? []).filter(s => s.reaction !== true && s.part === 0 && !!normalizeStickerPlacement(s.placement));
 }
 
 export function unplacedStickers(stickers: StickerOverlay[] | undefined): StickerOverlay[] {
-  return (stickers ?? []).filter(s => s.part !== 0 || !normalizeStickerPlacement(s.placement));
+  return (stickers ?? []).filter(s => s.reaction !== true && (s.part !== 0 || !normalizeStickerPlacement(s.placement)));
+}
+
+export function reactionStickers(stickers: StickerOverlay[] | undefined): StickerOverlay[] {
+  return (stickers ?? []).filter(s => s.reaction === true);
 }
 
 /** A compact decoration stays bounded even when metadata claims huge scaling.

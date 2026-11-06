@@ -1257,6 +1257,8 @@ def enrich(con, rows, with_names: bool):
             overlay = {"attachment": attachment, "guid": r["guid"] or "", "part": _assoc_part(r["ag"]),
                        "from_me": bool(r["is_from_me"]), "ts": fmt_ts(r["date"]),
                        "by": None if r["is_from_me"] else (name_for(r["handle"]) if with_names else None) or r["handle"]}
+            if r["t"] == 2007:
+                overlay["reaction"] = True
             placement = attachment.get("sticker", {}).get("placement")
             if placement is not None and mid not in nested_stickers:
                 overlay["placement"] = placement

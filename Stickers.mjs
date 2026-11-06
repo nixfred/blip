@@ -65,7 +65,7 @@ function normalizeStickerOverlays(value) {
       from_me: raw.from_me === true,
       by: label(raw.by, 160) || null,
       ts: typeof raw.ts === "string" ? raw.ts : ""
-    }, placement ? { placement } : {}));
+    }, raw.reaction === true ? { reaction: true } : {}, placement ? { placement } : {}));
   }
   return { stickers: valid, overflow: Math.max(0, total - valid.length) };
 }
@@ -83,10 +83,13 @@ function mergeStickers(a, b) {
   });
 }
 function placedStickers(stickers) {
-  return (stickers ?? []).filter((s) => s.part === 0 && !!normalizeStickerPlacement(s.placement));
+  return (stickers ?? []).filter((s) => s.reaction !== true && s.part === 0 && !!normalizeStickerPlacement(s.placement));
 }
 function unplacedStickers(stickers) {
-  return (stickers ?? []).filter((s) => s.part !== 0 || !normalizeStickerPlacement(s.placement));
+  return (stickers ?? []).filter((s) => s.reaction !== true && (s.part !== 0 || !normalizeStickerPlacement(s.placement)));
+}
+function reactionStickers(stickers) {
+  return (stickers ?? []).filter((s) => s.reaction === true);
 }
 function stickerGeometry(placement, width, height, naturalWidth = 64, naturalHeight = 64) {
   const w = finite(width, 1, 1e4) ? width : 64;
@@ -124,6 +127,7 @@ export {
   normalizeStickerOverlays,
   normalizeStickerPlacement,
   placedStickers,
+  reactionStickers,
   stickerGeometry,
   unplacedStickers
 };
