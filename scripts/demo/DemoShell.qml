@@ -139,6 +139,15 @@ ShellRoot {
       function list(): string { view.resetToList(); return "list" }
       function size(w: int, h: int): string { win.demoWidth = Math.max(720, w); win.demoHeight = Math.max(480, h); return "resized" }
       function dismiss(): string { view.catchEscape(); return "closed" }
+      function menu(): string {
+        function find(item) {
+          if (item.objectName === "blipConversationActions") return item
+          var children = item.children || []
+          for (var i = 0; i < children.length; i++) { var found = find(children[i]); if (found) return found }
+          return null
+        }
+        view.openContactMenu(view.active, find(view)); return "opened"
+      }
       function emoji(): string { view.openEmojiPicker(); return "opened" }
       function mode(m: string): string { win.narrow = (m === "narrow"); return m }
       function share(url: string): string { return view.shareLink(url) }

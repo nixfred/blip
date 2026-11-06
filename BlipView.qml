@@ -83,10 +83,11 @@ FocusScope {
   readonly property color canvasDim: backgroundUrl !== "" ? Qt.alpha(foreground, 0.94) : dim
   /** An editor owns the keyboard — the host's key catcher must stand down. */
   readonly property bool editorActive:
-    messageMenu.visible || emojiPopup.visible || contactMenu.visible || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused || focusedAudio !== null || actionFocused
+    messageMenu.visible || emojiPopup.visible || contactMenu.visible || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused || focusedAudio !== null || focusedReaction !== null || actionFocused
   readonly property bool actionFocused: newMessageButton.activeFocus || compactNewMessageButton.activeFocus || appWindowButton.activeFocus
     || backButton.activeFocus || conversationActions.activeFocus || attachmentButton.activeFocus || emojiButton.activeFocus || sendButton.activeFocus
   property var focusedAudio: null
+  property var focusedReaction: null
   readonly property alias composeEditor: composeField
   readonly property real contentHeightHint: listContent.implicitHeight
   /** The view wants keyboard navigation focus back (list mode). */
@@ -942,43 +943,37 @@ FocusScope {
     return "📎"
   }
 
-  /** "❤️👍" — the emoji string for a bubble's tapback pill. */
-  function tapbackRow(list) {
-    var s = ""
-    for (var i = 0; i < (list || []).length; i++) s += list[i].emoji
-    return s
-  }
-  // The tapback pill, overlapping the top corner opposite the tail. One
-  // definition for the text bubble and for the attachments: a picture-only
-  // message hides its text bubble, so the pill sits on the picture (or the
-  // file chip) itself, or the reaction is never seen.
-  component TapbackPill: Rectangle {
+  // One thought balloon for emoji and native sticker reactions. Placed
+  // stickers remain independent transparent decorations on the message.
+  component TapbackPill: ReactionBadge {
     id: pill
-    property bool mine: false
-    property var tapbacks: []
-    visible: (tapbacks || []).length > 0
-    // a tapback on its way (tapback-actions.ts shownTapbacks) draws dimmed
-    opacity: (tapbacks || []).some(function(t) { return t.pending === true }) ? 0.45 : 1
-    width: Math.ceil(pillText.implicitWidth) + Style.space(12)
-    height: Math.ceil(pillText.implicitHeight) + Style.space(8)
-    radius: height / 2
-    color: mine ? Qt.darker(root.mineFill, 2.2) : root.mineFill
-    border.color: Qt.rgba(0, 0, 0, 0.5)
-    border.width: 2
-    z: 2
+    files: root.attFiles
+    metrics: root.attMetrics
+    fetchingId: root.fetchingId
+    fetchQueue: root.fetchQueue
+    diameter: Style.space(34)
+    glyphSize: Style.space(22)
+    maximumWidth: Math.min(Style.space(180), parent.width)
+    width: implicitWidth
+    height: implicitHeight
+    fillColor: Qt.tint(appearance.background, Qt.alpha(root.foreground, 0.16))
+    borderColor: Qt.tint(appearance.background, Qt.alpha(root.foreground, 0.06))
+    textColor: root.foreground
+    z: 4
     anchors.top: parent.top
-    anchors.topMargin: -Style.space(12)
+    anchors.topMargin: -Style.space(26)
     anchors.right: mine ? undefined : parent.right
-    anchors.rightMargin: mine ? 0 : -Style.space(6)
+    anchors.rightMargin: mine ? 0 : -Style.space(4)
     anchors.left: mine ? parent.left : undefined
-    anchors.leftMargin: mine ? -Style.space(6) : 0
-    Text {
-      id: pillText
-      anchors.centerIn: parent
-      text: root.tapbackRow(pill.tapbacks)
-      textFormat: Text.PlainText
-      font.pixelSize: root.fontCaption
+    anchors.leftMargin: mine ? -Style.space(4) : 0
+    onStickerActivated: function(att) { root.activateSticker(att) }
+    property var message: null
+    onStickerContextRequested: function(att) { root.openAttachmentMenu(message, att) }
+    onActiveFocusChanged: {
+      if (activeFocus) root.focusedReaction = pill
+      else if (root.focusedReaction === pill) root.focusedReaction = null
     }
+    Component.onDestruction: if (root.focusedReaction === pill) root.focusedReaction = null
   }
 
   // ---------------------------------------------------- attachment fetching
@@ -2507,7 +2502,7 @@ FocusScope {
       || text === "u" || text === "U"
       || (text >= "1" && text <= "9")
     if (!jump) return false
-    if (searchField.activeFocus || newField.activeFocus || bubbleFocused || root.focusedAudio !== null || root.actionFocused) return false
+    if (searchField.activeFocus || newField.activeFocus || bubbleFocused || root.focusedAudio !== null || root.focusedReaction !== null || root.actionFocused) return false
     if (composeField.activeFocus && (composeField.text.length > 0 || root.attachCount > 0))
       return false
     return handleTextKey(text) === true
@@ -2536,6 +2531,7 @@ FocusScope {
     Keys.onPressed: function(event) { if (root.catchNavKey(event.key)) event.accepted = true }
   }
   function catchEscape() {
+    if (contactMenu.visible) { contactMenu.close(); root.focusDefault(); return true }
     if (emojiPopup.visible) { emojiPopup.close(); composeField.forceActiveFocus(); return true }
     if (newField.activeFocus || newMode) { exitNew(); return true }
     if (searchField.activeFocus || searching) { exitSearch(); return true }
@@ -3543,6 +3539,8 @@ FocusScope {
                 readonly property bool hasCursor: root.bubbleCursor === index
                 // with a tapback on its way drawn in (tapback-actions.ts)
                 readonly property var shownTapbacks: TapbackActions.shownTapbacks(modelData, root.pendingTapback)
+                readonly property var shownReactionStickers: Stickers.reactionStickers(modelData.stickers)
+                readonly property bool hasReactions: shownTapbacks.length > 0 || shownReactionStickers.length > 0
                 onHasCursorChanged: if (hasCursor) root.bubbleCursorItem = bubbleRow
 
                 Layout.fillWidth: true
@@ -3667,7 +3665,7 @@ FocusScope {
                     readonly property string attId: String(modelData.id || "")
                     // the pill lands here when the message has no text bubble to carry it
                     readonly property bool pillHere: index === 0 && String(bubbleRow.modelData.text || "") === ""
-                                                     && (bubbleRow.modelData.tapbacks || []).length > 0
+                                                     && bubbleRow.hasReactions
                     // undefined = not fetched, "" = failed, else file:// url
                     readonly property var fileUrl: root.attFiles[chipRow.attId]
                     readonly property bool failed: chipRow.fileUrl === ""
@@ -3679,7 +3677,7 @@ FocusScope {
                       chipRow.fileUrl !== undefined && chipRow.fileUrl !== ""
                     Layout.fillWidth: true
                     Layout.topMargin: (index === 0 && bubbleRow.modelData.groupStart ? Style.space(6) : 0)
-                                      + (pillHere ? Style.space(12) : 0)
+                                      + (pillHere ? Style.space(26) : 0)
                     spacing: 0
                     Item { Layout.fillWidth: true; visible: bubbleRow.mine }
 
@@ -3710,7 +3708,7 @@ FocusScope {
                         onOpenRequested: function(att) { root.activateSticker(att) }
                         onContextRequested: function(att) { root.openAttachmentMenu(bubbleRow.modelData, att) }
                       }
-                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks }
+                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks; stickers: bubbleRow.shownReactionStickers; message: bubbleRow.modelData; playing: root.surfaceOpen && bubbleRow.y + bubbleRow.height >= flick.contentY && bubbleRow.y <= flick.contentY + flick.height }
                     }
 
                     // fetched image renders inline, like Messages; click = full view.
@@ -3724,7 +3722,7 @@ FocusScope {
                     // every right-aligned element off-screen with it.
                     Item {
                       id: attImage
-                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.modelData.tapbacks }
+                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks; stickers: bubbleRow.shownReactionStickers; message: bubbleRow.modelData; playing: root.surfaceOpen && bubbleRow.y + bubbleRow.height >= flick.contentY && bubbleRow.y <= flick.contentY + flick.height }
                       visible: chipRow.showImage
                       StickerLayer {
                         anchors.fill: parent
@@ -3851,11 +3849,11 @@ FocusScope {
                       onPlaybackEnded: if (root.playingAudio === chipRow.attId) root.audioPlaying = false
                       onPlaybackFailed: root.failAudio(chipRow.attId)
                       onContextRequested: root.openAttachmentMenu(bubbleRow.modelData, chipRow.modelData)
-                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks }
+                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks; stickers: bubbleRow.shownReactionStickers; message: bubbleRow.modelData; playing: root.surfaceOpen && bubbleRow.y + bubbleRow.height >= flick.contentY && bubbleRow.y <= flick.contentY + flick.height }
                     }
 
                     Rectangle {
-                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.modelData.tapbacks }
+                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks; stickers: bubbleRow.shownReactionStickers; message: bubbleRow.modelData; playing: root.surfaceOpen && bubbleRow.y + bubbleRow.height >= flick.contentY && bubbleRow.y <= flick.contentY + flick.height }
                       visible: !chipRow.showImage && !chipRow.isSticker && !chipRow.isAudio
                       Layout.preferredWidth: Math.ceil(chipText.implicitWidth) + Style.space(18)
                       Layout.preferredHeight: Math.ceil(chipText.implicitHeight) + Style.space(12)
@@ -3900,7 +3898,7 @@ FocusScope {
                   onBareUrlChanged: if (bareUrl !== "") root.requestPreview(bareUrl)
                   visible: !modelData.retracted && (!!modelData.link || !!fetched)
                   Layout.fillWidth: true
-                  Layout.topMargin: modelData.groupStart ? Style.space(6) : 0
+                  Layout.topMargin: (modelData.groupStart ? Style.space(6) : 0) + (!textBubbleRow.visible && bubbleRow.hasReactions ? Style.space(26) : 0)
                   spacing: 0
                   // same anchoring as the chips: a card image completing ABOVE
                   // the viewport must not shove the reader's position.
@@ -3926,8 +3924,8 @@ FocusScope {
                     Layout.preferredWidth: Math.min(Math.round(content.width * 0.62), Style.space(380))
                     Layout.preferredHeight: linkCol.implicitHeight
                     radius: Style.space(14)
-                    clip: true
                     color: bubbleRow.mine ? root.mineFill : root.theirsFill
+                    TapbackPill { visible: !textBubbleRow.visible && bubbleRow.hasReactions; mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks; stickers: bubbleRow.shownReactionStickers; message: bubbleRow.modelData; playing: root.surfaceOpen && bubbleRow.y + bubbleRow.height >= flick.contentY && bubbleRow.y <= flick.contentY + flick.height }
                     ColumnLayout {
                       id: linkCol
                       width: parent.width
@@ -4006,7 +4004,7 @@ FocusScope {
                   Layout.fillWidth: true
                   // a tapback pill overlaps the top edge — leave room for it
                   Layout.topMargin: (modelData.groupStart ? Style.space(6) : 0)
-                                    + (bubbleRow.shownTapbacks.length > 0 ? Style.space(12) : 0)
+                                    + (bubbleRow.hasReactions ? Style.space(26) : 0)
                   visible: !modelData.retracted &&
                            (String(modelData.text || "") !== "" || (modelData.attachments || []).length === 0) &&
                            // a message that is ONLY the URL shows just the card,
@@ -4109,7 +4107,7 @@ FocusScope {
                       }
                     }
 
-                    TapbackPill { mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks }
+                    TapbackPill { mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks; stickers: bubbleRow.shownReactionStickers; message: bubbleRow.modelData; playing: root.surfaceOpen && bubbleRow.y + bubbleRow.height >= flick.contentY && bubbleRow.y <= flick.contentY + flick.height }
                   }
 
                   Item { Layout.fillWidth: true; visible: !bubbleRow.mine }
@@ -4155,7 +4153,7 @@ FocusScope {
                   Flow {
                     id: unplacedStickerFlow
                     readonly property bool imageSurface: (bubbleRow.modelData.attachments || []).length > 0 && (root.isImageMime(bubbleRow.modelData.attachments[0].mime) || !!bubbleRow.modelData.attachments[0].sticker) && !!root.attFiles[String(bubbleRow.modelData.attachments[0].id)]
-                    readonly property var stickers: textBubbleRow.visible || imageSurface ? Stickers.unplacedStickers(bubbleRow.modelData.stickers) : (bubbleRow.modelData.stickers || [])
+                    readonly property var stickers: textBubbleRow.visible || imageSurface ? Stickers.unplacedStickers(bubbleRow.modelData.stickers) : (bubbleRow.modelData.stickers || []).filter(function(sticker) { return sticker.reaction !== true })
                     Layout.preferredWidth: Math.min(content.width * 0.78, stickers.length * Style.space(58))
                     Layout.preferredHeight: childrenRect.height
                     spacing: Style.space(6)
@@ -4679,16 +4677,51 @@ FocusScope {
     root.contactContext = t
     if (root.hostWidget && root.isDmChat(t)) root.hostWidget.reloadToastAllowlist()
     if (item) {
-      var at = item.mapToItem(root, Math.max(0, item.width - contactMenu.width), item.height)
-      contactMenu.popup(root, at.x, at.y)
+      var at = item.mapToItem(root, item.width - contactMenu.width, item.height + Style.space(6))
+      contactMenu.open()
+      // A hidden Menu measures its rows on opening. Position after that
+      // measurement so the first open stays below its button when it fits.
+      Qt.callLater(function() {
+        if (!contactMenu.visible) return
+        contactMenu.x = Math.max(Style.space(8), Math.min(at.x, root.width - contactMenu.width - Style.space(8)))
+        contactMenu.y = Math.max(Style.space(8), Math.min(at.y, root.height - contactMenu.height - Style.space(8)))
+      })
     } else contactMenu.popup()
   }
   function menuIcon(name) { return Qt.resolvedUrl("icons/" + name + ".svg") }
+  component ConversationMenuItem: MenuItem {
+    implicitHeight: Math.max(Style.space(36), font.pixelSize + Style.space(18))
+    leftPadding: Style.space(12)
+    rightPadding: Style.space(12)
+    spacing: Style.space(10)
+    icon.width: Style.space(18)
+    icon.height: Style.space(18)
+    background: Rectangle {
+      radius: Style.space(7)
+      color: parent.highlighted ? Qt.alpha(root.accent, 0.90) : "transparent"
+    }
+  }
+  component ConversationMenuSeparator: MenuSeparator {
+    topPadding: Style.space(6)
+    bottomPadding: Style.space(6)
+    leftPadding: Style.space(6)
+    rightPadding: Style.space(6)
+    contentItem: Rectangle { implicitHeight: 1; color: Qt.alpha(root.foreground, 0.12) }
+  }
   Menu {
     id: contactMenu
     objectName: "blipContactMenu"
-    width: Math.max(260, implicitWidth)
-    padding: 6
+    parent: root
+    width: Math.min(Style.space(310), root.width - Style.space(24))
+    height: Math.min(implicitHeight, root.height - Style.space(24))
+    padding: Style.space(10)
+    modal: true
+    dim: false
+    focus: true
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    // Qt 6.8+ may put Menu in a separate window, whose outside clicks are
+    // not delivered by a layer-shell host. Keep the overlay in this window.
+    Component.onCompleted: { try { contactMenu.popupType = Popup.Item } catch (error) {} }
     font.family: root.fontFamily
     font.pixelSize: root.fontBodySmall
     palette.window: Commons.Color.background
@@ -4698,37 +4731,46 @@ FocusScope {
     palette.buttonText: root.foreground
     palette.highlight: root.accent
     palette.highlightedText: "#ffffff"
-    background: Rectangle {
-      color: contactMenu.palette.window
-      border.color: Qt.alpha(contactMenu.palette.windowText, 0.25)
-      radius: 7
+    background: GlassSurface {
+      color: Qt.alpha(contactMenu.palette.window, 0.94)
+      foreground: root.foreground
+      radius: Style.space(14)
     }
-    MenuItem {
+    contentItem: ListView {
+      implicitHeight: contentHeight
+      model: contactMenu.contentModel
+      currentIndex: contactMenu.currentIndex
+      clip: true
+      interactive: contentHeight > height
+      boundsBehavior: Flickable.StopAtBounds
+      ScrollIndicator.vertical: ScrollIndicator {}
+    }
+    ConversationMenuItem {
       text: root.backgroundBusy ? "Updating background…" : "Choose Conversation Background…"
       enabled: !root.backgroundBusy
       onTriggered: root.changeBackground("choose", root.contactContext ? String(root.contactContext.chat) : root.backgroundChat)
     }
-    MenuItem {
+    ConversationMenuItem {
       text: "Reset Conversation Background"
       enabled: !root.backgroundBusy
       onTriggered: root.changeBackground("clear", root.contactContext ? String(root.contactContext.chat) : root.backgroundChat)
     }
-    MenuItem {
+    ConversationMenuItem {
       text: "Choose Default Background…"
       enabled: !root.backgroundBusy
       onTriggered: root.changeBackground("choose", "")
     }
-    MenuItem {
+    ConversationMenuItem {
       text: "Remove Default Background"
       enabled: !root.backgroundBusy
       onTriggered: root.changeBackground("clear", "")
     }
-    MenuSeparator {}
-    MenuItem {
+    ConversationMenuSeparator {}
+    ConversationMenuItem {
       text: "Review contact"
       onTriggered: if (root.contactContext) contactReview.review(root.contactContext)
     }
-    MenuItem {
+    ConversationMenuItem {
       text: root.contactContext && root.contactContext.pinned ? "Unpin" : "Pin"
       icon.source: root.menuIcon("pin")
       enabled: root.isDmChat(root.contactContext)
@@ -4737,8 +4779,8 @@ FocusScope {
         if (t && root.hostWidget) root.hostWidget.conversationAct(t.pinned ? "unpin" : "pin", t.chat)
       }
     }
-    MenuSeparator {}
-    MenuItem {
+    ConversationMenuSeparator {}
+    ConversationMenuItem {
       visible: !(root.contactContext && Number(root.contactContext.unread || 0) > 0)
       height: visible ? implicitHeight : 0
       text: "Mark as Unread"
@@ -4746,7 +4788,7 @@ FocusScope {
       enabled: root.isDmChat(root.contactContext)
       onTriggered: if (root.contactContext) root.markUnread(root.contactContext)
     }
-    MenuItem {
+    ConversationMenuItem {
       visible: root.contactContext && Number(root.contactContext.unread || 0) > 0
       height: visible ? implicitHeight : 0
       text: "Mark as Read"
@@ -4758,7 +4800,7 @@ FocusScope {
         root.markRead(String(t.chat), String(t.last_ts || ""), root.isDmChat(t) ? "read" : "")
       }
     }
-    MenuItem {
+    ConversationMenuItem {
       text: root.contactContext && root.contactContext.muted ? "Show Alerts" : "Hide Alerts"
       icon.source: root.menuIcon("moon")
       enabled: root.isDmChat(root.contactContext)
@@ -4767,11 +4809,11 @@ FocusScope {
         if (t && root.hostWidget) root.hostWidget.conversationAct(t.muted ? "unmute" : "mute", t.chat)
       }
     }
-    MenuSeparator {
+    ConversationMenuSeparator {
       visible: root.isDmChat(root.contactContext)
       height: visible ? implicitHeight : 0
     }
-    MenuItem {
+    ConversationMenuItem {
       objectName: "blipToastNotifications"
       visible: root.isDmChat(root.contactContext)
       height: visible ? implicitHeight : 0

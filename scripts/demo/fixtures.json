@@ -99,10 +99,10 @@
       {
         "min": -78,
         "from_me": true,
-        "text": "Absolutely. Coffee is already packed ☕",
+        "text": "Absolutely. Coffee is already packed \u2615",
         "tapbacks": [
           {
-            "emoji": "❤️",
+            "emoji": "\u2764\ufe0f",
             "from_me": false,
             "by": "Jamie Rivera",
             "kind": "classic"
@@ -123,10 +123,10 @@
       {
         "min": -14,
         "from_me": true,
-        "text": "That light! Let’s take the long way back.",
+        "text": "That light! Let\u2019s take the long way back.",
         "tapbacks": [
           {
-            "emoji": "🌄",
+            "emoji": "\ud83c\udf04",
             "from_me": false,
             "by": "Jamie Rivera",
             "kind": "emoji"
@@ -183,12 +183,32 @@
       {
         "min": -8,
         "from_me": false,
-        "text": "See you there!"
+        "text": "See you there!",
+        "stickers": [
+          {
+            "reaction": true,
+            "attachment": {
+              "id": "990002",
+              "name": "reaction-star.png",
+              "mime": "image/png",
+              "bytes": 12000,
+              "sticker": {
+                "source": "user",
+                "label": "Star reaction",
+                "animated": false
+              }
+            },
+            "guid": "DEMO-REACTION-STICKER",
+            "part": 0,
+            "from_me": true,
+            "by": "You"
+          }
+        ]
       },
       {
         "min": -7,
         "from_me": true,
-        "text": "On my way ✨",
+        "text": "On my way \u2728",
         "read_at": true
       },
       {

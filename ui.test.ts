@@ -526,7 +526,7 @@ describe("QML safety invariants", () => {
     expect(panel).toContain("root.settleAudioFetch(id, d.ok === true, d.error)");
     expect(panel).toContain("resetToken: root.audioResetToken");
     expect(panel).toContain("metadata.playable === true");
-    expect(panel).toContain("focusedAudio !== null || actionFocused");
+    expect(panel).toContain("focusedAudio !== null || focusedReaction !== null || actionFocused");
     expect(panel).toContain("if (root.playingAudio === chipRow.attId) root.stopAudio()");
     expect(panel).not.toContain("exec mpv");
     // Closing, navigating and destruction stop playback and cancel pending fetch intent.
@@ -963,7 +963,8 @@ test("idle remaps do not adopt the focused workspace", () => {
   expect(window).toContain('runRestore("home", savedWorkspace)');
   expect(window).toContain('runRestore("return", savedWorkspace, addr || ourAddress())');
   expect(window).toContain('["bun", win.restoreScript, "prepare", win.savedWorkspace]');
-  expect(window).toContain("/^Blip( \\([0-9]+\\))?$/.test(title)");
+  expect(window).toContain("/^(Messages|Blip( \\([0-9]+\\))?)$/.test(title)");
+  expect(window).toContain("Number(t.lastIpcObject.pid) === Quickshell.processId && t.title === win.title");
   expect(window).toContain("id: strayReturn");
   expect(window).toContain("sameAddress");
 });
@@ -1087,10 +1088,10 @@ test("a thread response taken before a local send or failure cannot replace bubb
 // A picture-only message has no text bubble, so its tapback pill must live on
 // the picture (or file chip) itself, through the one shared TapbackPill.
 test("tapbacks on picture-only messages get a pill on the picture", () => {
-  expect(panel).toContain("component TapbackPill: Rectangle {");
-  expect(panel.split("TapbackPill {").length - 1).toBe(5);   // text, picture, file, standalone sticker, voice message
+  expect(panel).toContain("component TapbackPill: ReactionBadge {");
+  expect(panel.split("TapbackPill {").length - 1).toBe(6);   // text, picture, file, standalone sticker, voice message, link card
   expect(panel).toContain('readonly property bool pillHere: index === 0 && String(bubbleRow.modelData.text || "") === ""');
-  expect(panel).toContain("+ (pillHere ? Style.space(12) : 0)");
+  expect(panel).toContain("+ (pillHere ? Style.space(26) : 0)");
 });
  test("composer boundary arrows use visual lines and preserve modified keys", () => {
    const source = readFileSync(new URL("./ComposerInput.qml", import.meta.url), "utf8");

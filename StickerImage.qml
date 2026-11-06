@@ -12,6 +12,7 @@ Item {
   property bool animationUnavailable: false
   property bool playing: true
   property bool compact: false
+  property bool iconOnly: false
   property color textColor: "#8e8e93"
   property int fontSize: 12
   readonly property bool ready: animated ? motion.status === Image.Ready : still.status === Image.Ready
@@ -67,7 +68,8 @@ Item {
     anchors.centerIn: parent
     width: parent.width
     visible: !root.ready
-    text: root.loading ? "Loading…" : root.failed || root.decodeFailed ? "Sticker unavailable" : "Sticker"
+    text: root.iconOnly ? (root.loading ? "…" : root.failed || root.decodeFailed ? "!" : "◇")
+      : root.loading ? "Loading…" : root.failed || root.decodeFailed ? "Sticker unavailable" : "Sticker"
     textFormat: Text.PlainText
     horizontalAlignment: Text.AlignHCenter
     wrapMode: Text.Wrap

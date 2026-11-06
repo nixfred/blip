@@ -21,7 +21,8 @@ Message timestamps appear on hover or keyboard selection. Delivery failures,
 sending/scheduled state, edits, and the latest read receipt remain visible.
 Photos preserve their aspect ratio and fit within a 240-pixel display height;
 open an attachment to see its original. Transparent stickers have no bubble
-background. Known placements appear on their message; unsupported body-part
+background. Native sticker reactions and emoji reactions share larger round
+balloons with a two-dot tail. Known additive placements appear on their message; unsupported body-part
 placements stay in a separate sticker strip instead of being guessed.
 
 Voice messages have an inline play/pause button, a measured waveform, remaining
@@ -35,7 +36,9 @@ Right-click the player to save the file.
 
 ## Backgrounds
 
-Open a conversation's **⋯** menu:
+Open a conversation's **⋯** menu. Click outside it or press Escape to close;
+its translucent surface and spacious rows stay within the window:
+
 
 - **Choose Conversation Background…** sets a local PNG or JPEG for that chat.
 - **Reset Conversation Background** restores the default background.
@@ -83,3 +86,7 @@ configuration refreshes, cancellation, and component startup.
 popup keys, and send isolation. `python3 scripts/test-audio-session-ui.py`
 checks delayed audio playback, cancellation, switching, and retry using a fake
 fetcher. Neither test contacts the Mac or sends a message.
+
+`python3 scripts/test-conversation-menu-ui.py` exercises outside-click dismissal,
+reopening, Escape, and actual action clicks. `python3 scripts/test-reaction-badge-ui.py`
+checks round sizing and sticker interaction without involving real conversations.
