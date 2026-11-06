@@ -30,19 +30,39 @@ for dep in ssh scp bun jq notify-send wl-copy xdg-open; do
     [[ " ${pkgs[*]} " == *" ${pkg_for[$dep]} "* ]] || pkgs+=("${pkg_for[$dep]}")
   fi
 done
+# QML imports are runtime dependencies even before a voice message is played.
+# These are the standard Qt 6 locations on Arch and Debian/Ubuntu; no package
+# is installed by setup. WebP support is needed for animated sticker previews.
+qt6_has() {
+  local qt_root
+  for qt_root in /usr/lib/qt6 /usr/lib64/qt6 /usr/lib/x86_64-linux-gnu/qt6 /usr/lib/aarch64-linux-gnu/qt6; do
+    compgen -G "$qt_root/$1" >/dev/null && return 0
+  done
+  return 1
+}
+if ! qt6_has qml/QtMultimedia/qmldir; then
+  missing+=("QtMultimedia QML module"); pkgs+=(qt6-multimedia)
+fi
+if ! qt6_has 'plugins/multimedia/*mediaplugin.so'; then
+  missing+=("QtMultimedia playback backend"); pkgs+=(qt6-multimedia-ffmpeg)
+fi
+if ! qt6_has plugins/imageformats/libqwebp.so; then
+  missing+=("Qt WebP image plugin"); pkgs+=(qt6-imageformats)
+fi
 if (( ${#missing[@]} )); then
   echo "✗ missing on this machine: ${missing[*]}" >&2
   echo "  sudo pacman -S --needed ${pkgs[*]}   (Omarchy/Arch names), then re-run blip-setup" >&2
   exit 69
 fi
-echo "✓ Linux prerequisites present (ssh scp bun jq notify-send wl-copy xdg-open)"
-# Optional: voice messages. iPhone voice notes are CAF; ffmpeg turns them into
-# Ogg and mpv plays them without a window. Blip works without either, a voice
-# message just will not play.
+echo "✓ Linux prerequisites present (bridge commands, Qt Multimedia, WebP)"
+# Optional media analysis: ffmpeg converts iPhone CAF voice notes to Ogg and
+# generates real waveforms/animated sticker previews; ffprobe validates audio.
+# Qt Multimedia plays inline. Missing codecs leave an unavailable preview
+# with Save still available; mpv is only an optional external file association.
 optional=()
-for dep in ffmpeg mpv; do command -v "$dep" >/dev/null 2>&1 || optional+=("$dep"); done
+for dep in ffmpeg ffprobe; do command -v "$dep" >/dev/null 2>&1 || optional+=("$dep"); done
 if (( ${#optional[@]} )); then
-  echo "• optional, for voice messages: sudo pacman -S --needed ${optional[*]}"
+  echo "• missing media helpers (${optional[*]}): sudo pacman -S --needed ffmpeg"
 fi
 
 # 0b. bun must be resolvable by the BAR, not just by this shell. Quickshell
