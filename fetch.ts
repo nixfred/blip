@@ -17,6 +17,7 @@
  */
 
 import { shimPath } from "./shim-path";
+import { analyzeAudio, type AudioMetadata } from "./audio-metadata";
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 import {
@@ -522,6 +523,8 @@ export interface FetchResult {
   animated: boolean;
   /** A transparent still is available, but its source animation could not be decoded. */
   animationUnavailable: boolean;
+  /** Real decoded envelope, kept in memory; absent for non-audio media. */
+  audio?: AudioMetadata;
 }
 
 /** An iPhone voice message (CAF, Opus inside) → Ogg Opus, so the default
@@ -603,6 +606,7 @@ export function fetchAttachment(
         ok: true, online: true, path: candidate, url: pathToFileURL(candidate).href, error: "",
         renderMime: cachedMime, ...metrics,
         animationUnavailable: candidate !== animationFile && (sequenceStill || candidate === stillFile || metrics.animationUnavailable),
+        ...(mime.startsWith("audio/") ? { audio: analyzeAudio(candidate, runner) } : {}),
       };
     }
   } catch { /* not cached */ }
@@ -692,6 +696,7 @@ export function fetchAttachment(
     ...imageMetrics(bytes.subarray(0, IMAGE_HEADER_BYTES), renderMime), renderMime,
     animated: animation.animated && animation.format !== "png",
     animationUnavailable: animationUnavailable || (animation.animated && animation.format === "png"),
+    ...(mime.startsWith("audio/") ? { audio: analyzeAudio(file, runner) } : {}),
   };
 }
 

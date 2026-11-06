@@ -109,11 +109,11 @@ function conversation(): Row[] {
       stickers: Array.isArray(m.stickers) ? (m.stickers as any[]).map(sticker => ({...sticker, ts: stamp(Number(m.min) + 1)})) : [],
       attachments: Array.isArray(m.attachments)
         ? (m.attachments as unknown as Array<{ name: string; mime: string; sticker?: unknown }>).map((a, k) => ({
-          id: String(700000 + i * 10 + k), name: a.name, mime: a.mime, bytes: a.sticker ? 12000 : 1843200, ...(a.sticker ? {sticker:a.sticker} : {}),
+          id: String(700000 + i * 10 + k), name: a.name, mime: a.mime, bytes: a.mime.startsWith("audio/") ? 1152044 : a.sticker ? 12000 : 1843200, ...(a.sticker ? {sticker:a.sticker} : {}),
         }))
         : null,
       reply_to: m.reply_to ? { text: String(m.reply_to), from_me: false } : null,
-      edited: m.edited === true, retracted: m.retracted === true, effect: null, audio: false, link: null,
+      edited: m.edited === true, retracted: m.retracted === true, effect: null, audio: m.audio === true, link: null,
     };
     return row;
   });
@@ -196,6 +196,20 @@ function main(): void {
   if (sub === "attachment") {
     const dim = val("--max-dim") || "1600";
     const id = argv.find((a) => /^[0-9]+$/.test(a)) ?? "0";
+    const isAudio = conversation().some(row => (row.attachments as any[] || []).some(a => a.id === id && a.mime.startsWith("audio/")));
+    if (isAudio) {
+      // Synthetic tone envelope, never a recording of a real voice.
+      const frames = 48000 * 12, data = Buffer.alloc(44 + frames * 2);
+      data.write("RIFF"); data.writeUInt32LE(data.length - 8, 4); data.write("WAVEfmt ", 8);
+      data.writeUInt32LE(16, 16); data.writeUInt16LE(1, 20); data.writeUInt16LE(1, 22);
+      data.writeUInt32LE(48000, 24); data.writeUInt32LE(96000, 28); data.writeUInt16LE(2, 32); data.writeUInt16LE(16, 34);
+      data.write("data", 36); data.writeUInt32LE(frames * 2, 40);
+      for (let i = 0; i < frames; i++) {
+        const envelope = Math.max(0, Math.sin(i / 11000) * Math.sin(i / 37000));
+        data.writeInt16LE(Math.round(18000 * envelope * Math.sin(2 * Math.PI * 220 * i / 48000)), 44 + i * 2);
+      }
+      process.stdout.write(data); return;
+    }
     const isSticker = id === "990001" || conversation().some(row => (row.attachments as any[] || []).some(a => a.id === id && a.sticker));
     if (isSticker) {
       // Procedural transparent art: no real person's image or downloaded media.

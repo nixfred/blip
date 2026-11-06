@@ -190,6 +190,36 @@
         "from_me": true,
         "text": "On my way ✨",
         "read_at": true
+      },
+      {
+        "min": -6,
+        "from_me": false,
+        "text": "Here is the voice note."
+      },
+      {
+        "min": -5,
+        "from_me": false,
+        "text": "",
+        "audio": true,
+        "attachments": [
+          {
+            "name": "Voice note.wav",
+            "mime": "audio/wav"
+          }
+        ]
+      },
+      {
+        "min": -4,
+        "from_me": true,
+        "text": "",
+        "audio": true,
+        "attachments": [
+          {
+            "name": "Reply.wav",
+            "mime": "audio/wav"
+          }
+        ],
+        "read_at": true
       }
     ]
   }
