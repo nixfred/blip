@@ -83,7 +83,10 @@ FocusScope {
   readonly property color canvasDim: backgroundUrl !== "" ? Qt.alpha(foreground, 0.94) : dim
   /** An editor owns the keyboard — the host's key catcher must stand down. */
   readonly property bool editorActive:
-    messageMenu.visible || emojiPopup.visible || contactMenu.visible || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused
+    messageMenu.visible || emojiPopup.visible || contactMenu.visible || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused || focusedAudio !== null || actionFocused
+  readonly property bool actionFocused: markAllBtn.activeFocus || newMessageButton.activeFocus || appWindowButton.activeFocus
+    || backButton.activeFocus || conversationActions.activeFocus || attachmentButton.activeFocus || emojiButton.activeFocus || sendButton.activeFocus
+  property var focusedAudio: null
   readonly property alias composeEditor: composeField
   readonly property real contentHeightHint: listContent.implicitHeight
   /** The view wants keyboard navigation focus back (list mode). */
@@ -1138,38 +1141,58 @@ FocusScope {
       Qt.callLater(root.pumpAvatar)
     }
   }
-  /** Voice messages play WITHOUT a window. xdg-open handed audio to mpv,
-   *  which opens an empty black video window for a sound file (Fred,
-   *  2026-09-26). mpv runs with --no-video --force-window=no; the chip toggles:
-   *  a second click on the same file stops it, a click on another stops the
-   *  first. The path is an argument, never interpolated; without mpv the file
-   *  still goes to xdg-open. */
+  // Exactly one inline audio message plays. A paused source keeps its
+  // position; leaving the conversation resets every player and pending intent.
+  property bool audioMuted: false // synthetic demo/test playback only
   property string playingAudio: ""
-  function toggleAudio(path) {
-    if (path === "") return
-    var same = audioPlayer.running && root.playingAudio === path
-    if (audioPlayer.running) audioPlayer.running = false
-    if (same) {
-      root.playingAudio = ""
-      root.note = "stopped"
-      noteTimer.restart()
+  property bool audioPlaying: false
+  property int audioResetToken: 0
+  property string pendingAudioId: ""
+  property string pendingAudioChat: ""
+  function toggleAudio(att) {
+    var id = String(att.id || "")
+    if (id === "" || !root.inThread || !root.surfaceOpen) return
+    if (root.pendingAudioId === id) { root.stopAudio(); return }
+    if (root.playingAudio === id && root.attFiles[id]) {
+      root.audioPlaying = !root.audioPlaying
       return
     }
-    root.playingAudio = path
-    audioPlayer.command = ["sh", "-c",
-      'if command -v mpv >/dev/null 2>&1; then exec mpv --no-video --force-window=no --no-terminal --really-quiet -- "$1"; else exec xdg-open "$1"; fi',
-      "sh", path]
-    audioPlayer.running = true
-    root.note = "playing, click again to stop"
-    noteTimer.restart()
+    root.stopAudio()
+    root.pendingAudioId = id
+    root.pendingAudioChat = String(root.active.chat)
+    // Fetch again before a fresh play: the cache may have been evicted.
+    // An in-flight auto-fetch also satisfies this captured play intent.
+    root.enqueueFetch(att, "audio-play", false)
   }
-  Process {
-    id: audioPlayer
-    onExited: function(code, status) { root.playingAudio = "" }
+  function settleAudioFetch(id, ok) {
+    if (root.pendingAudioId !== id) return
+    var belongsHere = root.surfaceOpen && root.inThread
+      && String(root.active.chat) === root.pendingAudioChat
+    root.pendingAudioId = ""
+    root.pendingAudioChat = ""
+    if (ok && belongsHere && root.attFiles[id]) {
+      var metadata = (root.attMetrics[id] || {}).audio
+      if (metadata && metadata.playable === true) {
+        root.playingAudio = id
+        root.audioPlaying = true
+      } else root.note = "Audio preview unavailable — right-click to save the file"
+    }
+  }
+  function failAudio(id) {
+    var requested = root.playingAudio === id || root.pendingAudioId === id
+    if (requested) root.stopAudio()
+    // Clear the source so retry reloads even when the cache URL is unchanged.
+    var files = Object.assign({}, root.attFiles)
+    files[id] = ""
+    root.attFiles = files
+    if (requested) root.note = "Could not play this audio message — try again or save the file"
   }
   function stopAudio() {
-    if (audioPlayer.running) audioPlayer.running = false
+    root.audioPlaying = false
     root.playingAudio = ""
+    root.pendingAudioId = ""
+    root.pendingAudioChat = ""
+    root.audioResetToken++
   }
   Component.onDestruction: root.stopAudio()
 
@@ -1237,7 +1260,8 @@ FocusScope {
         // while sips turns a 5.07 MB HEIC into a 7.80 MB JPEG, so full-size
         // iPhone photos were rejected at both ends and simply never appeared.
         var b = atts[j].bytes
-        if ((isImageMime(atts[j].mime) || (atts[j].sticker && String(atts[j].mime || "").indexOf("video/") === 0)) && typeof b === "number" && b > 0 && b <= root.autoFetchMaxSource)
+        var audio = !atts[j].sticker && String(atts[j].mime || "").indexOf("audio/") === 0
+        if ((isImageMime(atts[j].mime) || (atts[j].sticker && String(atts[j].mime || "").indexOf("video/") === 0) || audio) && typeof b === "number" && b > 0 && b <= root.autoFetchMaxSource && (!audio || b <= 5 * 1024 * 1024))
           enqueueFetch(atts[j], "", true)
       }
       // link-card preview PNGs are small; the auto-fetch transfer cap bounds them
@@ -1260,6 +1284,7 @@ FocusScope {
    *  when attFiles already has a url — the LRU may have evicted the file
    *  since (Codex finding #5); a cache hit is instant anyway. */
   function openAttachment(att) {
+    if (!att.sticker && String(att.mime || "").indexOf("audio/") === 0) { root.toggleAudio(att); return }
     var id = String(att.id || "")
     if (id === "") return
     if (attFiles[id] === "") {   // failed marker — clear it so a retry runs
@@ -2071,7 +2096,7 @@ FocusScope {
           if (!isFinite(pixelHeight) || pixelHeight < 1 || pixelHeight > 100000) pixelHeight = 0
           if (!keepInline) {
             var metrics = Object.assign({}, root.attMetrics)
-            metrics[id] = { pixelRatio: ratio, pixelWidth: pixelWidth, pixelHeight: pixelHeight, animated: d.animated === true, renderMime: String(d.renderMime || ""), animationUnavailable: d.animationUnavailable === true }
+            metrics[id] = { pixelRatio: ratio, pixelWidth: pixelWidth, pixelHeight: pixelHeight, animated: d.animated === true, renderMime: String(d.renderMime || ""), animationUnavailable: d.animationUnavailable === true, audio: d.audio || null }
             root.attMetrics = metrics
           }
           if (d.ok === true && root.fetchJobAction === "copy") {
@@ -2090,14 +2115,13 @@ FocusScope {
               saveProc.running = true
             } else root.note = "a save dialog is already open"
           } else if (d.ok === true && root.fetchJobAction === "open") {
-            if (String(root.fetchJobMime || "").indexOf("audio/") === 0) {
-              root.toggleAudio(String(d.path || ""))
-            } else if (root.openableMime(root.fetchJobMime)) {
+            if (root.openableMime(root.fetchJobMime)) {
               Quickshell.execDetached(["xdg-open", String(d.url || "")])
             } else {
               root.note = "saved, not opened (" + (root.fetchJobMime || "unknown type") + "): " + String(d.path || "")
             }
           }
+          root.settleAudioFetch(id, d.ok === true)
           if (root.fetchJobSticker && root.fetchJobAction === "open" && !root.attFiles[id]) {
             var previewAtt = { id: id, name: root.fetchJobName, mime: root.fetchJobMime, sticker: {} }
             Qt.callLater(function() { root.enqueueFetch(previewAtt, "preview", true) })
@@ -2116,6 +2140,7 @@ FocusScope {
       }
     }
     onExited: function(code, status) {
+      root.settleAudioFetch(root.fetchingId, false)
       root.fetchingId = ""
       Qt.callLater(root.pumpFetch)
     }
@@ -2478,7 +2503,7 @@ FocusScope {
       || text === "u" || text === "U"
       || (text >= "1" && text <= "9")
     if (!jump) return false
-    if (searchField.activeFocus || newField.activeFocus || bubbleFocused) return false
+    if (searchField.activeFocus || newField.activeFocus || bubbleFocused || root.focusedAudio !== null || root.actionFocused) return false
     if (composeField.activeFocus && (composeField.text.length > 0 || root.attachCount > 0))
       return false
     return handleTextKey(text) === true
@@ -2560,36 +2585,39 @@ FocusScope {
           Layout.preferredHeight: Style.space(32)
           spacing: Style.space(8)
           Item { Layout.fillWidth: true }
-          PanelActionButton {
+          ComposerButton {
             id: markAllBtn
             visible: root.canMarkAllRead
-            iconText: "✓"
+            iconName: "check"
             tooltipText: "Mark all conversations read"
             Accessible.name: "Mark all conversations read"
-            focusable: true
             foreground: root.foreground
-            hoverColor: root.accent
-            fontFamily: root.fontFamily
+            accent: root.accent
+            motionDuration: Style.duration(120)
+            font.family: root.fontFamily
             onClicked: root.markAllRead()
           }
-          PanelActionButton {
+          ComposerButton {
+            id: newMessageButton
             visible: root.online && !root.newMode
-            iconText: "✎"
+            iconName: "compose"
             tooltipText: "New message (n)"
             Accessible.name: "New message"
-            focusable: true
             foreground: root.foreground
-            hoverColor: root.accent
-            fontFamily: root.fontFamily
+            accent: root.accent
+            motionDuration: Style.duration(120)
+            font.family: root.fontFamily
             onClicked: root.startNew()
           }
-          PanelActionButton {
+          ComposerButton {
+            id: appWindowButton
             visible: root.online && !root.splitView
-            iconText: "⇱"
+            iconName: "window"
             tooltipText: "Open the app window"
             foreground: root.foreground
-            hoverColor: root.accent
-            fontFamily: root.fontFamily
+            accent: root.accent
+            motionDuration: Style.duration(120)
+            font.family: root.fontFamily
             onClicked: root.openApp()
           }
         }
@@ -2784,38 +2812,25 @@ FocusScope {
               Layout.fillWidth: true
               visible: root.online && root.listShowing && !root.newMode
               placeholderText: "Search"
-              background: Rectangle {
-                radius: height / 2
+              background: GlassSurface {
                 color: Qt.alpha(root.foreground, 0.08)
-                border.width: searchField.activeFocus ? 1 : 0
-                border.color: root.accent
+                foreground: root.foreground
+                accent: root.accent
+                focused: searchField.activeFocus
+                motionDuration: Style.duration(120)
               }
               verticalPadding: Style.space(8)
               horizontalPadding: Style.space(12)
               Accessible.name: "Search"
               leftPadding: horizontalPadding + searchGlyph.width + Style.space(7)
-              Canvas {
+              LineIcon {
                 id: searchGlyph
                 anchors.left: parent.left
                 anchors.leftMargin: searchField.horizontalPadding
                 anchors.verticalCenter: parent.verticalCenter
-                width: Style.space(16)
-                height: width
-                readonly property color strokeColor: searchField.placeholderTextColor
-                onStrokeColorChanged: requestPaint()
-                onPaint: {
-                  var ctx = getContext("2d")
-                  ctx.reset()
-                  ctx.scale(width / 16, height / 16)
-                  ctx.strokeStyle = strokeColor
-                  ctx.lineWidth = 1.5
-                  ctx.lineCap = "round"
-                  ctx.beginPath()
-                  ctx.arc(6.5, 6.5, 5, 0, Math.PI * 2)
-                  ctx.moveTo(10.1, 10.1)
-                  ctx.lineTo(14.5, 14.5)
-                  ctx.stroke()
-                }
+                width: Style.space(16); height: width
+                name: "search"
+                color: searchField.placeholderTextColor
               }
               foreground: root.foreground
               accent: root.accent
@@ -3325,17 +3340,19 @@ FocusScope {
         Item {
           Layout.fillWidth: true
           Layout.preferredHeight: root.inThread ? Style.space(82) : Style.space(50)
-          PanelActionButton {
+          ComposerButton {
+            id: backButton
             visible: root.inThread && !root.splitView
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
-            iconText: "←"
+            iconName: "back"
+            fill: root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.76) : Qt.alpha(root.foreground, 0.10)
             tooltipText: "Back to messages (Esc)"
             Accessible.name: "Back to messages"
-            focusable: true
             foreground: root.foreground
-            hoverColor: root.accent
-            fontFamily: root.fontFamily
+            accent: root.accent
+            motionDuration: Style.duration(120)
+            font.family: root.fontFamily
             onClicked: root.back()
           }
           Column {
@@ -3352,12 +3369,13 @@ FocusScope {
               fontFamily: root.fontFamily
               onRequestAvatar: function(handle) { root.requestAvatar(handle) }
             }
-            Rectangle {
+            GlassSurface {
               anchors.horizontalCenter: parent.horizontalCenter
               width: Math.min(parent.width, headerName.implicitWidth + Style.space(18))
               height: headerName.implicitHeight + Style.space(6)
               radius: height / 2
-              color: root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.74) : "transparent"
+              color: root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.74) : Qt.alpha(root.foreground, 0.08)
+              foreground: root.foreground
               Text {
                 id: headerName
                 anchors.centerIn: parent
@@ -3373,19 +3391,20 @@ FocusScope {
               }
             }
           }
-          PanelActionButton {
+          ComposerButton {
             id: conversationActions
             objectName: "blipConversationActions"
             visible: root.inThread
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            iconText: "⋯"
+            iconName: "more"
+            fill: root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.76) : Qt.alpha(root.foreground, 0.10)
             tooltipText: "Conversation actions"
             Accessible.name: "Conversation actions"
-            focusable: true
             foreground: root.foreground
-            hoverColor: root.accent
-            fontFamily: root.fontFamily
+            accent: root.accent
+            motionDuration: Style.duration(120)
+            font.family: root.fontFamily
             onClicked: root.openContactMenu(root.active, conversationActions)
           }
         }
@@ -3645,6 +3664,7 @@ FocusScope {
                     readonly property bool failed: chipRow.fileUrl === ""
                     readonly property var imageMetrics: root.attMetrics[chipRow.attId] || ({})
                     readonly property bool isSticker: !!modelData.sticker
+                    readonly property bool isAudio: !isSticker && String(modelData.mime || "").indexOf("audio/") === 0
                     readonly property bool showImage:
                       !isSticker && root.isImageMime(chipRow.modelData.mime) &&
                       chipRow.fileUrl !== undefined && chipRow.fileUrl !== ""
@@ -3659,7 +3679,7 @@ FocusScope {
                       Layout.preferredWidth: Math.min(Style.space(160), content.width * 0.50)
                       Layout.preferredHeight: Layout.preferredWidth
                       attachment: chipRow.modelData
-                      source: chipRow.fileUrl || ""
+                      source: chipRow.isSticker ? (chipRow.fileUrl || "") : ""
                       loading: root.stickerLoading(chipRow.attId)
                       failed: chipRow.attId === "" || chipRow.failed
                       animated: chipRow.imageMetrics.animated === true
@@ -3790,9 +3810,44 @@ FocusScope {
                       }
                     }
 
+                    AudioMessage {
+                      objectName: chipRow.isAudio ? "blipAudio:" + chipRow.attId : ""
+                      visible: chipRow.isAudio
+                      Layout.preferredWidth: Math.min(Style.space(270), content.width * 0.80)
+                      Layout.preferredHeight: Style.space(64)
+                      // Only recognized audio containers reach the media
+                      // decoder; an audio MIME alone could conceal a playlist.
+                      source: chipRow.isAudio && (chipRow.imageMetrics.audio || {}).playable === true ? (chipRow.fileUrl || "") : ""
+                      waveform: (chipRow.imageMetrics.audio || {}).waveform || []
+                      durationMs: Number((chipRow.imageMetrics.audio || {}).durationMs || 0)
+                      playing: root.playingAudio === chipRow.attId && root.audioPlaying
+                      muted: root.audioMuted
+                      resetToken: root.audioResetToken
+                      loading: root.stickerLoading(chipRow.attId)
+                      failed: chipRow.attId === "" || chipRow.failed || (!!chipRow.fileUrl && (chipRow.imageMetrics.audio || {}).playable !== true)
+                      fillColor: bubbleRow.mine ? root.mineFill : root.theirsFill
+                      textColor: bubbleRow.mine ? root.mineText : root.theirsText
+                      fontFamily: root.fontFamily
+                      fontSize: root.fontCaption
+                      id: audioMessage
+                      onControlsFocusedChanged: {
+                        if (controlsFocused) root.focusedAudio = audioMessage
+                        else if (root.focusedAudio === audioMessage) root.focusedAudio = null
+                      }
+                      Component.onDestruction: {
+                        if (root.focusedAudio === audioMessage) root.focusedAudio = null
+                        if (root.playingAudio === chipRow.attId) root.stopAudio()
+                      }
+                      onToggleRequested: root.toggleAudio(chipRow.modelData)
+                      onPlaybackEnded: if (root.playingAudio === chipRow.attId) root.audioPlaying = false
+                      onPlaybackFailed: root.failAudio(chipRow.attId)
+                      onContextRequested: root.openAttachmentMenu(bubbleRow.modelData, chipRow.modelData)
+                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks }
+                    }
+
                     Rectangle {
                       TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.modelData.tapbacks }
-                      visible: !chipRow.showImage && !chipRow.isSticker
+                      visible: !chipRow.showImage && !chipRow.isSticker && !chipRow.isAudio
                       Layout.preferredWidth: Math.ceil(chipText.implicitWidth) + Style.space(18)
                       Layout.preferredHeight: Math.ceil(chipText.implicitHeight) + Style.space(12)
                       radius: Style.space(14)
@@ -4227,7 +4282,8 @@ FocusScope {
             Layout.alignment: Qt.AlignBottom
             Layout.bottomMargin: Style.space(3)
             implicitWidth: Style.space(34)
-            iconText: "+"
+            iconName: "plus"
+            motionDuration: Style.duration(120)
             tooltipText: "Attach files"
             foreground: root.foreground
             fill: root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.76) : Qt.alpha(root.foreground, 0.10)
@@ -4257,12 +4313,14 @@ FocusScope {
             // The border belongs to the SLOT, not the field: inside composeFlick
             // the TextArea is as tall as its text, so a background there would
             // scroll away and its rounded bottom edge would be clipped off.
-            Rectangle {
+            GlassSurface {
               anchors.fill: parent
               color: root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.76) : Qt.alpha(root.foreground, 0.06)
-              border.width: 1
-              border.color: Qt.alpha(root.foreground, composeField.activeFocus ? 0.35 : 0.20)
+              foreground: root.foreground
+              accent: Qt.alpha(root.foreground, 0.35)
+              focused: composeField.activeFocus
               radius: Math.min(height / 2, Style.space(22))
+              motionDuration: Style.duration(120)
             }
 
             // A long draft reads back with the wheel (#62). The caret keeps what
@@ -4412,7 +4470,8 @@ FocusScope {
             Layout.alignment: Qt.AlignBottom
             Layout.bottomMargin: Style.space(3)
             implicitWidth: Style.space(34)
-            iconText: "☺"
+            iconName: "emoji"
+            motionDuration: Style.duration(120)
             tooltipText: "Emoji"
             foreground: root.foreground
             fill: root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.76) : Qt.alpha(root.foreground, 0.10)
@@ -4424,25 +4483,18 @@ FocusScope {
             }
           }
 
-          // send button — the blue arrow circle (lit when text OR a file is queued)
-          Rectangle {
+          ComposerButton {
+            id: sendButton
             Layout.alignment: Qt.AlignVCenter
-            Accessible.role: Accessible.Button
-            Accessible.name: "Send message"
-            Accessible.onPressAction: root.send()
             readonly property bool armed: composeField.text.trim() !== "" || root.attachCount > 0
-            width: Style.space(32); height: width; radius: width / 2
-            color: armed ? root.mineFill : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15)
-            Text {
-              anchors.centerIn: parent
-              text: "↑"
-              textFormat: Text.PlainText
-              color: parent.armed ? "#ffffff" : root.canvasDim
-              font.family: root.fontFamily
-              font.pixelSize: root.fontBody
-              font.bold: true
-            }
-            TapHandler { onTapped: root.send() }
+            implicitWidth: Style.space(32)
+            iconName: "send"
+            tooltipText: "Send message"
+            foreground: armed ? "#ffffff" : root.canvasDim
+            fill: armed ? root.mineFill : root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.76) : Qt.alpha(root.foreground, 0.10)
+            accent: root.accent
+            motionDuration: Style.duration(120)
+            onClicked: root.send()
           }
         }
 

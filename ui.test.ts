@@ -117,7 +117,8 @@ describe("QML safety invariants", () => {
     expect(flick).toContain("interactive: false");
     // the border is the slot's: inside the flickable it would scroll away
     const slot = panel.slice(panel.indexOf("id: composeSlot"), panel.indexOf("id: composeFlick"));
-    expect(slot).toContain("border.width: 1");
+    expect(slot).toContain("GlassSurface {");
+    expect(readFileSync(new URL("./GlassSurface.qml", import.meta.url), "utf8")).toContain("border.width: 1");
     expect(slot).toContain("radius: Math.min(height / 2, Style.space(22))");
     expect(panel).toContain("background: null");
   });
@@ -517,14 +518,18 @@ describe("QML safety invariants", () => {
     expect(parseTouchpadScrollGain("scroll_gain=0.25\ntouchpad_scroll_gain=0.5")).toBe(0.5);
   });
 
-  test("a voice message plays without a window, and the chip toggles it", () => {
-    // xdg-open gave audio to mpv, which opened an empty black video window.
-    expect(panel).toContain('if (String(root.fetchJobMime || "").indexOf("audio/") === 0) {');
-    expect(panel).toContain("root.toggleAudio(String(d.path || \"\"))");
-    expect(panel).toContain("exec mpv --no-video --force-window=no --no-terminal --really-quiet -- \"$1\"");
-    expect(panel).toContain('"sh", path]'); // the path is an argument, never interpolated
-    expect(panel).toContain("var same = audioPlayer.running && root.playingAudio === path");
-    // clicking away stops it: surface closed, another thread, view destroyed
+  test("inline voice playback pauses and scopes delayed play intent to its conversation", () => {
+    expect(panel).toContain("AudioMessage {");
+    expect(panel).toContain('root.enqueueFetch(att, "audio-play", false)');
+    expect(panel).toContain("root.audioPlaying = !root.audioPlaying");
+    expect(panel).toContain("String(root.active.chat) === root.pendingAudioChat");
+    expect(panel).toContain("root.settleAudioFetch(id, d.ok === true)");
+    expect(panel).toContain("resetToken: root.audioResetToken");
+    expect(panel).toContain("metadata.playable === true");
+    expect(panel).toContain("focusedAudio !== null || actionFocused");
+    expect(panel).toContain("if (root.playingAudio === chipRow.attId) root.stopAudio()");
+    expect(panel).not.toContain("exec mpv");
+    // Closing, navigating and destruction stop playback and cancel pending fetch intent.
     expect(panel).toContain("if (!surfaceOpen) root.stopAudio()");
     expect(panel).toContain("root.stopAudio() // another conversation");
     expect(panel).toContain("Component.onDestruction: root.stopAudio()");
@@ -1083,7 +1088,7 @@ test("a thread response taken before a local send or failure cannot replace bubb
 // the picture (or file chip) itself, through the one shared TapbackPill.
 test("tapbacks on picture-only messages get a pill on the picture", () => {
   expect(panel).toContain("component TapbackPill: Rectangle {");
-  expect(panel.split("TapbackPill {").length - 1).toBe(4);   // text bubble, picture, file chip, standalone sticker
+  expect(panel.split("TapbackPill {").length - 1).toBe(5);   // text, picture, file, standalone sticker, voice message
   expect(panel).toContain('readonly property bool pillHere: index === 0 && String(bubbleRow.modelData.text || "") === ""');
   expect(panel).toContain("+ (pillHere ? Style.space(12) : 0)");
 });

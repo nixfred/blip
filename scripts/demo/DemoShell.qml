@@ -117,6 +117,7 @@ ShellRoot {
       anchors.margins: win.narrow ? Style.space(12) : 0
       hostWidget: host
       surfaceOpen: true
+      audioMuted: true          // never make QA playback audible
       readActive: false          // a screenshot must never move a read mark
       splitView: !win.narrow
       foreground: Commons.Color.foreground
@@ -142,6 +143,26 @@ ShellRoot {
       function mode(m: string): string { win.narrow = (m === "narrow"); return m }
       function share(url: string): string { return view.shareLink(url) }
       function snapshot(): string { return JSON.stringify({background:view.backgroundUrl,chat:view.backgroundChat,note:view.note,bubbles:view.bubbles.length,busy:view.backgroundBusy,pending:view.backgroundReloadPending}) }
+      function audio(id: string): string {
+        for (var i = 0; i < view.bubbles.length; i++) {
+          var atts = view.bubbles[i].attachments || []
+          for (var j = 0; j < atts.length; j++) if (String(atts[j].id) === id) {
+            view.toggleAudio(atts[j]); return "toggled"
+          }
+        }
+        return "unknown attachment"
+      }
+      function audioState(): string {
+        var states = []
+        function visit(item) {
+          if (String(item.objectName || "").indexOf("blipAudio:") === 0)
+            states.push({id:item.objectName,position:item.positionMs,duration:item.totalDurationMs,playing:item.actuallyPlaying,ready:item.ready,seekable:item.seekable,failed:item.decodeFailed})
+          var children = item.children || []
+          for (var i = 0; i < children.length; i++) visit(children[i])
+        }
+        visit(view)
+        return JSON.stringify({intent:view.playingAudio,playing:view.audioPlaying,pending:view.pendingAudioId,states:states})
+      }
       function threads(): string { return String(host.threads.length) }
     }
   }

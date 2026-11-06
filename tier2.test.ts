@@ -910,7 +910,9 @@ describe("multi-photo messages and the preview transform (#Crystal/Thatchers)", 
     const panelSrc = readFileSync(new URL("./BlipView.qml", import.meta.url), "utf8");
     expect(panelSrc).toContain("for (var j = 0; j < atts.length; j++)");
     expect(panelSrc).toContain("b <= root.autoFetchMaxSource");
-    expect(panelSrc).not.toContain("b <= 5 * 1024 * 1024");
+    // Photos retain the larger source allowance; only audio has the lower
+    // automatic transfer gate, since it is not resampled by the Mac.
+    expect(panelSrc).toContain("&& (!audio || b <= 5 * 1024 * 1024)");
   });
 });
 
