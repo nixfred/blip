@@ -534,11 +534,7 @@ FocusScope {
   property string reloadChat: ""
 
   function avatarInitials(thread) {
-    var n = String(thread.name || "")
-    if (/^[+0-9]/.test(n) || n === "") return "#"
-    var parts = n.trim().split(/\s+/).filter(function(p) { return p.length > 0 })
-    if (parts.length === 0) return "#"
-    return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase()
+    return ConversationAppearance.conversationInitials(thread)
   }
 
   readonly property bool contactsOpen: contactReview.opened
@@ -2849,9 +2845,9 @@ FocusScope {
                        && root.pinnedThreads.length > 0
               columns: 3
               columnSpacing: Style.space(8)
-              rowSpacing: Style.space(10)
-              Layout.topMargin: Style.space(8)
-              Layout.bottomMargin: Style.space(8)
+              rowSpacing: Style.space(6)
+              Layout.topMargin: Style.space(4)
+              Layout.bottomMargin: Style.space(4)
 
               Repeater {
                 id: pinnedRepeater
@@ -2865,8 +2861,9 @@ FocusScope {
                   readonly property bool selected: root.splitView && root.isShowing(modelData)
                   onHasCursorChanged: if (hasCursor) root.cursorRow = pinnedTile
                   Layout.fillWidth: true
-                  Layout.preferredWidth: Math.max(1, (pinnedGrid.width - pinnedGrid.columnSpacing * 2) / 3)
-                  implicitHeight: pinnedColumn.implicitHeight + Style.space(12)
+                  Layout.preferredWidth: 1
+                  Layout.minimumWidth: 0
+                  implicitHeight: pinnedColumn.implicitHeight + Style.space(16)
                   radius: Style.space(10)
                   color: selected ? root.selectedFill
                     : pinnedHover.hovered || (hasCursor && root.cursorShown)
@@ -2887,7 +2884,7 @@ FocusScope {
                     anchors.leftMargin: Style.space(4)
                     anchors.rightMargin: Style.space(4)
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: Style.space(4)
+                    spacing: Style.space(7)
 
                     Rectangle {
                       id: pinnedAvatar
@@ -2895,7 +2892,7 @@ FocusScope {
                       // Hidden layouts defer their first measurement. Derive
                       // the size from the pane's known width and supply both
                       // implicit size and layout hints before the first open.
-                      readonly property real avatarSize: Math.min(88, Math.max(56,
+                      readonly property real avatarSize: Math.min(76, Math.max(56,
                         ((root.splitView ? root.sidebarWidth - Style.space(24) : root.width)
                           - pinnedGrid.columnSpacing * 2) / 3 * 0.80))
                       implicitWidth: avatarSize
@@ -2956,8 +2953,8 @@ FocusScope {
                         textFormat: Text.PlainText
                         color: root.foreground
                         font.family: root.fontFamily
-                        font.pixelSize: root.fontBody
-                        font.bold: true
+                        font.pixelSize: Math.round(pinnedAvatar.avatarSize * 0.32)
+                        font.weight: Font.Medium
                       }
 
                       // The unread dot. Pinned threads live ONLY here — the list
@@ -2990,14 +2987,17 @@ FocusScope {
                     // the label; the digit was a hint, not the mechanism.
                     Text {
                       Layout.fillWidth: true
-                      text: String(modelData.name || modelData.chat)
+                      Layout.minimumWidth: 0
+                      text: ConversationAppearance.pinnedName(modelData, root.pinnedThreads,
+                        root.isGroupId(String(modelData.chat || "")))
                       textFormat: Text.PlainText
                       horizontalAlignment: Text.AlignHCenter
                       elide: Text.ElideRight
                       color: root.foreground
                       font.family: root.fontFamily
                       font.pixelSize: root.fontCaption
-                      font.bold: modelData.unread > 0
+                      font.weight: modelData.unread > 0 ? Font.DemiBold : Font.Normal
+                      Accessible.name: ConversationAppearance.conversationName(modelData)
                     }
                   }
                 }
@@ -3115,7 +3115,7 @@ FocusScope {
                   onHasCursorChanged: if (hasCursor) root.cursorRow = threadRow
 
                   Layout.fillWidth: true
-                  implicitHeight: Math.max(Style.space(64), rowRow.implicitHeight + Style.space(18))
+                  implicitHeight: Math.max(Style.space(68), rowRow.implicitHeight + Style.space(16))
                   radius: Style.space(10)
                   color: selected ? root.selectedFill : highlighted
                     ? root.hoverFill
@@ -3154,7 +3154,7 @@ FocusScope {
                       id: avatarCircle
                       // Messages' sidebar avatar is large relative to the row;
                       // Keep ordinary avatars legible beside two preview lines.
-                      width: Style.space(40); height: width; radius: width / 2
+                      width: Style.space(42); height: width; radius: width / 2
                       color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
                       // A group binds to ITS OWN chat id (its Messages group photo); a DM to
                       // the person. Binding a group to `handle` showed whoever spoke last —
@@ -3211,14 +3211,15 @@ FocusScope {
                         textFormat: Text.PlainText
                         color: root.foreground
                         font.family: root.fontFamily
-                        font.pixelSize: root.fontCaption
-                        font.bold: true
+                        font.pixelSize: root.fontBodySmall + 2
+                        font.weight: Font.Medium
                       }
                     }
 
                     ColumnLayout {
                       Layout.fillWidth: true
-                      spacing: Style.space(1)
+                      Layout.minimumWidth: 0
+                      spacing: Style.space(3)
                       RowLayout {
                         Layout.fillWidth: true
                         spacing: Style.space(6)
@@ -4464,7 +4465,18 @@ FocusScope {
   }
 
   function openEmojiPicker() {
+    if (emojiPopup.visible) { emojiPopup.close(); return }
     emojiPopup.open()
+  }
+  function insertComposerEmoji(emoji) {
+    var start = composeField.selectionStart
+    var end = composeField.selectionEnd
+    var at = start !== end ? start : composeField.cursorPosition
+    if (start !== end) composeField.remove(start, end)
+    composeField.insert(at, emoji)
+    composeField.cursorPosition = at + emoji.length
+    emojiPopup.close()
+    composeField.forceActiveFocus()
   }
   Popup {
     id: emojiPopup
@@ -4475,6 +4487,7 @@ FocusScope {
     y: Math.max(Style.space(8), root.height - height - composeSlot.height - Style.space(28))
     padding: Style.space(8)
     focus: true
+    onClosed: if (root.inThread) composeField.forceActiveFocus()
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     background: Rectangle {
       color: appearance.background
@@ -4494,9 +4507,7 @@ FocusScope {
       palette.window: appearance.background
       palette.highlight: root.accent
       onEmojiChosen: function(emoji) {
-        composeField.insert(composeField.cursorPosition, emoji)
-        emojiPopup.close()
-        composeField.forceActiveFocus()
+        root.insertComposerEmoji(emoji)
       }
     }
   }

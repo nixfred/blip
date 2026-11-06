@@ -986,7 +986,7 @@ test("pinned avatars size through Layout hints, not width bindings", () => {
   const start = panel.indexOf("id: pinnedAvatar");
   expect(start).toBeGreaterThan(-1);
   const avatar = panel.slice(start, panel.indexOf("radius: width / 2", start));
-  expect(avatar).toContain("readonly property real avatarSize: Math.min(88, Math.max(56,");
+  expect(avatar).toContain("readonly property real avatarSize: Math.min(76, Math.max(56,");
   expect(avatar).toContain("implicitWidth: avatarSize");
   expect(avatar).toContain("implicitHeight: avatarSize");
   expect(avatar).toContain("Layout.preferredWidth: avatarSize");
