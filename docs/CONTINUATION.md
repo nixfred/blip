@@ -1,0 +1,38 @@
+# Private continuation
+
+This checkout preserves Blip 2.6.2 and its original MIT license and history.
+The recovered baseline is `d51b0bccb35b723be5050bee9cae73f6413b752d`
+(November 4, 2026), also available from:
+
+- https://github.com/ianswope/blip
+- https://github.com/mmdisbrow/blip
+- https://github.com/TabibitoLab/blip
+
+On November 6, the original repository and account were unavailable from
+GitHub's live public API. This does not establish why they were unavailable,
+or that the original author abandoned the project. The project website still
+linked to the original repository; no confirmed migration was found.
+
+The public fork search also found `duketopceo/blip` commit
+`e38cf844fa000e75813c19f37d1b0cc580c8f471` (November 5), an Omarchy/Qt
+compatibility change. Its branch lacks 420 commits in the recovered baseline,
+so its later timestamp is not a newer complete release. Its namespaced QML
+imports and plain-text display precautions are useful review references;
+replacing the baseline with that branch would lose substantial functionality.
+
+Blip was created by Fred Nix with Larry. The Mac bridge was originally
+vendored from `nixfred/claude-on-mac`; see `bridge/BRIDGE-VERSION` and the
+original README credits. This continuation is not an official upstream release.
+
+## Development checks
+
+Run `bun test`, the synthetic Python tests under `bridge/mac` and
+`bridge/linux`, `python3 test_otp_desktop.py`, and
+`python3 scripts/test-read-ui.py`. Consult `.github/workflows/ci.yml` for the
+complete upstream check list. Desktop previews use the fake bridge in
+`scripts/demo`, never real conversations. Tests that need local sockets or
+subprocess execution must run with those permissions; permission-denied failures
+in a restricted shell are not a successful validation run.
+
+Do not test sends or reactions against other people. Native Mac behavior
+must be distinguished from Linux rendering and synthetic protocol tests.
