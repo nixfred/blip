@@ -3662,6 +3662,7 @@ FocusScope {
                       loading: root.stickerLoading(chipRow.attId)
                       failed: chipRow.attId === "" || chipRow.failed
                       animated: chipRow.imageMetrics.animated === true
+                      animationUnavailable: chipRow.imageMetrics.animationUnavailable === true
                       playing: root.surfaceOpen && chipRow.y + bubbleRow.y + height >= flick.contentY && chipRow.y + bubbleRow.y <= flick.contentY + flick.height
                       textColor: root.canvasDim
                       fontSize: root.fontCaption
@@ -3675,7 +3676,7 @@ FocusScope {
                         files: root.attFiles; metrics: root.attMetrics
                         fetchingId: root.fetchingId; fetchQueue: root.fetchQueue
                         textColor: root.canvasDim
-                        playing: root.surfaceOpen
+                        playing: root.surfaceOpen && bubbleRow.y + chipRow.y + height >= flick.contentY && bubbleRow.y + chipRow.y <= flick.contentY + flick.height
                         onOpenRequested: function(att) { root.activateSticker(att) }
                         onContextRequested: function(att) { root.openAttachmentMenu(bubbleRow.modelData, att) }
                       }
@@ -4104,10 +4105,11 @@ FocusScope {
                         loading: root.stickerLoading(attachmentId)
                         failed: attachmentId === "" || root.attFiles[attachmentId] === ""
                         animated: (root.attMetrics[attachmentId] || {}).animated === true
+                        animationUnavailable: (root.attMetrics[attachmentId] || {}).animationUnavailable === true
                         playing: root.surfaceOpen && bubbleRow.y + height >= flick.contentY && bubbleRow.y <= flick.contentY + flick.height
                         compact: true
                         textColor: root.canvasDim
-                        Accessible.description: "Sticker attached to message part " + String(modelData.part + 1)
+                        Accessible.description: (animationUnavailable ? "Static preview; animation unavailable. " : "") + "Sticker attached to message part " + String(modelData.part + 1)
                         onTapped: root.activateSticker(modelData.attachment)
                         onContextRequested: root.openAttachmentMenu(bubbleRow.modelData, modelData.attachment)
                       }

@@ -65,6 +65,13 @@ test("local raster round trip copies privately, persists, detects tampering and 
   expect(url.startsWith("file://")).toBe(true);
   expect(loadBackground(paths)).toBe(url);
   const stored = new URL(url); expect(statSync(stored).mode & 0o777).toBe(0o600);
+  const png = readFileSync(stored);
+  const chunks: string[] = [];
+  for (let offset = 8; offset + 12 <= png.length;) {
+    chunks.push(png.toString("ascii", offset + 4, offset + 8));
+    offset += 12 + png.readUInt32BE(offset);
+  }
+  for (const metadata of ["tIME", "orNT", "eXIf", "tEXt", "iTXt", "zTXt"]) expect(chunks).not.toContain(metadata);
   expect(statSync(paths.assets).mode & 0o777).toBe(0o700);
   expect(readFileSync(paths.config, "utf8")).toContain("tapbacks=on");
   writeFileSync(stored, tinyPng);

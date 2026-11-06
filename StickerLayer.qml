@@ -30,6 +30,7 @@ Item {
       loading: attachmentId !== "" && (root.fetchingId === attachmentId || root.fetchQueue.some(function(job) { return job.id === attachmentId }))
       failed: attachmentId === "" || root.files[attachmentId] === ""
       animated: metric.animated === true
+      animationUnavailable: metric.animationUnavailable === true
       playing: root.playing
       compact: true
       textColor: root.textColor

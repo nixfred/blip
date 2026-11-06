@@ -77,18 +77,38 @@ export function rasterType(bytes: Buffer): "png" | "jpeg" {
   if (bytes.length >= 4 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return "jpeg";
   throw new Error("Choose a PNG or JPEG image");
 }
+/** Recent ImageMagick still emits orNT after -strip, even when explicitly
+ * excluded. Remove non-rendering metadata chunks from its bounded PNG output;
+ * retained chunks and their CRCs remain byte-identical. */
+export function stripPngMetadata(bytes: Buffer): Buffer {
+  if (rasterType(bytes) !== "png") throw new Error("Image decoder did not return PNG");
+  const chunks = [bytes.subarray(0, 8)];
+  const metadata = new Set(["tIME", "orNT", "eXIf", "tEXt", "zTXt", "iTXt"]);
+  let offset = 8, ended = false;
+  while (offset + 12 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const end = offset + length + 12;
+    if (end > bytes.length) throw new Error("Image decoder returned an incomplete PNG");
+    const kind = bytes.toString("ascii", offset + 4, offset + 8);
+    if (!metadata.has(kind)) chunks.push(bytes.subarray(offset, end));
+    offset = end;
+    if (kind === "IEND") { ended = true; break; }
+  }
+  if (!ended || offset !== bytes.length) throw new Error("Image decoder returned an incomplete PNG");
+  return Buffer.concat(chunks);
+}
 export function normalizeBackground(bytes: Buffer): Buffer {
   if (!bytes.length || bytes.length > MAX_BACKGROUND_BYTES) throw new Error("Image is empty or too large (maximum 20 MB)");
   const format = rasterType(bytes);
   const {pixelWidth: w, pixelHeight: h} = imageMetrics(bytes, "image/" + format);
   if (!w || !h || w > 12000 || h > 12000 || w * h > 40000000) throw new Error("Image dimensions exceed the 40 megapixel limit");
-  const args = ["-limit", "memory", "128MiB", "-limit", "map", "128MiB", "-limit", "disk", "0", `${format}:-[0]`, "-auto-orient", "-resize", "2560x2560>", "-strip", "png:-"];
+  const args = ["-limit", "memory", "128MiB", "-limit", "map", "128MiB", "-limit", "disk", "0", `${format}:-[0]`, "-auto-orient", "-resize", "2560x2560>", "-strip", "-define", "png:exclude-chunk=tIME,orNT", "png:-"];
   const options = { input: bytes, maxBuffer: MAX_BACKGROUND_BYTES, timeout: 12000 };
   let r = spawnSync("magick", args, options);
   // Arch ships ImageMagick 7; Ubuntu's package can still expose IM6 convert.
   if ((r.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") r = spawnSync("convert", args, options);
   if (r.status !== 0 || !r.stdout?.length) throw new Error("Could not decode this image; choose a different PNG or JPEG");
-  return r.stdout;
+  return stripPngMetadata(r.stdout);
 }
 function atomicWrite(path: string, bytes: Buffer | string): void {
   const temp = path + "." + randomUUID() + ".tmp";
