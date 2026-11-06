@@ -1,4 +1,4 @@
-> **Private continuation:** This repository preserves the recovered Blip 2.6.2 history and develops a Messages-style interface. It is not an official upstream release. See [provenance and development notes](docs/CONTINUATION.md). The upstream documentation below is retained; new capability limits are documented alongside each feature.
+> **Private continuation:** This repository preserves the recovered Blip 2.6.2 history and develops a Messages-style interface. It is not an official upstream release. See [provenance and development notes](docs/CONTINUATION.md). See [appearance and backgrounds](docs/APPEARANCE.md), [stickers](docs/STICKERS.md), and [reactions](docs/reactions.md) for the new features and their limits. The remaining upstream documentation is retained.
 
 <p align="center">
   <img src="docs/blip-hero@2x.png" alt="Blip: iMessage. On Linux. For real." width="920">
@@ -17,7 +17,7 @@
   <img alt="Omarchy" src="https://img.shields.io/badge/Omarchy-plugin-5fd7ff?style=flat-square">
   <img alt="QuickShell" src="https://img.shields.io/badge/QuickShell-QML-0a84ff?style=flat-square">
   <img alt="bun" src="https://img.shields.io/badge/bun-TypeScript-f9f1e1?style=flat-square">
-  <img alt="tests" src="https://img.shields.io/badge/tests-790%20passing-2ea043?style=flat-square">
+  <img alt="tests" src="https://img.shields.io/badge/tests-840%20passing-2ea043?style=flat-square">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
@@ -62,8 +62,8 @@ people who showed up with pull requests. What is in it now:
 - **The font Messages uses.** Omarchy renders everything in monospace, and that
   one thing is most of what makes a screenshot read as *not* Messages. Blip
   picks the first of **SF Pro** (Apple's own, what Messages ships with),
-  **Inter** (open licence, `pacman -S inter-font`), then your theme font — so
-  nothing changes for anyone who has installed neither. `blip-setup` offers to
+  **Inter** (open licence, `pacman -S inter-font`), then an installed Linux sans
+  family before the theme fallback. `blip-setup` offers to
   install Inter; `ui_font=theme` in `bridge.conf` opts out. `ui_font_size=14`
   (9–24) is bubble text in pixels so Blip can be larger than the rest of the
   shell.
@@ -257,12 +257,14 @@ Blip renders in the first of these it finds, so it is optional either way:
 |---|---|---|
 | **SF Pro** | what Messages itself uses | [developer.apple.com/fonts](https://developer.apple.com/fonts/) · Arch: [`otf-san-francisco`](https://aur.archlinux.org/packages/otf-san-francisco) (AUR, downloads it from Apple) |
 | **Inter** | open licence, drawn for interfaces, very close | [rsms/inter](https://github.com/rsms/inter) · Arch: [`inter-font`](https://archlinux.org/packages/extra/any/inter-font/) — `sudo pacman -S inter-font` |
-| your theme font | whatever Omarchy is set to | nothing to install |
+| Linux sans | Adwaita Sans, Noto Sans, or Liberation Sans if installed | nothing bundled |
+| your theme font | final fallback, or explicit `ui_font=theme` | nothing to install |
 
 `blip-setup` offers to install Inter if you have neither. `ui_font=theme` in
 `bridge.conf` always uses the Omarchy family. `ui_font_size=14` (9–24) sets
 bubble text in pixels so Blip can be larger than the rest of the shell;
-unset, it follows Omarchy's type size.
+unset, the Messages-style sans default uses at least 13 pixels; the explicit
+theme-font preference retains Omarchy's type scale.
 
 **Scroll speed.** Blip applies the wheel delta the compositor delivers, 1:1,
 so Hyprland's `input:scroll_factor` decides the speed as it does everywhere
