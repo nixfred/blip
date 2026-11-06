@@ -277,7 +277,7 @@ export function imageAnimation(bytes: Buffer): ImageAnimation {
 /** Qt's PNG reader renders APNG as a still. Convert only the inline sticker
  * preview to lossless animated WebP, preserving alpha. Originals still back
  * explicit Open/Copy/Save; no conversation text enters files or argv. */
-export function stickerAnimationPreview(bytes: Buffer, runner = spawnSync): { bytes: Buffer; converted: boolean; unavailable: boolean } {
+export function stickerAnimationPreview(bytes: Buffer, runner = spawnSync, dir = CACHE_DIR): { bytes: Buffer; converted: boolean; unavailable: boolean } {
   const animation = imageAnimation(bytes.subarray(0, IMAGE_HEADER_BYTES));
   if (animation.format !== "png" || !animation.animated) return { bytes, converted: false, unavailable: false };
   const size = imageMetrics(bytes.subarray(0, IMAGE_HEADER_BYTES), "image/png");
@@ -285,15 +285,23 @@ export function stickerAnimationPreview(bytes: Buffer, runner = spawnSync): { by
       || size.pixelWidth > 2048 || size.pixelHeight > 2048
       || size.pixelWidth * size.pixelHeight * animation.frames > 64_000_000)
     return { bytes, converted: false, unavailable: true };
+  // FFmpeg 6's APNG demuxer asks for input length even with ignore_loop=1;
+  // a looping APNG on stdin fails with ENOSYS. Keep one bounded, seekable
+  // private media file, as with HEICS, and remove it on every exit path.
+  const tmp = join(dir, `.sticker-${process.pid}-${Math.random().toString(36).slice(2, 10)}.apng`);
   try {
-    const res = runner("ffmpeg", ["-nostdin", "-v", "error", "-protocol_whitelist", "pipe", "-f", "apng", "-i", "pipe:0",
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const fd = openSync(tmp, "wx", 0o600);
+    try { writeSync(fd, bytes); } finally { closeSync(fd); }
+    const res = runner("ffmpeg", ["-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe", "-f", "apng", "-ignore_loop", "1", "-i", tmp,
       "-map_metadata", "-1", "-c:v", "libwebp_anim", "-lossless", "1", "-loop", "0",
       "-frames:v", "100", "-f", "webp", "pipe:1"],
-    { input: bytes, timeout: 30000, maxBuffer: FETCH_MAX_BYTES + (1 << 20) });
+    { timeout: 30000, maxBuffer: FETCH_MAX_BYTES + (1 << 20) });
     const out = res.stdout as Buffer;
     if (res.status === 0 && Buffer.isBuffer(out) && out.length > 30 && imageAnimation(out).format === "webp")
       return { bytes: out, converted: true, unavailable: false };
   } catch { /* A missing ffmpeg or decoder retains a usable transparent still. */ }
+  finally { try { unlinkSync(tmp); } catch { /* no temp file survived */ } }
   return { bytes, converted: false, unavailable: true };
 }
 

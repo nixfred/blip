@@ -189,13 +189,20 @@ describe("alpha and animated sticker fetches", () => {
     const calls: any[] = [];
     const runner = ((cmd: string, args: string[], options: any) => {
       calls.push({ cmd, args, options });
+      if (cmd === "ffmpeg") {
+        const input = args[args.indexOf("-i") + 1]!;
+        expect(readFileSync(input)).toEqual(png(2));
+        expect(statSync(input).mode & 0o777).toBe(0o600);
+      }
       return { status: 0, stdout: cmd === "ffmpeg" ? webp() : png(2) };
     }) as never;
     const aid = id();
     const result = fetchAttachment(aid, "animated.png", "image/png", runner, cap, true);
     expect(result.renderMime).toBe("image/webp"); expect(result.animated).toBe(true);
     expect(result.path).toContain("-anim-");
-    expect(calls[1].options.input).toEqual(png(2));
+    expect(calls[1].options.input).toBeUndefined();
+    expect(calls[1].args).toContain("-ignore_loop");
+    expect(readdirSync(CACHE_DIR).some(n => n.startsWith(".sticker-"))).toBe(false);
     expect(calls[1].args).toContain("-lossless");
     expect(() => cachedOriginal(result.path)).toThrow("original");
     const original = fetchAttachment(aid, "animated.png", "image/png", runner, FETCH_MAX_BYTES, true);
@@ -244,6 +251,7 @@ describe("alpha and animated sticker fetches", () => {
       const r = fetchAttachment(id(), "loop.png", "image/png", runner, cap, true);
       expect(r.ok).toBe(true); expect(r.animationUnavailable).toBe(true);
       expect(r.renderMime).toBe("image/png"); expect(readFileSync(r.path)).toEqual(png(2));
+      expect(readdirSync(CACHE_DIR).some(n => n.startsWith(".sticker-"))).toBe(false);
     }
   });
   test("HEICS failure asks the Mac for a transparent still and names the lost motion", () => {

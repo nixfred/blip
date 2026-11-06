@@ -59,12 +59,21 @@ def main():
              str(folder / "four-track.mov")])
         prepare = folder / "prepare.ts"
         prepare.write_text('''import { readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { stickerAnimationPreview, stickerSequencePreview } from @MODULE@;
 const dir = process.argv[2];
-const apng = stickerAnimationPreview(readFileSync(dir + "/animated.png"));
+// Synthetic inputs only: expose codec diagnostics here, never in shipping
+// message/media logs. CI must explain unsupported decoders rather than skip.
+const diagnosticRunner = ((command, args, options) => {
+  const result = spawnSync(command, args, options);
+  if (result.status !== 0) console.error(command, "exit", result.status,
+    String(result.stderr || "").slice(0, 4096), result.error?.message || "");
+  return result;
+}) as typeof spawnSync;
+const apng = stickerAnimationPreview(readFileSync(dir + "/animated.png"), diagnosticRunner, dir);
 if (!apng.converted || apng.unavailable) throw Error("APNG conversion failed");
 writeFileSync(dir + "/animated.webp", apng.bytes);
-const sequence = stickerSequencePreview(readFileSync(dir + "/four-track.mov"), "image/heic-sequence", undefined, dir);
+const sequence = stickerSequencePreview(readFileSync(dir + "/four-track.mov"), "image/heic-sequence", diagnosticRunner, dir);
 if (!sequence || sequence.unavailable || sequence.renderMime !== "image/webp") throw Error("sequence conversion failed");
 writeFileSync(dir + "/sequence.webp", sequence.bytes);
 '''.replace("@MODULE@", json.dumps(str(ROOT / "fetch.ts"))))
