@@ -17,7 +17,7 @@ set -euo pipefail
 REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 SANDBOX=${BLIP_DEMO_HOME:-/tmp/blip-demo-home}
 SHELLDIR=${BLIP_DEMO_SHELL:-/tmp/blip-demo-shell}
-OUT="$REPO/docs/img"
+OUT=${BLIP_DEMO_OUT:-"$REPO/docs/img"}
 KEEP=0
 [[ ${1:-} == "--keep" ]] && KEEP=1
 
@@ -75,6 +75,7 @@ echo "· shell copy $SHELLDIR"
 cp -r /usr/share/omarchy/shell "$SHELLDIR"
 touch "$SHELLDIR/.blip-demo-scratch"
 cp "$REPO"/*.qml "$REPO"/*.ts "$REPO"/*.mjs "$REPO/otp-desktop.py" "$REPO/manifest.json" "$SHELLDIR/"   # manifest: the header's version (Astra D#7)
+cp -r "$REPO/icons" "$SHELLDIR/"
 cp "$REPO/scripts/demo/DemoShell.qml" "$SHELLDIR/shell.qml"
 
 echo "· launching"
@@ -98,8 +99,8 @@ echo "· $ready conversations loaded"
 
 # The demo surface is a layer-shell panel at a fixed origin and size (see
 # DemoShell.qml), so the crop is known without asking the compositor anything.
-WIDE="220,140 1120x760"
-NARROW="220,140 560x760"
+WIDE="220,140 1040x720"
+NARROW="220,140 560x720"
 GEOM="$WIDE"
 # Park the pointer off the crop: Hyprland composites a software cursor into
 # the screencopy frame, so grim captures it even without -c.

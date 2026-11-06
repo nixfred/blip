@@ -92,51 +92,103 @@
     "chat": "+15550100011",
     "messages": [
       {
-        "min": -184,
+        "min": -80,
         "from_me": false,
-        "text": "trailhead at 7? forecast says clear"
+        "text": "Morning! Lake trail at ten?"
       },
       {
-        "min": -182,
+        "min": -78,
         "from_me": true,
-        "text": "7 works. bringing the good thermos"
+        "text": "Absolutely. Coffee is already packed ☕",
+        "tapbacks": [
+          {
+            "emoji": "❤️",
+            "from_me": false,
+            "by": "Jamie Rivera",
+            "kind": "classic"
+          }
+        ]
       },
       {
-        "min": -181,
+        "min": -65,
         "from_me": false,
-        "text": "Loved “7 works. bringing the good thermos”",
-        "tapback": true
-      },
-      {
-        "min": -96,
-        "from_me": false,
-        "text": "found the meetup page, it's a real thing now https://oatlug.org"
-      },
-      {
-        "min": -95,
-        "from_me": true,
-        "text": "that logo goes hard",
-        "reply_to": "found the meetup page, it's a real thing now"
-      },
-      {
-        "min": -44,
-        "from_me": false,
-        "text": "two from the ridge",
+        "text": "A little preview from yesterday.",
         "attachments": [
           {
-            "name": "ridge-1.heic",
-            "mime": "image/heic"
-          },
-          {
-            "name": "ridge-2.heic",
+            "name": "ridge.heic",
             "mime": "image/heic"
           }
         ]
       },
       {
-        "min": -12,
+        "min": -14,
         "from_me": true,
-        "text": "on my way, ten minutes out",
+        "text": "That light! Let’s take the long way back.",
+        "tapbacks": [
+          {
+            "emoji": "🌄",
+            "from_me": false,
+            "by": "Jamie Rivera",
+            "kind": "emoji"
+          }
+        ]
+      },
+      {
+        "min": -12,
+        "from_me": false,
+        "text": "Perfect. I found a new overlook for our coffee stop.",
+        "stickers": [
+          {
+            "attachment": {
+              "id": "990001",
+              "name": "sunshine.png",
+              "mime": "image/png",
+              "bytes": 12000,
+              "sticker": {
+                "source": "user",
+                "label": "Sunshine sticker",
+                "animated": false
+              }
+            },
+            "guid": "DEMO-STICKER-1",
+            "part": 0,
+            "from_me": true,
+            "by": "You",
+            "placement": {
+              "x": 1.0,
+              "y": 0.0,
+              "scale": 1.0,
+              "rotation": -0.12,
+              "parentWidth": 300
+            }
+          }
+        ]
+      },
+      {
+        "min": -10,
+        "from_me": true,
+        "text": "",
+        "attachments": [
+          {
+            "name": "happy-star.png",
+            "mime": "image/png",
+            "sticker": {
+              "source": "user",
+              "label": "Happy star sticker",
+              "animated": false
+            }
+          }
+        ]
+      },
+      {
+        "min": -8,
+        "from_me": false,
+        "text": "See you there!"
+      },
+      {
+        "min": -7,
+        "from_me": true,
+        "text": "On my way ✨",
         "read_at": true
       }
     ]

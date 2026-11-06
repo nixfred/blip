@@ -25,8 +25,8 @@ QtObject {
    * yields a default sans, which would be a worse wrong answer than the
    * theme font).
    * Order: SF Pro if the machine has it, then Inter — which is OFL-licensed,
-   * ships in Arch's `extra`, and was drawn for exactly this job — then the
-   * theme font, so nothing changes for anyone who has installed neither.
+   * ships in Arch's `extra`, and was drawn for exactly this job — then an installed Linux sans family. Explicit theme typography remains
+   * available through ui_font=theme.
    * `ui_font=theme` in bridge.conf opts out.
    *
    * Blip will never SHIP a font: SF Pro is Apple's and its licence forbids
@@ -34,7 +34,7 @@ QtObject {
    * Apple's own download for SF Pro.
    */
   readonly property string messagesFont: {
-    var want = ["SF Pro Text", "SF Pro Display", "SF Pro", "Inter"]
+    var want = ["SF Pro Text", "SF Pro Display", "SF Pro", "Inter", "Adwaita Sans", "Noto Sans", "Liberation Sans"]
     var have = Qt.fontFamilies()
     for (var i = 0; i < want.length; i++) if (have.indexOf(want[i]) >= 0) return want[i]
     return ""
@@ -43,14 +43,14 @@ QtObject {
   readonly property string fontFamily:
     (messagesFont !== "" && !themeFontForced) ? messagesFont : themeFont
   // `ui_font_size=N` in bridge.conf: N is bubble text in px. Unset (0) keeps
-  // Omarchy's tokens. Caption/body keep the same ratios as Style.font.
+  // the readable sans default. Caption/body keep the same ratios as Style.font.
   readonly property int uiFontSizePx: {
     if (!hostWidget) return 0
     var n = hostWidget.uiFontSize
     return (typeof n === "number" && n > 0) ? n : 0
   }
   readonly property real uiFontScale: {
-    if (uiFontSizePx <= 0) return 1
+    if (uiFontSizePx <= 0) return themeFontForced ? 1 : Math.max(1, 13 / Style.font.bodySmall)
     var small = Style.font.bodySmall
     return small > 0 ? uiFontSizePx / small : 1
   }

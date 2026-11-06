@@ -116,7 +116,9 @@ describe("QML safety invariants", () => {
     const flick = panel.slice(panel.indexOf("id: composeFlick"), panel.indexOf("id: composeField"));
     expect(flick).toContain("interactive: false");
     // the border is the slot's: inside the flickable it would scroll away
-    expect(panel).toContain("borderSpec: composeField._composeBorder");
+    const slot = panel.slice(panel.indexOf("id: composeSlot"), panel.indexOf("id: composeFlick"));
+    expect(slot).toContain("border.width: 1");
+    expect(slot).toContain("radius: Math.min(height / 2, Style.space(22))");
     expect(panel).toContain("background: null");
   });
 
@@ -398,7 +400,7 @@ describe("QML safety invariants", () => {
   });
 
   test("split-view active chat has a persistent selected fill independent of the keyboard cursor", () => {
-    expect(panel).toContain("readonly property color selectedFill: Style.selectedFillFor(foreground, accent)");
+    expect(panel).toContain("readonly property color selectedFill: Qt.alpha(accent, 0.28)");
     // Both the pinned tiles and chronological rows follow the displayed chat's
     // identity, not its changing position or whether an editor holds focus.
     expect(panel.split("readonly property bool selected: root.splitView && root.isShowing(modelData)").length - 1).toBe(2);
@@ -580,7 +582,7 @@ describe("QML safety invariants", () => {
     expect(save).toContain("MessageActions.saveableMime(att.mime)");
     expect(save).toContain('enqueueFetch(att, "save")');
     // a gesture on a queued auto-pull drops its cap, so the ORIGINAL is fetched
-    expect(qmlFunction("enqueueFetch")).toContain("fetchQueue[i].auto = false");
+    expect(qmlFunction("enqueueFetch")).toContain('fetchQueue[i].auto = action === "preview"');
     // path and name ride as arguments to the script; nothing is executed or opened
     expect(panel).toContain('saveProc.command = ["bun", root.saveAttachmentScript, String(d.path || ""), root.fetchJobName]');
     const menu = readFileSync(new URL("./MessageMenu.qml", import.meta.url), "utf8");
@@ -604,12 +606,12 @@ describe("QML safety invariants", () => {
     // HEIC arrives as JPEG (fetch.ts wantsJpeg): the clipboard type must say so
     expect(panel).toContain('root.fetchJobMime === "image/heic" || root.fetchJobMime === "image/heif" ? "image/jpeg"');
     // the inline preview stays put while the original is fetched for the clipboard (or a save)
-    expect(panel).toContain('var keepInline = (root.fetchJobAction === "copy" || root.fetchJobAction === "save") && !!root.attFiles[id]');
+    expect(panel).toContain('var keepInline = ((root.fetchJobAction === "copy" || root.fetchJobAction === "save") && !!root.attFiles[id]) || (root.fetchJobSticker && root.fetchJobAction === "open")');
     expect(panel).not.toContain("fetchJobOpen");
     expect(qmlFunction("quoteBubble")).toContain("leaveBubbles()");
     // Empty status does not reserve a row; only failures are red.
     expect(panel).toContain('visible: root.note !== ""');
-    expect(panel).toContain("color: calm ? root.dim : root.urgent");
+    expect(panel).toContain("color: calm ? root.canvasDim : root.urgent");
     // secondary text dims by alpha, which reads right on light and dark themes alike;
     // Qt.darker on the foreground only works on a dark one
     expect(panel).toContain("readonly property color dim: appearance.muted");
@@ -755,7 +757,9 @@ describe("QML safety invariants", () => {
 describe("media renders at its intended scale", () => {
   test("attachment sizing honours the header pixel density from fetch.ts", () => {
     expect(panel).toContain("Number(chipRow.imageMetrics.pixelWidth) / pixelRatio");
-    expect(panel).toContain("Math.min(maxW, naturalWidth)");
+    expect(panel).toContain("Math.min(maxW, naturalWidth, maxH * naturalWidth / naturalHeight)");
+    expect(panel).toContain("readonly property real maxH: Style.space(240)");
+    expect(panel).toContain("Layout.preferredWidth * naturalHeight / naturalWidth");
   });
 
   test("message links inherit the bubble's text color", () => {
@@ -820,12 +824,15 @@ test("outgoing bubbles are always iMessage blue with white text", () => {
   expect(panel).not.toContain("themeHasAccent");
 });
 
-// The version shows in the header both surfaces share, read live from
-// manifest.json by the host — one source, one place, never two numbers.
-test("the header shows the version from manifest.json", () => {
+// Version remains host metadata. The conversation UI no longer reserves an
+// application banner: its header is the resolved contact identity.
+test("the contact header replaces the application status and version banner", () => {
   expect(widget).toContain('Qt.resolvedUrl("manifest.json")');
   expect(widget).toContain("root.version = String(JSON.parse(text()).version");
-  expect(panel).toContain("text: root.version");
+  expect(panel).not.toContain("text: root.version");
+  expect(panel).not.toContain('text: "Blip"');
+  expect(panel).toContain("ConversationAppearance.conversationName(root.active)");
+  expect(panel).toContain("ConversationAvatar {");
 });
 
 // A release bumps three files. If one is missed the badge lies, or the
@@ -834,9 +841,9 @@ test("manifest, README badge and CHANGELOG agree on the released version", () =>
   const manifest = JSON.parse(readFileSync(new URL("./manifest.json", import.meta.url), "utf8")).version as string;
   const readme = readFileSync(new URL("./README.md", import.meta.url), "utf8");
   const changelog = readFileSync(new URL("./CHANGELOG.md", import.meta.url), "utf8");
-  expect(manifest).toMatch(/^\d+\.\d+\.\d+$/);
-  expect(readme).toContain(`badge/version-${manifest}-`);
-  const released = /^## (\d+\.\d+\.\d+)\b/m.exec(changelog);
+  expect(manifest).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/);
+  expect(readme).toContain(`badge/version-${manifest.replace(/-/g, "--")}-`);
+  const released = /^## (\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?)\b/m.exec(changelog);
   expect(released?.[1]).toBe(manifest);
 });
 
@@ -1076,7 +1083,7 @@ test("a thread response taken before a local send or failure cannot replace bubb
 // the picture (or file chip) itself, through the one shared TapbackPill.
 test("tapbacks on picture-only messages get a pill on the picture", () => {
   expect(panel).toContain("component TapbackPill: Rectangle {");
-  expect(panel.split("TapbackPill {").length - 1).toBe(3);   // text bubble, picture, file chip
+  expect(panel.split("TapbackPill {").length - 1).toBe(4);   // text bubble, picture, file chip, standalone sticker
   expect(panel).toContain('readonly property bool pillHere: index === 0 && String(bubbleRow.modelData.text || "") === ""');
   expect(panel).toContain("+ (pillHere ? Style.space(12) : 0)");
 });
@@ -1218,11 +1225,13 @@ test("a toast click strips the + and falls back to open()", () => {
 describe("mark all read is not gated on Blip's own unread count", () => {
   const view = readFileSync(new URL("./BlipView.qml", import.meta.url), "utf8");
 
-  test("the function, the button and its row share one gate that only push_read=off closes", () => {
+  test("the function and toolbar button share one gate that only push_read=off closes", () => {
     expect(view).toMatch(/readonly property bool canMarkAllRead: root\.online && \(root\.unread > 0 \|\| !hostWidget \|\| hostWidget\.readPush !== "off"\)/);
     expect(view).toMatch(/function markAllRead\(\) \{\s*if \(!root\.hostWidget \|\| !root\.canMarkAllRead\) return/);
-    expect(view).toMatch(/id: markAllBtn\s*visible: root\.canMarkAllRead && !root\.searchShowing && !root\.newMode/);
-    expect(view).toMatch(/\(root\.newMode \|\| root\.canMarkAllRead && !root\.searchShowing\)/);
+    expect(view).toMatch(/id: markAllBtn\s*visible: root\.canMarkAllRead/);
+    const button = view.slice(view.indexOf("id: markAllBtn"), view.indexOf("id: markAllBtn") + 450);
+    expect(button).toContain("onClicked: root.markAllRead()");
+    expect(button).toContain('Accessible.name: "Mark all conversations read"');
   });
 
   test("nothing in the view still short-circuits mark-all on a zero count", () => {

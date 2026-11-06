@@ -1,3 +1,5 @@
+import "Stickers.mjs" as Stickers
+import "ConversationAppearance.mjs" as ConversationAppearance
 import "SendState.mjs" as SendState
 import "MessageActions.mjs" as MessageActions
 import "SourceId.mjs" as SourceId
@@ -78,9 +80,10 @@ FocusScope {
   readonly property int fontBodySmall: appearance.fontBodySmall
   readonly property int fontBody: appearance.fontBody
   readonly property color dim: appearance.muted
+  readonly property color canvasDim: backgroundUrl !== "" ? Qt.alpha(foreground, 0.94) : dim
   /** An editor owns the keyboard — the host's key catcher must stand down. */
   readonly property bool editorActive:
-    messageMenu.visible || contactMenu.visible || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused
+    messageMenu.visible || emojiPopup.visible || contactMenu.visible || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused
   readonly property alias composeEditor: composeField
   readonly property real contentHeightHint: listContent.implicitHeight
   /** The view wants keyboard navigation focus back (list mode). */
@@ -97,11 +100,11 @@ FocusScope {
 
   readonly property color mineFill: accent
   readonly property color mineText: appearance.accentText
-  readonly property color theirsFill: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.14)
+  readonly property color theirsFill: backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.78) : Qt.rgba(foreground.r, foreground.g, foreground.b, 0.14)
   // Omarchy's hover-cursor fill for rows and the bubble band alike: the theme's
   // colour and alpha (foreground at 0.08 by default), not a hard-coded copy of them.
   readonly property color hoverFill: Style.hoverFillFor(foreground, accent)
-  readonly property color selectedFill: Style.selectedFillFor(foreground, accent)
+  readonly property color selectedFill: Qt.alpha(accent, 0.28)
   readonly property color theirsText: foreground
 
   // Links inside a bubble take the bubble's readable text color instead of
@@ -134,6 +137,78 @@ FocusScope {
 
   readonly property string contactScript:
     decodeURIComponent(Qt.resolvedUrl("contact-search.ts").toString().replace(/^file:\/\//, ""))
+
+  // Only the validated helper result reaches Image.source. A saved setting
+  // cannot turn this renderer into a URL loader or an arbitrary file viewer.
+  property string backgroundUrl: ""
+  readonly property string backgroundScript: decodeURIComponent(Qt.resolvedUrl("conversation-background.ts").toString().replace(/^file:\/\//, ""))
+  readonly property string backgroundChat: root.active ? String(root.active.chat || "") : ""
+  property bool backgroundReloadPending: false
+  property bool backgroundBusy: false
+  property bool backgroundReady: false
+  Component.onCompleted: {
+    root.backgroundReady = true
+    Qt.callLater(function() { root.changeBackground("load") })
+  }
+  onBackgroundChatChanged: {
+    backgroundUrl = ""
+    changeBackground("load")
+  }
+  function changeBackground(action, targetChat) {
+    if (!root.backgroundReady) return
+    if (root.backgroundBusy || backgroundProc.running) {
+      if (action === "load") backgroundReloadPending = true
+      return
+    }
+    root.backgroundBusy = true
+    backgroundProc.action = action
+    backgroundProc.chat = targetChat === undefined ? root.backgroundChat : String(targetChat)
+    backgroundProc.reply = ""
+    backgroundProc.sawExit = false
+    backgroundProc.command = ["bun", root.backgroundScript, action]
+    backgroundProc.stdinEnabled = true
+    backgroundProc.running = true
+    backgroundProc.write(JSON.stringify({ chat: backgroundProc.chat }))
+    backgroundProc.stdinEnabled = false
+  }
+  function finishBackground(code) {
+    try {
+      var result = JSON.parse(backgroundProc.reply)
+      if (result.cancelled !== true) {
+        if (result.ok === true && backgroundProc.chat === root.backgroundChat) root.backgroundUrl = String(result.url || "")
+        else if (result.ok === true) root.backgroundReloadPending = true
+        else {
+          if (backgroundProc.action === "load") root.backgroundUrl = ""
+          root.note = String(result.error || "Background could not be changed")
+        }
+      }
+    } catch (e) { root.note = "Background helper failed (exit " + code + ")" }
+    root.backgroundBusy = false
+    if (root.backgroundReloadPending || backgroundProc.chat !== root.backgroundChat) {
+      root.backgroundReloadPending = false
+      Qt.callLater(function() { root.changeBackground("load") })
+    }
+  }
+  FileView {
+    path: root.home + "/.config/blip/bridge.conf"
+    watchChanges: root.surfaceOpen
+    printErrors: false
+    onFileChanged: { reload(); root.changeBackground("load") }
+  }
+  Process {
+    id: backgroundProc
+    property string action: "load"
+    property string chat: ""
+    property string reply: ""
+    property bool sawExit: false
+    stdout: StdioCollector { onStreamFinished: backgroundProc.reply = text }
+    onRunningChanged: if (!running) Qt.callLater(function() {
+      if (!backgroundProc.sawExit && !backgroundProc.running && root.backgroundBusy) root.finishBackground(-1)
+    })
+    // Process exit can arrive before the stdout collector finishes. Settle on
+    // the next turn before clearing busy or starting the next chat's request.
+    onExited: function(code, status) { backgroundProc.sawExit = true; Qt.callLater(function() { root.finishBackground(code) }) }
+  }
 
   // ---- new-conversation state (`n` opens, Esc closes)
   property bool newMode: false
@@ -1019,6 +1094,7 @@ FocusScope {
     for (var i = 0; i < keys.length; i++) root.requestAvatar(keys[i])
   }
   onSurfaceOpenChanged: {
+    if (surfaceOpen) root.changeBackground("load")
     if (surfaceOpen) root.retryBareAvatars()
     // Closed: drop the rows scrolling built, so the next open is cheap again.
     else rowBudget = rowBatch
@@ -1121,16 +1197,17 @@ FocusScope {
       if (fetchQueue[i].id === id) {
         // A gesture on a queued auto-pull wants the ORIGINAL: drop the
         // transfer cap, or a save is handed the -prev- preview it refuses.
-        if (action) { fetchQueue[i].action = action; fetchQueue[i].auto = false }
+        if (action) { fetchQueue[i].action = action; fetchQueue[i].auto = action === "preview" }
         return
       }
     }
     fetchQueue.push({ id: id, name: String(att.name || "file"),
-                      mime: String(att.mime || ""), action: action || "",
+                      mime: String(att.mime || ""), sticker: !!att.sticker, action: action || "",
                       auto: auto === true })
     pumpFetch()
   }
 
+  property bool fetchJobSticker: false
   property string fetchJobAction: ""
   property string fetchJobMime: ""
   property string fetchJobName: ""
@@ -1141,8 +1218,9 @@ FocusScope {
     fetchJobAction = job.action
     fetchJobMime = job.mime
     fetchJobName = job.name
+    fetchJobSticker = job.sticker === true
     // Auto-pulls carry a hard transfer cap: claimed metadata is not the limit.
-    fetchProc.command = ["bun", root.fetchScript, job.id, job.name, job.mime, job.auto ? "5242880" : ""]
+    fetchProc.command = ["bun", root.fetchScript, job.id, job.name, job.mime, job.auto ? "5242880" : ""].concat(job.sticker ? ["--sticker"] : [])
     fetchProc.running = true
   }
 
@@ -1154,7 +1232,7 @@ FocusScope {
   function autoFetchImages() {
     if (!inThread) return
     for (var i = 0; i < bubbles.length; i++) {
-      var atts = bubbles[i].attachments || []
+      var atts = (bubbles[i].attachments || []).concat((bubbles[i].stickers || []).map(function(sticker) { return sticker.attachment }))
       for (var j = 0; j < atts.length; j++) {
         // Bytes must be KNOWN — null/0 must not slip through and auto-pull
         // something the click-path 100 MB ceiling would allow. The SOURCE cap
@@ -1163,13 +1241,23 @@ FocusScope {
         // while sips turns a 5.07 MB HEIC into a 7.80 MB JPEG, so full-size
         // iPhone photos were rejected at both ends and simply never appeared.
         var b = atts[j].bytes
-        if (isImageMime(atts[j].mime) && typeof b === "number" && b > 0 && b <= root.autoFetchMaxSource)
+        if ((isImageMime(atts[j].mime) || (atts[j].sticker && String(atts[j].mime || "").indexOf("video/") === 0)) && typeof b === "number" && b > 0 && b <= root.autoFetchMaxSource)
           enqueueFetch(atts[j], "", true)
       }
       // link-card preview PNGs are small; the auto-fetch transfer cap bounds them
       var l = bubbles[i].link
       if (l && l.image_id) enqueueFetch({ id: String(l.image_id), name: "preview.png", mime: "image/png", bytes: 0 }, "", true)
     }
+  }
+
+  function stickerLoading(id) {
+    return id !== "" && (root.fetchingId === id || root.fetchQueue.some(function(job) { return job.id === id }))
+  }
+  function activateSticker(att) {
+    var id = String(att.id || "")
+    if (!id) return
+    if (!root.attFiles[id]) root.enqueueFetch(att, "preview", true)
+    else root.openAttachment(att)
   }
 
   /** Chip/image click: fetch-then-open. ALWAYS round-trips fetch.ts, even
@@ -1239,6 +1327,28 @@ FocusScope {
   function clearAttachments() {
     root.attachDrafts = []
     root.fileQueue = []
+  }
+
+  property string attachmentPickerChat: ""
+  function chooseAttachments() {
+    if (attachmentPicker.running || !root.inThread) return
+    root.attachmentPickerChat = String(root.active.chat)
+    attachmentPicker.command = ["bun", decodeURIComponent(Qt.resolvedUrl("attachment-picker.ts").toString().replace(/^file:\/\//, ""))]
+    attachmentPicker.running = true
+  }
+  Process {
+    id: attachmentPicker
+    stdout: StdioCollector {
+      onStreamFinished: {
+        if (!root.inThread || String(root.active.chat) !== root.attachmentPickerChat) return
+        try {
+          var result = JSON.parse(text)
+          if (result.cancelled === true) return
+          if (result.ok === true) root.addAttachments(result.paths || [])
+          else root.note = String(result.error || "Could not select files")
+        } catch (e) { root.note = "Could not select files" }
+      }
+    }
   }
 
   function startPaste() {
@@ -1953,7 +2063,7 @@ FocusScope {
           // A copy fetches the ORIGINAL for the clipboard; the bubble keeps
           // the preview it already draws. Swapping its source and metrics
           // re-decodes and re-lays out the picture under the reader's eyes.
-          var keepInline = (root.fetchJobAction === "copy" || root.fetchJobAction === "save") && !!root.attFiles[id]
+          var keepInline = ((root.fetchJobAction === "copy" || root.fetchJobAction === "save") && !!root.attFiles[id]) || (root.fetchJobSticker && root.fetchJobAction === "open")
           var m = Object.assign({}, root.attFiles)
           if (!keepInline) m[id] = d.ok === true ? String(d.url || "") : ""
           root.attFiles = m
@@ -1965,14 +2075,14 @@ FocusScope {
           if (!isFinite(pixelHeight) || pixelHeight < 1 || pixelHeight > 100000) pixelHeight = 0
           if (!keepInline) {
             var metrics = Object.assign({}, root.attMetrics)
-            metrics[id] = { pixelRatio: ratio, pixelWidth: pixelWidth, pixelHeight: pixelHeight }
+            metrics[id] = { pixelRatio: ratio, pixelWidth: pixelWidth, pixelHeight: pixelHeight, animated: d.animated === true, renderMime: String(d.renderMime || ""), animationUnavailable: d.animationUnavailable === true }
             root.attMetrics = metrics
           }
           if (d.ok === true && root.fetchJobAction === "copy") {
             // The Mac converts HEIC/HEIF to JPEG on the way (fetch.ts wantsJpeg),
             // so the clipboard type must say what the bytes are. Path and type
             // travel as arguments, never interpolated into the script.
-            var mime = root.fetchJobMime === "image/heic" || root.fetchJobMime === "image/heif" ? "image/jpeg" : root.fetchJobMime
+            var mime = String(d.renderMime || "") || (root.fetchJobMime === "image/heic" || root.fetchJobMime === "image/heif" ? "image/jpeg" : root.fetchJobMime)
             Quickshell.execDetached(["sh", "-c", 'wl-copy --type "$1" < "$2"', "sh", mime, String(d.path || "")])
             root.note = "copied"
             noteTimer.restart()
@@ -1991,6 +2101,10 @@ FocusScope {
             } else {
               root.note = "saved, not opened (" + (root.fetchJobMime || "unknown type") + "): " + String(d.path || "")
             }
+          }
+          if (root.fetchJobSticker && root.fetchJobAction === "open" && !root.attFiles[id]) {
+            var previewAtt = { id: id, name: root.fetchJobName, mime: root.fetchJobMime, sticker: {} }
+            Qt.callLater(function() { root.enqueueFetch(previewAtt, "preview", true) })
           }
           if (d.ok !== true && d.online === false) root.note = "fetch failed — Mac unreachable"
           // A click deserves the reason (a photo Messages in iCloud has not
@@ -2397,6 +2511,7 @@ FocusScope {
     Keys.onPressed: function(event) { if (root.catchNavKey(event.key)) event.accepted = true }
   }
   function catchEscape() {
+    if (emojiPopup.visible) { emojiPopup.close(); composeField.forceActiveFocus(); return true }
     if (newField.activeFocus || newMode) { exitNew(); return true }
     if (searchField.activeFocus || searching) { exitSearch(); return true }
     return false
@@ -2419,7 +2534,7 @@ FocusScope {
   // ---- layout: one pane (popout) or two (window). Both panes always exist —
   // hiding, not unloading, keeps image state, selection, and scroll position.
   property bool splitView: false
-  property int sidebarWidth: 320
+  property int sidebarWidth: Math.min(340, Math.max(260, width * 0.30))
   readonly property bool listShowing: splitView || !inThread
 
   RowLayout {
@@ -2430,6 +2545,7 @@ FocusScope {
     // ------------------------------------------------------- thread pane
     Item {
       id: threadPane
+      Rectangle { anchors.fill: parent; color: Qt.alpha(root.foreground, 0.035) }
       visible: root.listShowing
       Layout.fillHeight: true
       Layout.fillWidth: !root.splitView
@@ -2438,47 +2554,34 @@ FocusScope {
         anchors.fill: parent
         // Gutters for the app: the popout's card supplies its own padding,
         // the window's panes had text flush against the borders (Fred).
-        anchors.leftMargin: root.splitView ? Style.space(18) : 0
-        anchors.rightMargin: root.splitView ? Style.space(18) : 0
+        anchors.leftMargin: root.splitView ? Style.space(12) : 0
+        anchors.rightMargin: root.splitView ? Style.space(12) : 0
         anchors.topMargin: root.splitView ? Style.space(10) : 0
         anchors.bottomMargin: root.splitView ? Style.space(10) : 0
-        spacing: Style.space(root.splitView ? 14 : 8)
+        spacing: Style.space(8)
         RowLayout {
           Layout.fillWidth: true
+          Layout.preferredHeight: Style.space(32)
           spacing: Style.space(8)
-          Text {
-            text: "Blip"
-            textFormat: Text.PlainText
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: root.fontTitle
-            font.bold: true
-          }
-          Text {
-            Layout.fillWidth: true
-            text: (!root.online ? "Mac unreachable — bridge offline"
-              : root.unread > 0 ? root.unread + " unread" : "all caught up").toUpperCase()
-            textFormat: Text.PlainText
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: root.fontCaption
-            font.bold: true
-            font.letterSpacing: 1.2
-            elide: Text.ElideRight
-          }
-          Text {
-            visible: root.version !== ""
-            text: root.version
-            textFormat: Text.PlainText
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: root.fontCaption
+          Item { Layout.fillWidth: true }
+          PanelActionButton {
+            id: markAllBtn
+            visible: root.canMarkAllRead
+            iconText: "✓"
+            tooltipText: "Mark all conversations read"
+            Accessible.name: "Mark all conversations read"
+            focusable: true
+            foreground: root.foreground
+            hoverColor: root.accent
+            fontFamily: root.fontFamily
+            onClicked: root.markAllRead()
           }
           PanelActionButton {
-            visible: root.online && !root.newMode && !root.searchShowing
-            iconText: "＋"
+            visible: root.online && !root.newMode
+            iconText: "✎"
             tooltipText: "New message (n)"
-            bordered: true
+            Accessible.name: "New message"
+            focusable: true
             foreground: root.foreground
             hoverColor: root.accent
             fontFamily: root.fontFamily
@@ -2488,15 +2591,12 @@ FocusScope {
             visible: root.online && !root.splitView
             iconText: "⇱"
             tooltipText: "Open the app window"
-            bordered: true
             foreground: root.foreground
             hoverColor: root.accent
             fontFamily: root.fontFamily
             onClicked: root.openApp()
           }
         }
-
-        PanelSeparator { Layout.fillWidth: true; foreground: root.foreground }
 
         Text {
           objectName: "blipToastErrorList"
@@ -2587,30 +2687,12 @@ FocusScope {
             }
 
             // ---------------------------------------------- LIST VIEW
-            RowLayout {
+            PanelSectionHeader {
               Layout.fillWidth: true
-              visible: root.online && root.listShowing
-                && (root.newMode || root.canMarkAllRead && !root.searchShowing)
-              PanelSectionHeader {
-                Layout.fillWidth: true
-                text: root.newMode ? "NEW MESSAGE" : ""
-                foreground: root.foreground
-                fontFamily: root.fontFamily
-              }
-              // Clear local marks and, unless push_read=off, ask Messages
-              // on the Mac to mark its conversations read too.
-              Text {
-                id: markAllBtn
-                visible: root.canMarkAllRead && !root.searchShowing && !root.newMode
-                text: "mark all read"
-                textFormat: Text.PlainText
-                color: markAllHover.hovered ? root.mineFill : root.cyan
-                font.family: root.fontFamily
-                font.pixelSize: root.fontCaption
-                font.underline: markAllHover.hovered
-                HoverHandler { id: markAllHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: root.markAllRead() }
-              }
+              visible: root.newMode
+              text: "NEW MESSAGE"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
             }
 
             // ------------------------------------------------ SEARCH
@@ -2706,6 +2788,14 @@ FocusScope {
               Layout.fillWidth: true
               visible: root.online && root.listShowing && !root.newMode
               placeholderText: "Search"
+              background: Rectangle {
+                radius: height / 2
+                color: Qt.alpha(root.foreground, 0.08)
+                border.width: searchField.activeFocus ? 1 : 0
+                border.color: root.accent
+              }
+              verticalPadding: Style.space(8)
+              horizontalPadding: Style.space(12)
               Accessible.name: "Search"
               leftPadding: horizontalPadding + searchGlyph.width + Style.space(7)
               Canvas {
@@ -2777,7 +2867,7 @@ FocusScope {
                   Layout.fillWidth: true
                   Layout.preferredWidth: Math.max(1, (pinnedGrid.width - pinnedGrid.columnSpacing * 2) / 3)
                   implicitHeight: pinnedColumn.implicitHeight + Style.space(12)
-                  radius: Style.cornerRadius
+                  radius: Style.space(10)
                   color: selected ? root.selectedFill
                     : pinnedHover.hovered || (hasCursor && root.cursorShown)
                     ? root.hoverFill
@@ -2806,8 +2896,8 @@ FocusScope {
                       // the size from the pane's known width and supply both
                       // implicit size and layout hints before the first open.
                       readonly property real avatarSize: Math.min(88, Math.max(56,
-                        ((root.splitView ? root.sidebarWidth - Style.space(36) : root.width)
-                          - pinnedGrid.columnSpacing * 2) / 3 * 0.62))
+                        ((root.splitView ? root.sidebarWidth - Style.space(24) : root.width)
+                          - pinnedGrid.columnSpacing * 2) / 3 * 0.80))
                       implicitWidth: avatarSize
                       implicitHeight: avatarSize
                       Layout.preferredWidth: avatarSize
@@ -3025,8 +3115,8 @@ FocusScope {
                   onHasCursorChanged: if (hasCursor) root.cursorRow = threadRow
 
                   Layout.fillWidth: true
-                  implicitHeight: rowRow.implicitHeight + Style.space(root.splitView ? 30 : 18)
-                  radius: Style.cornerRadius
+                  implicitHeight: Math.max(Style.space(64), rowRow.implicitHeight + Style.space(18))
+                  radius: Style.space(10)
                   color: selected ? root.selectedFill : highlighted
                     ? root.hoverFill
                     : "transparent"
@@ -3204,6 +3294,21 @@ FocusScope {
     // ------------------------------------------------- conversation pane
     Item {
       id: conversationPane
+      clip: true
+      Image {
+        id: conversationBackdrop
+        anchors.fill: parent
+        source: root.backgroundUrl
+        asynchronous: true
+        autoTransform: true
+        fillMode: Image.PreserveAspectCrop
+        sourceSize: Qt.size(2048, 2048)
+      }
+      Rectangle {
+        anchors.fill: parent
+        visible: conversationBackdrop.status === Image.Ready
+        color: Qt.alpha(appearance.background, 0.50)
+      }
       visible: root.splitView || root.inThread
       Layout.fillHeight: true
       Layout.fillWidth: true
@@ -3216,13 +3321,13 @@ FocusScope {
         anchors.topMargin: root.splitView ? Style.space(10) : 0
         anchors.bottomMargin: root.splitView ? Style.space(10) : 0
         spacing: Style.space(8)
-        RowLayout {
+        Item {
           Layout.fillWidth: true
-          spacing: Style.space(8)
+          Layout.preferredHeight: root.inThread ? Style.space(82) : Style.space(50)
           PanelActionButton {
             visible: root.inThread && !root.splitView
-            Layout.alignment: Qt.AlignTop
-            Layout.topMargin: Style.space(6)
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
             iconText: "←"
             tooltipText: "Back to messages (Esc)"
             Accessible.name: "Back to messages"
@@ -3232,22 +3337,47 @@ FocusScope {
             fontFamily: root.fontFamily
             onClicked: root.back()
           }
-          PanelHero {
-            Layout.fillWidth: true
-            title: root.inThread ? String(root.active.name || root.active.chat) : "Select a conversation"
-            meta: root.inThread
-              ? (root.activeIsGroup
-                  ? (root.isSendable(root.active) ? "group" : "group · read-only (id unknown)")
-                  : String(root.active.handle))
-              : ""
-            detail: root.inThread && root.loading ? "loading…" : ""
-            foreground: root.foreground
-            fontFamily: root.fontFamily
+          Column {
+            anchors.centerIn: parent
+            spacing: Style.space(4)
+            width: Math.max(1, parent.width - Style.space(120))
+            ConversationAvatar {
+              anchors.horizontalCenter: parent.horizontalCenter
+              visible: root.inThread
+              width: Style.space(44); height: width
+              thread: root.active
+              avatarFiles: root.avatarFiles
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              onRequestAvatar: function(handle) { root.requestAvatar(handle) }
+            }
+            Rectangle {
+              anchors.horizontalCenter: parent.horizontalCenter
+              width: Math.min(parent.width, headerName.implicitWidth + Style.space(18))
+              height: headerName.implicitHeight + Style.space(6)
+              radius: height / 2
+              color: root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.74) : "transparent"
+              Text {
+                id: headerName
+                anchors.centerIn: parent
+                width: Math.max(0, parent.width - Style.space(18))
+                text: ConversationAppearance.conversationName(root.active)
+                textFormat: Text.PlainText
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: root.fontBodySmall
+                font.weight: Font.DemiBold
+              }
+            }
           }
           PanelActionButton {
             id: conversationActions
             objectName: "blipConversationActions"
             visible: root.inThread
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
             iconText: "⋯"
             tooltipText: "Conversation actions"
             Accessible.name: "Conversation actions"
@@ -3257,22 +3387,7 @@ FocusScope {
             fontFamily: root.fontFamily
             onClicked: root.openContactMenu(root.active, conversationActions)
           }
-          // The app's NEW button lives up here (where "Esc = back" used to be).
-          PanelActionButton {
-            visible: root.splitView && !root.newMode
-            Layout.alignment: Qt.AlignTop
-            Layout.topMargin: Style.space(6)
-            iconText: "＋"
-            tooltipText: "New message (n)"
-            bordered: true
-            foreground: root.foreground
-            hoverColor: root.accent
-            fontFamily: root.fontFamily
-            onClicked: root.startNew()
-          }
         }
-
-        PanelSeparator { Layout.fillWidth: true; foreground: root.foreground }
 
         Text {
           objectName: "blipToastErrorThread"
@@ -3307,6 +3422,9 @@ FocusScope {
           // the fold. Scrolling up releases the stick; scrolling back to
           // the end re-arms it.
           property bool stick: false
+          onHeightChanged: if (stick || root.pinToBottom) Qt.callLater(function() {
+            if (flick.stick || root.pinToBottom) flick.contentY = Math.max(0, flick.contentHeight - flick.height)
+          })
           onContentHeightChanged: {
             if (!root.inThread) return
             if (root.pinToBottom) {
@@ -3380,7 +3498,7 @@ FocusScope {
               text: "loading…"
               textFormat: Text.PlainText
               horizontalAlignment: Text.AlignHCenter
-              color: root.dim
+              color: root.canvasDim
               font.family: root.fontFamily
               font.pixelSize: root.fontCaption
             }
@@ -3400,6 +3518,11 @@ FocusScope {
 
                 Layout.fillWidth: true
                 spacing: Style.space(2)
+                HoverHandler { id: bubbleHover }
+                ToolTip.visible: (bubbleHover.hovered || bubbleRow.hasCursor) && String(modelData.time || "") !== ""
+                ToolTip.text: String(modelData.time || "")
+                ToolTip.delay: 450
+                ToolTip.timeout: 4000
 
                 // day divider — "Today", "Yesterday", "Aug 28"
                 Text {
@@ -3408,7 +3531,7 @@ FocusScope {
                   text: String(modelData.day || "")
                   textFormat: Text.PlainText
                   horizontalAlignment: Text.AlignHCenter
-                  color: root.dim
+                  color: root.canvasDim
                   font.family: root.fontFamily
                   font.pixelSize: root.fontCaption
                   font.bold: true
@@ -3428,7 +3551,7 @@ FocusScope {
                   // "delegate wider than the panel" bug (CLAUDE.md) — Astra A#10.
                   Layout.maximumWidth: Math.max(1, bubbleRow.width - Style.space(40))
                   elide: Text.ElideRight
-                  color: root.dim
+                  color: root.canvasDim
                   font.family: root.fontFamily
                   font.pixelSize: root.fontCaption
                 }
@@ -3444,7 +3567,7 @@ FocusScope {
                     textFormat: Text.PlainText
                     Layout.maximumWidth: Math.max(1, bubbleRow.width - Style.space(40))
                     elide: Text.ElideRight
-                    color: root.dim
+                    color: root.canvasDim
                     font.family: root.fontFamily
                     font.pixelSize: root.fontCaption
                     font.italic: true
@@ -3465,7 +3588,7 @@ FocusScope {
                     Layout.preferredHeight: Math.ceil(replySnippet.implicitHeight) + Style.space(10)
                     radius: Style.space(12)
                     color: "transparent"
-                    border.color: root.dim
+                    border.color: root.canvasDim
                     border.width: 1
                     opacity: 0.75
                     Text {
@@ -3476,7 +3599,7 @@ FocusScope {
                       textFormat: Text.PlainText
                       elide: Text.ElideRight
                       maximumLineCount: 1
-                      color: root.dim
+                      color: root.canvasDim
                       font.family: root.fontFamily
                       font.pixelSize: root.fontCaption
                     }
@@ -3520,14 +3643,44 @@ FocusScope {
                     readonly property var fileUrl: root.attFiles[chipRow.attId]
                     readonly property bool failed: chipRow.fileUrl === ""
                     readonly property var imageMetrics: root.attMetrics[chipRow.attId] || ({})
+                    readonly property bool isSticker: !!modelData.sticker
                     readonly property bool showImage:
-                      root.isImageMime(chipRow.modelData.mime) &&
+                      !isSticker && root.isImageMime(chipRow.modelData.mime) &&
                       chipRow.fileUrl !== undefined && chipRow.fileUrl !== ""
                     Layout.fillWidth: true
                     Layout.topMargin: (index === 0 && bubbleRow.modelData.groupStart ? Style.space(6) : 0)
                                       + (pillHere ? Style.space(12) : 0)
                     spacing: 0
                     Item { Layout.fillWidth: true; visible: bubbleRow.mine }
+
+                    StickerImage {
+                      visible: chipRow.isSticker
+                      Layout.preferredWidth: Math.min(Style.space(160), content.width * 0.50)
+                      Layout.preferredHeight: Layout.preferredWidth
+                      attachment: chipRow.modelData
+                      source: chipRow.fileUrl || ""
+                      loading: root.stickerLoading(chipRow.attId)
+                      failed: chipRow.attId === "" || chipRow.failed
+                      animated: chipRow.imageMetrics.animated === true
+                      playing: root.surfaceOpen && chipRow.y + bubbleRow.y + height >= flick.contentY && chipRow.y + bubbleRow.y <= flick.contentY + flick.height
+                      textColor: root.canvasDim
+                      fontSize: root.fontCaption
+                      onTapped: root.activateSticker(chipRow.modelData)
+                      onContextRequested: root.openAttachmentMenu(bubbleRow.modelData, chipRow.modelData)
+                      StickerLayer {
+                        anchors.fill: parent
+                        z: 3
+                        visible: chipRow.index === 0 && !textBubbleRow.visible
+                        stickers: visible ? Stickers.placedStickers(bubbleRow.modelData.stickers) : []
+                        files: root.attFiles; metrics: root.attMetrics
+                        fetchingId: root.fetchingId; fetchQueue: root.fetchQueue
+                        textColor: root.canvasDim
+                        playing: root.surfaceOpen
+                        onOpenRequested: function(att) { root.activateSticker(att) }
+                        onContextRequested: function(att) { root.openAttachmentMenu(bubbleRow.modelData, att) }
+                      }
+                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks }
+                    }
 
                     // fetched image renders inline, like Messages; click = full view.
                     // A GIF has to MOVE, and Image paints frame one and stops,
@@ -3542,6 +3695,18 @@ FocusScope {
                       id: attImage
                       TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.modelData.tapbacks }
                       visible: chipRow.showImage
+                      StickerLayer {
+                        anchors.fill: parent
+                        z: 3
+                        visible: chipRow.index === 0 && !textBubbleRow.visible
+                        stickers: visible ? Stickers.placedStickers(bubbleRow.modelData.stickers) : []
+                        files: root.attFiles; metrics: root.attMetrics
+                        fetchingId: root.fetchingId; fetchQueue: root.fetchQueue
+                        textColor: root.canvasDim
+                        playing: root.surfaceOpen && bubbleRow.y + chipRow.y + height >= flick.contentY && bubbleRow.y + chipRow.y <= flick.contentY + flick.height
+                        onOpenRequested: function(att) { root.activateSticker(att) }
+                        onContextRequested: function(att) { root.openAttachmentMenu(bubbleRow.modelData, att) }
+                      }
                       readonly property bool animated: root.isAnimatedMime(chipRow.modelData.mime)
                       readonly property var view: animated ? attAnimated : attStill
                       readonly property int status: view.status
@@ -3561,7 +3726,9 @@ FocusScope {
                           ? Number(chipRow.imageMetrics.pixelHeight) / pixelRatio
                           : view.implicitHeight
 
-                      Layout.preferredWidth: status === Image.Ready ? Math.min(maxW, naturalWidth) : maxW
+                      readonly property real maxH: Style.space(240)
+                      Layout.preferredWidth: status === Image.Ready && naturalHeight > 0
+                        ? Math.min(maxW, naturalWidth, maxH * naturalWidth / naturalHeight) : maxW
                       Layout.preferredHeight: status === Image.Ready && naturalWidth > 0
                         ? Layout.preferredWidth * naturalHeight / naturalWidth
                         : Style.space(120)
@@ -3623,7 +3790,7 @@ FocusScope {
 
                     Rectangle {
                       TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.modelData.tapbacks }
-                      visible: !chipRow.showImage
+                      visible: !chipRow.showImage && !chipRow.isSticker
                       Layout.preferredWidth: Math.ceil(chipText.implicitWidth) + Style.space(18)
                       Layout.preferredHeight: Math.ceil(chipText.implicitHeight) + Style.space(12)
                       radius: Style.space(14)
@@ -3769,6 +3936,7 @@ FocusScope {
                 // the sender's far side guarantees right/left placement even
                 // when the delegate's own width collapses to its content.
                 RowLayout {
+                  id: textBubbleRow
                   Layout.fillWidth: true
                   // a tapback pill overlaps the top edge — leave room for it
                   Layout.topMargin: (modelData.groupStart ? Style.space(6) : 0)
@@ -3798,8 +3966,20 @@ FocusScope {
                     // the corner: theirsFill is translucent, and stacking two
                     // copies of it double-alphas the overlap into a visibly
                     // lighter square (seen on every received run-ending bubble).
-                    bottomLeftRadius: modelData.groupEnd === true && !bubbleRow.mine ? 0 : radius
-                    bottomRightRadius: modelData.groupEnd === true && bubbleRow.mine ? 0 : radius
+                    bottomLeftRadius: modelData.groupEnd === true && !bubbleRow.mine ? Style.space(4) : radius
+                    bottomRightRadius: modelData.groupEnd === true && bubbleRow.mine ? Style.space(4) : radius
+
+                    StickerLayer {
+                      anchors.fill: parent
+                      z: 3
+                      stickers: Stickers.placedStickers(bubbleRow.modelData.stickers)
+                      files: root.attFiles; metrics: root.attMetrics
+                        fetchingId: root.fetchingId; fetchQueue: root.fetchQueue
+                      textColor: root.canvasDim
+                      playing: root.surfaceOpen && bubbleRow.y + textBubbleRow.y + height >= flick.contentY && bubbleRow.y + textBubbleRow.y <= flick.contentY + flick.height
+                      onOpenRequested: function(att) { root.activateSticker(att) }
+                      onContextRequested: function(att) { root.openAttachmentMenu(bubbleRow.modelData, att) }
+                    }
 
                     // TextEdit, not Text: read-only but selectable, so a message
                     // can be highlighted and Ctrl+C'd like any other text.
@@ -3869,12 +4049,11 @@ FocusScope {
                   Item { Layout.fillWidth: true; visible: !bubbleRow.mine }
                 }
 
-                // timestamp under the last bubble of a run, same spacer trick;
-                // carries the "Edited" and "sent with <effect>" tags too
+                // Only delivery/edit status occupies space; timestamps are available
+                // on hover and keyboard selection without shifting the transcript.
                 RowLayout {
                   Layout.fillWidth: true
-                  visible: String(modelData.time || "") !== "" ||
-                           modelData.edited === true || String(modelData.effect || "") !== "" ||
+                  visible: modelData.edited === true || String(modelData.effect || "") !== "" ||
                            modelData.failed === true || modelData.pending === true ||
                            modelData.scheduled === true
                   spacing: 0
@@ -3888,19 +4067,63 @@ FocusScope {
                            modelData.failed === true ? String(modelData.failureReason || "")
                              : modelData.pending === true ? "Sending…"
                              : modelData.scheduled === true ? "Scheduled for " + String(modelData.scheduledFor || "")
-                             : String(modelData.time || ""),
+                             : "",
                            modelData.edited === true ? "Edited" : "",
                            String(modelData.effect || "") !== "" ? "sent with " + modelData.effect : ""]
                           .filter(function(s) { return s !== "" }).join(" · ")
                     textFormat: Text.PlainText
                     // a failed send is the one thing here that must not be dim
-                    color: modelData.failed === true ? root.urgent : root.dim
+                    color: modelData.failed === true ? root.urgent : root.canvasDim
                     font.bold: modelData.failed === true
                     font.family: root.fontFamily
                     font.pixelSize: root.fontCaption
                     bottomPadding: Style.space(4)
                   }
                   Item { Layout.fillWidth: true; visible: !bubbleRow.mine }
+                }
+
+                RowLayout {
+                  Layout.fillWidth: true
+                  visible: unplacedStickerFlow.stickers.length > 0
+                  Item { Layout.fillWidth: true; visible: bubbleRow.mine }
+                  Flow {
+                    id: unplacedStickerFlow
+                    readonly property bool imageSurface: (bubbleRow.modelData.attachments || []).length > 0 && (root.isImageMime(bubbleRow.modelData.attachments[0].mime) || !!bubbleRow.modelData.attachments[0].sticker) && !!root.attFiles[String(bubbleRow.modelData.attachments[0].id)]
+                    readonly property var stickers: textBubbleRow.visible || imageSurface ? Stickers.unplacedStickers(bubbleRow.modelData.stickers) : (bubbleRow.modelData.stickers || [])
+                    Layout.preferredWidth: Math.min(content.width * 0.78, stickers.length * Style.space(58))
+                    Layout.preferredHeight: childrenRect.height
+                    spacing: Style.space(6)
+                    Repeater {
+                      model: unplacedStickerFlow.stickers
+                      delegate: StickerImage {
+                        required property var modelData
+                        readonly property string attachmentId: String(modelData.attachment.id || "")
+                        width: Style.space(52); height: width
+                        attachment: modelData.attachment
+                        source: root.attFiles[attachmentId] || ""
+                        loading: root.stickerLoading(attachmentId)
+                        failed: attachmentId === "" || root.attFiles[attachmentId] === ""
+                        animated: (root.attMetrics[attachmentId] || {}).animated === true
+                        playing: root.surfaceOpen && bubbleRow.y + height >= flick.contentY && bubbleRow.y <= flick.contentY + flick.height
+                        compact: true
+                        textColor: root.canvasDim
+                        Accessible.description: "Sticker attached to message part " + String(modelData.part + 1)
+                        onTapped: root.activateSticker(modelData.attachment)
+                        onContextRequested: root.openAttachmentMenu(bubbleRow.modelData, modelData.attachment)
+                      }
+                    }
+                  }
+                  Item { Layout.fillWidth: true; visible: !bubbleRow.mine }
+                }
+                Text {
+                  Layout.fillWidth: true
+                  visible: Number(modelData.stickersOverflow || 0) > 0
+                  text: "+" + String(modelData.stickersOverflow || 0) + " more stickers"
+                  textFormat: Text.PlainText
+                  horizontalAlignment: bubbleRow.mine ? Text.AlignRight : Text.AlignLeft
+                  color: root.canvasDim
+                  font.family: root.fontFamily
+                  font.pixelSize: root.fontCaption
                 }
 
                 // "Read 4:42 PM" — only ever under the newest read from-me bubble
@@ -3912,8 +4135,16 @@ FocusScope {
                   Text {
                     Layout.rightMargin: Style.space(6)
                     text: String(modelData.receipt || "")
+                    Rectangle {
+                      anchors.fill: parent
+                      anchors.margins: -Style.space(3)
+                      z: -1
+                      visible: root.backgroundUrl !== ""
+                      radius: Style.space(8)
+                      color: Qt.alpha(appearance.background, 0.74)
+                    }
                     textFormat: Text.PlainText
-                    color: root.dim
+                    color: root.canvasDim
                     font.family: root.fontFamily
                     font.pixelSize: root.fontCaption
                     font.bold: true
@@ -3930,19 +4161,13 @@ FocusScope {
               text: "No messages loaded for this thread."
               horizontalAlignment: Text.AlignHCenter
               textFormat: Text.PlainText
-              color: root.dim
+              color: root.canvasDim
               font.family: root.fontFamily
               font.pixelSize: root.fontBodySmall
             }
           }
         }
         // ------------------------------------------------------ COMPOSE
-        PanelSeparator {
-          Layout.fillWidth: true
-          visible: root.inThread
-          foreground: root.foreground
-        }
-
         // queued attachments — ✕ removes one. ONE CHIP PER ROW, never a
         // RowLayout of N: summed implicit widths stretch the whole column
         // past the panel and take every right-aligned element off-screen
@@ -3994,6 +4219,21 @@ FocusScope {
           Layout.topMargin: root.splitView ? 0 : Math.max(0, Style.spacing.popupPadding - Style.space(8))
           spacing: Style.space(6)
 
+          ComposerButton {
+            id: attachmentButton
+            Layout.alignment: Qt.AlignBottom
+            Layout.bottomMargin: Style.space(3)
+            implicitWidth: Style.space(34)
+            iconText: "+"
+            tooltipText: "Attach files"
+            foreground: root.foreground
+            fill: root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.76) : Qt.alpha(root.foreground, 0.10)
+            font.family: root.fontFamily
+            font.pixelSize: root.fontBody + 8
+            enabled: root.online && root.isSendable(root.active) && !attachmentPicker.running
+            onClicked: root.chooseAttachments()
+          }
+
           // Width must be assigned by the layout *before* wrap can happen.
           // A bare TextArea's implicitWidth is the unwrapped line, so RowLayout
           // otherwise grows with the text and the caret scrolls sideways.
@@ -4014,11 +4254,12 @@ FocusScope {
             // The border belongs to the SLOT, not the field: inside composeFlick
             // the TextArea is as tall as its text, so a background there would
             // scroll away and its rounded bottom edge would be clipped off.
-            BorderSurface {
+            Rectangle {
               anchors.fill: parent
-              color: Style.controlFill(composeField.activeFocus, composeField.hovered, root.foreground, root.mineFill)
-              borderSpec: composeField._composeBorder
-              radius: Style.cornerRadius
+              color: root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.76) : Qt.alpha(root.foreground, 0.06)
+              border.width: 1
+              border.color: Qt.alpha(root.foreground, composeField.activeFocus ? 0.35 : 0.20)
+              radius: Math.min(height / 2, Style.space(22))
             }
 
             // A long draft reads back with the wheel (#62). The caret keeps what
@@ -4091,7 +4332,7 @@ FocusScope {
                   ? "caption (optional) — Enter sends the file"
                   : root.isSendable(root.active) ? "iMessage" : "Read-only — group id unknown"
                 color: root.foreground
-                placeholderTextColor: root.dim
+                placeholderTextColor: root.canvasDim
                 selectionColor: Style.selectionFillFor(root.foreground, root.mineFill)
                 selectedTextColor: root.foreground
                 font.family: root.fontFamily
@@ -4099,10 +4340,10 @@ FocusScope {
                 readonly property var _composeBorder: Border.controlSpec(
                   activeFocus ? "focus" : (hovered ? "hover-cursor" : "normal"),
                   root.foreground, root.mineFill)
-                leftPadding: Style.spacing.controlPaddingX + Border.left(_composeBorder)
-                rightPadding: Style.spacing.controlPaddingX + Border.right(_composeBorder)
-                topPadding: Style.spacing.inputPaddingY + Border.top(_composeBorder)
-                bottomPadding: Style.spacing.inputPaddingY + Border.bottom(_composeBorder)
+                leftPadding: Style.space(14)
+                rightPadding: Style.space(14)
+                topPadding: Style.space(9)
+                bottomPadding: Style.space(9)
                 // Esc drops a bubble selection first (back to the bottom), then
                 // leaves the thread — the two-step Esc a text selection gets.
                 Keys.onEscapePressed: if (root.shareUrl !== "") root.closeShare(); else if (root.bubbleCursor >= 0) root.leaveBubbles(); else root.back()
@@ -4163,17 +4404,37 @@ FocusScope {
             }
           }
 
+          ComposerButton {
+            id: emojiButton
+            Layout.alignment: Qt.AlignBottom
+            Layout.bottomMargin: Style.space(3)
+            implicitWidth: Style.space(34)
+            iconText: "☺"
+            tooltipText: "Emoji"
+            foreground: root.foreground
+            fill: root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.76) : Qt.alpha(root.foreground, 0.10)
+            font.family: root.fontFamily
+            font.pixelSize: root.fontBody + 4
+            enabled: root.online && root.isSendable(root.active)
+            onClicked: {
+              root.openEmojiPicker()
+            }
+          }
+
           // send button — the blue arrow circle (lit when text OR a file is queued)
           Rectangle {
-            Layout.alignment: Qt.AlignBottom
+            Layout.alignment: Qt.AlignVCenter
+            Accessible.role: Accessible.Button
+            Accessible.name: "Send message"
+            Accessible.onPressAction: root.send()
             readonly property bool armed: composeField.text.trim() !== "" || root.attachCount > 0
-            width: Style.space(28); height: width; radius: width / 2
+            width: Style.space(32); height: width; radius: width / 2
             color: armed ? root.mineFill : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15)
             Text {
               anchors.centerIn: parent
               text: "↑"
               textFormat: Text.PlainText
-              color: parent.armed ? "#ffffff" : root.dim
+              color: parent.armed ? "#ffffff" : root.canvasDim
               font.family: root.fontFamily
               font.pixelSize: root.fontBody
               font.bold: true
@@ -4191,11 +4452,49 @@ FocusScope {
           textFormat: Text.PlainText
           readonly property bool calm: root.note === "copied" || root.note === "sending…"
             || root.note === "sent to LocalSend" || root.note.indexOf("attached") === 0
-          color: calm ? root.dim : root.urgent
+          color: calm ? root.canvasDim : root.urgent
           font.family: root.fontFamily
           font.pixelSize: root.fontCaption
           wrapMode: Text.WordWrap
         }
+      }
+    }
+  }
+
+  function openEmojiPicker() {
+    emojiPopup.open()
+  }
+  Popup {
+    id: emojiPopup
+    parent: root
+    width: Math.min(Style.space(340), root.width - Style.space(16))
+    height: Math.min(emojiPicker.implicitHeight + padding * 2, root.height - Style.space(16))
+    x: Math.max(Style.space(8), root.width - width - Style.space(18))
+    y: Math.max(Style.space(8), root.height - height - composeSlot.height - Style.space(28))
+    padding: Style.space(8)
+    focus: true
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    background: Rectangle {
+      color: appearance.background
+      border.color: Qt.alpha(root.foreground, 0.18)
+      border.width: 1
+      radius: Style.space(16)
+    }
+    contentItem: ReactionPicker {
+      id: emojiPicker
+      expanded: true
+      showClassics: false
+      font.family: root.fontFamily
+      font.pixelSize: root.fontBodySmall
+      palette.text: root.foreground
+      palette.windowText: root.foreground
+      palette.base: appearance.background
+      palette.window: appearance.background
+      palette.highlight: root.accent
+      onEmojiChosen: function(emoji) {
+        composeField.insert(composeField.cursorPosition, emoji)
+        emojiPopup.close()
+        composeField.forceActiveFocus()
       }
     }
   }
@@ -4247,13 +4546,14 @@ FocusScope {
     if (root.tapbacksBusy || !root.tapbacksOn || !hostWidget || !TapbackActions.canTapback(message, root.activeIsGroup)) return
     var chat = String(root.active.chat)
     var current = TapbackActions.myTapback(message)
-    var argv = SourceId.bridgeArgv(chat, "imsg-react", hostWidget.binDir)
-      .concat(TapbackActions.tapbackArgs(String(message.guid), kind, current))
+    var request = TapbackActions.tapbackRequest(String(message.guid), kind, current)
+    if (!request) { root.note = "That reaction is not supported"; return }
+    var argv = SourceId.bridgeArgv(chat, "imsg-react", hostWidget.binDir).concat(request.args)
     // the dimmed pill says it is on its way; an earlier failure is old news
     if (root.note.indexOf("tapback: ") === 0) root.note = ""
     hostWidget.takeTapbackFailure(chat)
     root.pendingTapback = TapbackActions.pendingTapback(chat, String(message.guid), kind, current)
-    if (!hostWidget.runTapback(chat, argv)) root.pendingTapback = null
+    if (!hostWidget.runTapback(chat, argv, request.stdin)) root.pendingTapback = null
   }
   MessageMenu {
     id: messageMenu
@@ -4328,6 +4628,27 @@ FocusScope {
       border.color: Qt.alpha(contactMenu.palette.windowText, 0.25)
       radius: 7
     }
+    MenuItem {
+      text: root.backgroundBusy ? "Updating background…" : "Choose Conversation Background…"
+      enabled: !root.backgroundBusy
+      onTriggered: root.changeBackground("choose", root.contactContext ? String(root.contactContext.chat) : root.backgroundChat)
+    }
+    MenuItem {
+      text: "Reset Conversation Background"
+      enabled: !root.backgroundBusy
+      onTriggered: root.changeBackground("clear", root.contactContext ? String(root.contactContext.chat) : root.backgroundChat)
+    }
+    MenuItem {
+      text: "Choose Default Background…"
+      enabled: !root.backgroundBusy
+      onTriggered: root.changeBackground("choose", "")
+    }
+    MenuItem {
+      text: "Remove Default Background"
+      enabled: !root.backgroundBusy
+      onTriggered: root.changeBackground("clear", "")
+    }
+    MenuSeparator {}
     MenuItem {
       text: "Review contact"
       onTriggered: if (root.contactContext) contactReview.review(root.contactContext)

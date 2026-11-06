@@ -27,6 +27,19 @@ ShellRoot {
     property bool healthy: true
     property string lastError: ""
     property var draftCache: ({})
+    property var avatarCache: ({})
+    property string binDir: Quickshell.env("HOME") + "/bin"
+    property var pendingSends: []
+    property int sendEpoch: 0
+    property bool tapbacks: true
+    signal tapbackExited(string chat, bool ok)
+    property bool tapbackRunning: false
+    property var toastAllowlist: []
+    property bool toastAllowlistLoaded: true
+    property bool toastAllowlistReady: true
+    function takeTapbackFailure(chat) { return "" }
+    function reloadToastAllowlist() { }
+    function runTapback(chat, argv, body) { return false }
     // The version, from the same manifest.json the shipped widget reads.
     property string version: ""
     // Clock and date patterns, as BarWidget would supply them (README defaults);
@@ -87,8 +100,10 @@ ShellRoot {
     readonly property int originY: 140
     /** narrow = the bar popout (one column); wide = the app window (two). */
     property bool narrow: false
-    implicitWidth: narrow ? 560 : 1120
-    implicitHeight: 760
+    property int demoWidth: 1040
+    property int demoHeight: 720
+    implicitWidth: narrow ? 560 : demoWidth
+    implicitHeight: demoHeight
     visible: true
 
     Rectangle {
@@ -99,7 +114,7 @@ ShellRoot {
     BlipView {
       id: view
       anchors.fill: parent
-      anchors.margins: Style.space(14)
+      anchors.margins: win.narrow ? Style.space(12) : 0
       hostWidget: host
       surfaceOpen: true
       readActive: false          // a screenshot must never move a read mark
@@ -121,8 +136,12 @@ ShellRoot {
         return "unknown chat"
       }
       function list(): string { view.resetToList(); return "list" }
+      function size(w: int, h: int): string { win.demoWidth = Math.max(720, w); win.demoHeight = Math.max(480, h); return "resized" }
+      function dismiss(): string { view.catchEscape(); return "closed" }
+      function emoji(): string { view.openEmojiPicker(); return "opened" }
       function mode(m: string): string { win.narrow = (m === "narrow"); return m }
       function share(url: string): string { return view.shareLink(url) }
+      function snapshot(): string { return JSON.stringify({background:view.backgroundUrl,chat:view.backgroundChat,note:view.note,bubbles:view.bubbles.length,busy:view.backgroundBusy,pending:view.backgroundReloadPending}) }
       function threads(): string { return String(host.threads.length) }
     }
   }
