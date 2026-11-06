@@ -224,8 +224,11 @@ describe("message menu: tapbacks", () => {
     expect(view).toContain("if (root.threadTapbackDone && root.pendingTapback && root.pendingTapback.chat === root.threadRunningChat) {");
     // the text bubble's pill and the room left for it both draw through shownTapbacks
     expect(view).toContain("readonly property var shownTapbacks: TapbackActions.shownTapbacks(modelData, root.pendingTapback)");
-    expect(view).toContain("TapbackPill { mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks }");
-    expect(view).toContain("+ (bubbleRow.shownTapbacks.length > 0 ? Style.space(12) : 0)");
-    expect(view).toContain("opacity: (tapbacks || []).some(function(t) { return t.pending === true }) ? 0.45 : 1");
+    expect(view).toContain("TapbackPill { mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks; stickers: bubbleRow.shownReactionStickers; message: bubbleRow.modelData;");
+    expect(view).toContain("readonly property bool hasReactions: shownTapbacks.length > 0 || shownReactionStickers.length > 0");
+    expect(view).toContain("+ (bubbleRow.hasReactions ? Style.space(26) : 0)");
+    expect(view).toContain("component TapbackPill: ReactionBadge");
+    const badge = readFileSync(new URL("./ReactionBadge.qml", import.meta.url), "utf8");
+    expect(badge).toContain("opacity: (tapbacks || []).some(function(t) { return t.pending === true }) ? 0.45 : 1");
   });
 });
