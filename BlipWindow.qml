@@ -37,7 +37,7 @@ FloatingWindow {
   // used to count as this window being read (Astra A#6). The title is ours
   // ("Messages"), and the PID guard excludes another app with the same title.
   readonly property bool focused: visible && Hyprland.activeToplevel !== null
-    && Number(Hyprland.activeToplevel.lastIpcObject.pid) === Quickshell.processId
+    && Number((Hyprland.activeToplevel.lastIpcObject || {}).pid) === Quickshell.processId
     && String(Hyprland.activeToplevel.title || "") === win.title
 
   // Proxies BarWidget relies on (same names as the popout host).
