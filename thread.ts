@@ -13,6 +13,7 @@
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { normalizeStickerAttachment, normalizeStickerOverlays, type StickerOverlay } from "./stickers";
 import {
   chatKey,
   dedupeSelfEcho,
@@ -80,6 +81,10 @@ export interface Bubble {
   tapbacks: Tapback[];
   /** Attachment chips ("📷 IMG_4502.png"); metadata only, files stay on the Mac. */
   attachments: AttachmentMeta[];
+  /** Stickers placed on this message, independent of the sender's tapback. */
+  stickers: StickerOverlay[];
+  /** Additional decorations omitted from the bounded render tree. */
+  stickersOverflow: number;
   /** Inline-reply context: the quoted snippet, "" when not a reply. */
   replyText: string;
   replyMine: boolean;
@@ -307,6 +312,7 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
       localDay(next.ts) !== localDay(m.ts) ||
       !sameSender(m, next) ||
       minutesBetween(m.ts, next.ts) > GROUP_GAP_MINUTES;
+    const stickerState = normalizeStickerOverlays(m.stickers);
 
     out.push({
       ts: m.ts,
@@ -326,7 +332,9 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
       // Belt to imsg 1.5.1's suspenders: link-preview payloads are not files.
       attachments: (m.attachments ?? []).filter(
         (a) => !String(a.name || "").endsWith(".pluginPayloadAttachment"),
-      ),
+      ).map(normalizeStickerAttachment),
+      stickers: m.retracted ? [] : stickerState.stickers,
+      stickersOverflow: m.retracted ? 0 : stickerState.overflow,
       replyText: m.reply_to?.text ?? "",
       replyMine: m.reply_to?.from_me ?? false,
       edited: m.edited === true,
@@ -420,6 +428,8 @@ export function pendingBubble(prev: Bubble | undefined, send: PendingSend, today
     receipt: "",
     tapbacks: [],
     attachments: [],
+    stickers: [],
+    stickersOverflow: 0,
     replyText: "",
     replyMine: false,
     edited: false,

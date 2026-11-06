@@ -26,13 +26,13 @@ import { CACHE_DIR, FETCH_MAX_BYTES } from "./fetch";
 
 const CONTROL = /[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/;
 
-/** Only an original (`<id>-orig-…`) or the full-size HEIC→JPEG (`<id>-jpg-…`)
+/** Only an original (`<id>-orig-…`) or full-size HEIC→JPEG/PNG (`-jpg-`/`-png-`)
  *  inside the media cache is a valid source: never a preview, never a path a
  *  caller made up. Returns the resolved path. */
 export function cachedOriginal(path: string, cacheDir = CACHE_DIR): string {
   if (typeof path !== "string" || !isAbsolute(path) || CONTROL.test(path)) throw new Error("Invalid attachment path");
   const resolved = realpathSync(path);
-  if (dirname(resolved) !== realpathSync(cacheDir) || !/^[^/]+-(orig|jpg)-[^/]+$/.test(basename(resolved)))
+  if (dirname(resolved) !== realpathSync(cacheDir) || !/^[^/]+-(orig|jpg|png)-[^/]+$/.test(basename(resolved)))
     throw new Error("Not a fetched original");
   const st = lstatSync(resolved);
   if (!st.isFile()) throw new Error("Not a fetched original");

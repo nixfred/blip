@@ -53,6 +53,12 @@ export function wantsJpeg(mime: string): boolean {
   return mime === "image/heic" || mime === "image/heif";
 }
 
+/** HEIC stickers need alpha-preserving PNG, including a still fallback for
+ * Live Sticker sequences that sips cannot export as an animation. */
+export function wantsStickerPng(mime: string): boolean {
+  return ["image/heic", "image/heif", "image/heics", "image/heic-sequence", "image/heif-sequence"].includes(String(mime || "").toLowerCase());
+}
+
 /**
  * Formats whose whole point is that they MOVE.
  *
@@ -79,6 +85,7 @@ export function sanitizeName(name: string): string {
  *  from the sender's filename: "image/png" + "evil.desktop" caches as .png. */
 const MIME_EXT: Record<string, string> = {
   "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp",
+  "image/apng": "png",
   "image/heic": "jpg", "image/heif": "jpg", "image/tiff": "tiff", "image/bmp": "bmp",
   "video/mp4": "mp4", "video/quicktime": "mov", "video/x-m4v": "m4v",
   "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/aac": "aac", "audio/amr": "amr",
@@ -88,18 +95,19 @@ const MIME_EXT: Record<string, string> = {
   "audio/x-caf": "ogg",
   "application/pdf": "pdf", "text/plain": "txt", "text/vcard": "vcf", "text/calendar": "ics",
 };
-export function cacheFileName(id: string, name: string, mime: string, preview = false): string {
+export function cacheFileName(id: string, name: string, mime: string, preview = false, sticker = false): string {
   // Three transforms, never colliding: `orig` is the untouched file, `jpg` a
   // sips HEIC→JPEG at full size, `prev` a resampled inline preview. A preview
   // is ALWAYS JPEG whatever the source was, so its extension is too —
   // xdg-open dispatches on extension, and a JPEG inside a .png would be a lie
   // (war room #49).
-  const transform = preview ? "prev" : wantsJpeg(mime) ? "jpg" : "orig";
+  const png = sticker && wantsStickerPng(mime);
+  const transform = png ? "png" : preview ? "prev" : wantsJpeg(mime) ? "jpg" : "orig";
   let base = sanitizeName(name);
   // The extension is ALWAYS ours. An unmapped type (image/svg+xml, anything
   // exotic) used to keep the sender's name — "evil.desktop" with an image MIME
   // passed the opening gate and reached xdg-open by extension (Astra B#1).
-  const ext = preview ? "jpg" : (MIME_EXT[String(mime || "").toLowerCase()] ?? "bin");
+  const ext = png ? "png" : preview ? "jpg" : (MIME_EXT[String(mime || "").toLowerCase()] ?? "bin");
   base = base.replace(/\.[^.]{1,8}$/, "") + "." + ext;
   return `${id}-${transform}-${base}`;
 }
@@ -151,6 +159,21 @@ export function imageMetrics(bytes: Buffer, mime: string): ImageMetrics {
       pixelWidth: bytes.readUInt16LE(6),
       pixelHeight: bytes.readUInt16LE(8),
       pixelRatio: 1,                       // GIF carries no density
+    };
+  }
+
+  // WebP extended header (including animations), lossless, and lossy.
+  if (bytes.length >= 30 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP") {
+    const kind = bytes.toString("ascii", 12, 16);
+    if (kind === "VP8X") return {
+      pixelWidth: bytes.readUIntLE(24, 3) + 1, pixelHeight: bytes.readUIntLE(27, 3) + 1, pixelRatio: 1,
+    };
+    if (kind === "VP8L" && bytes[20] === 0x2f) return {
+      pixelWidth: 1 + (bytes.readUInt32LE(21) & 0x3fff),
+      pixelHeight: 1 + ((bytes.readUInt32LE(21) >>> 14) & 0x3fff), pixelRatio: 1,
+    };
+    if (kind === "VP8 " && bytes[23] === 0x9d && bytes[24] === 0x01 && bytes[25] === 0x2a) return {
+      pixelWidth: bytes.readUInt16LE(26) & 0x3fff, pixelHeight: bytes.readUInt16LE(28) & 0x3fff, pixelRatio: 1,
     };
   }
 
@@ -208,20 +231,158 @@ export function imageMetrics(bytes: Buffer, mime: string): ImageMetrics {
   return { ...EMPTY_IMAGE_METRICS };
 }
 
-function cachedImageMetrics(path: string, mime: string): ImageMetrics {
+export interface ImageAnimation { animated: boolean; frames: number; format: string }
+
+/** Sticker images bypass JPEG previewing, so do not let a sender use that
+ * path to load SVG or another resource-bearing format in the QML renderer. */
+export function stickerRasterMime(bytes: Buffer): string {
+  if (bytes.length >= 24 && bytes.toString("hex", 0, 8) === "89504e470d0a1a0a"
+      && bytes.toString("ascii", 12, 16) === "IHDR") return "image/png";
+  if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 10 && ["GIF87a", "GIF89a"].includes(bytes.toString("ascii", 0, 6))) return "image/gif";
+  if (bytes.length >= 30 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP"
+      && ["VP8X", "VP8L", "VP8 "].includes(bytes.toString("ascii", 12, 16))) return "image/webp";
+  return "";
+}
+
+function stickerRasterValid(bytes: Buffer, mime: string): boolean {
+  const expected = mime === "image/apng" ? "image/png" : mime;
+  if (stickerRasterMime(bytes) !== expected) return false;
+  const metrics = imageMetrics(bytes, expected);
+  return metrics.pixelWidth > 0 && metrics.pixelHeight > 0 && metrics.pixelWidth <= 2048 && metrics.pixelHeight <= 2048;
+}
+
+/** Only inspect bounded container headers. PNG's acTL precedes IDAT. */
+export function imageAnimation(bytes: Buffer): ImageAnimation {
+  const plain = { animated: false, frames: 1, format: "" };
+  if (bytes.length >= 10 && ["GIF87a", "GIF89a"].includes(bytes.toString("ascii", 0, 6)))
+    return { animated: true, frames: 0, format: "gif" };
+  if (bytes.length >= 30 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP")
+    return { animated: bytes.toString("ascii", 12, 16) === "VP8X" && (bytes[20]! & 2) !== 0, frames: 0, format: "webp" };
+  if (bytes.length < 24 || bytes.toString("hex", 0, 8) !== "89504e470d0a1a0a") return plain;
+  for (let pos = 8; pos + 12 <= bytes.length;) {
+    const length = bytes.readUInt32BE(pos);
+    if (length > IMAGE_HEADER_BYTES || pos + 12 + length > bytes.length) break;
+    const type = bytes.toString("ascii", pos + 4, pos + 8);
+    if (type === "acTL" && length === 8) {
+      const frames = bytes.readUInt32BE(pos + 8);
+      return { animated: frames > 1, frames, format: "png" };
+    }
+    if (type === "IDAT" || type === "IEND") break;
+    pos += length + 12;
+  }
+  return { ...plain, format: "png" };
+}
+
+/** Qt's PNG reader renders APNG as a still. Convert only the inline sticker
+ * preview to lossless animated WebP, preserving alpha. Originals still back
+ * explicit Open/Copy/Save; no conversation text enters files or argv. */
+export function stickerAnimationPreview(bytes: Buffer, runner = spawnSync): { bytes: Buffer; converted: boolean; unavailable: boolean } {
+  const animation = imageAnimation(bytes.subarray(0, IMAGE_HEADER_BYTES));
+  if (animation.format !== "png" || !animation.animated) return { bytes, converted: false, unavailable: false };
+  const size = imageMetrics(bytes.subarray(0, IMAGE_HEADER_BYTES), "image/png");
+  if (animation.frames > 100 || size.pixelWidth <= 0 || size.pixelHeight <= 0
+      || size.pixelWidth > 2048 || size.pixelHeight > 2048
+      || size.pixelWidth * size.pixelHeight * animation.frames > 64_000_000)
+    return { bytes, converted: false, unavailable: true };
+  try {
+    const res = runner("ffmpeg", ["-nostdin", "-v", "error", "-protocol_whitelist", "pipe", "-f", "apng", "-i", "pipe:0",
+      "-map_metadata", "-1", "-c:v", "libwebp_anim", "-lossless", "1", "-loop", "0",
+      "-frames:v", "100", "-f", "webp", "pipe:1"],
+    { input: bytes, timeout: 30000, maxBuffer: FETCH_MAX_BYTES + (1 << 20) });
+    const out = res.stdout as Buffer;
+    if (res.status === 0 && Buffer.isBuffer(out) && out.length > 30 && imageAnimation(out).format === "webp")
+      return { bytes: out, converted: true, unavailable: false };
+  } catch { /* A missing ffmpeg or decoder retains a usable transparent still. */ }
+  return { bytes, converted: false, unavailable: true };
+}
+
+interface StickerSequenceResult { bytes: Buffer; renderMime: "image/webp" | "image/png"; unavailable: boolean }
+
+/** Live Stickers use a color track and a separate grayscale alpha track.
+ * In HEICS the first pair is the still image; tracks 2/3 are the animation.
+ * Probe only container metadata before allowing bounded decode. A private
+ * media temp file supplies seekable input (MOV/HEICS often puts moov last).
+ */
+export function stickerSequencePreview(bytes: Buffer, mime: string, runner = spawnSync, dir = CACHE_DIR): StickerSequenceResult | undefined {
+  if (!bytes.length || bytes.length > FETCH_MAX_BYTES) return undefined;
+  const tmp = join(dir, `.sticker-${process.pid}-${Math.random().toString(36).slice(2, 10)}.media`);
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const fd = openSync(tmp, "wx", 0o600);
+    try { writeSync(fd, bytes); } finally { closeSync(fd); }
+    const probe = runner("ffprobe", ["-v", "error", "-protocol_whitelist", "file,pipe",
+      "-show_entries", "stream=index,codec_type,width,height,nb_frames,duration,pix_fmt",
+      "-of", "json", tmp], { timeout: 10000, maxBuffer: 65536 });
+    if (probe.status !== 0) return undefined;
+    const data = JSON.parse(String(probe.stdout));
+    if (!Array.isArray(data.streams) || data.streams.length > 8) return undefined;
+    const video = data.streams.filter((s: any) => s.codec_type === "video");
+    const heics = wantsStickerPng(mime);
+    if (!video.length || (heics && video.length < 4)) return undefined;
+    const color = heics ? video[2] : video[0];
+    const mask = heics ? video[3] : video.length === 2 && /^gray/.test(video[1].pix_fmt) ? video[1] : null;
+    const width = Number(color.width), height = Number(color.height), count = Number(color.nb_frames), seconds = Number(color.duration);
+    const validSize = (s: any) => Number.isInteger(s.index) && s.index >= 0 && s.index <= 16
+      && Number.isInteger(s.width) && Number.isInteger(s.height) && s.width > 0 && s.height > 0 && s.width <= 2048 && s.height <= 2048;
+    if (!validSize(color) || (mask && (!validSize(mask) || mask.width !== width || mask.height !== height || !/^gray/.test(mask.pix_fmt)))) return undefined;
+    const animate = Number.isInteger(count) && count > 1 && count <= 100
+      && width * height * count <= 64_000_000 && Number.isFinite(seconds) && seconds > 0 && seconds <= 8;
+    const filter = mask
+      ? `[0:${color.index}][0:${mask.index}]alphamerge,format=rgba[out]`
+      : `[0:${color.index}]format=rgba[out]`;
+    const output = animate
+      ? ["-c:v", "libwebp_anim", "-lossless", "1", "-loop", "0", "-frames:v", "100", "-t", "8", "-f", "webp"]
+      : ["-c:v", "png", "-frames:v", "1", "-f", "image2pipe"];
+    const result = runner("ffmpeg", ["-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe",
+      "-threads", "1", "-i", tmp, "-filter_complex_threads", "1", "-filter_complex", filter,
+      "-map", "[out]", "-an", "-map_metadata", "-1", ...output, "pipe:1"],
+    { timeout: 30000, maxBuffer: FETCH_MAX_BYTES + (1 << 20) });
+    const out = result.stdout as Buffer;
+    if (result.status !== 0 || !Buffer.isBuffer(out) || out.length > FETCH_MAX_BYTES) return undefined;
+    const format = imageAnimation(out).format;
+    if ((animate && format !== "webp") || (!animate && format !== "png")) return undefined;
+    return { bytes: out, renderMime: animate ? "image/webp" : "image/png", unavailable: !animate };
+  } catch { return undefined; }
+  finally { try { unlinkSync(tmp); } catch { /* no temp file survived */ } }
+}
+
+function cachedImageMetrics(path: string, mime: string): ImageMetrics & { animated: boolean; animationUnavailable: boolean; rasterMime: string } {
+  const empty = { ...EMPTY_IMAGE_METRICS, animated: false, animationUnavailable: false, rasterMime: "" };
   let fd = -1;
   try {
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const st = fstatSync(fd);
-    if (!st.isFile() || st.uid !== process.getuid() || st.size <= 0) return { ...EMPTY_IMAGE_METRICS };
+    if (!st.isFile() || st.uid !== process.getuid() || st.size <= 0) return empty;
     const header = Buffer.alloc(Math.min(st.size, IMAGE_HEADER_BYTES));
     const count = readSync(fd, header, 0, header.length, 0);
-    return imageMetrics(header.subarray(0, count), mime);
+    const bytes = header.subarray(0, count);
+    const animation = imageAnimation(bytes);
+    return { ...imageMetrics(bytes, mime), animated: animation.animated && animation.format !== "png",
+      animationUnavailable: animation.animated && animation.format === "png", rasterMime: stickerRasterMime(bytes) };
   } catch {
-    return { ...EMPTY_IMAGE_METRICS };
+    return empty;
   } finally {
     if (fd >= 0) closeSync(fd);
   }
+}
+
+function cachedMediaBytes(path: string, cap: number): Buffer | undefined {
+  let fd = -1;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.uid !== process.getuid() || stat.size <= 0 || stat.size > cap) return undefined;
+    const bytes = Buffer.alloc(stat.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const n = readSync(fd, bytes, offset, bytes.length - offset, offset);
+      if (!n) return undefined;
+      offset += n;
+    }
+    return bytes;
+  } catch { return undefined; }
+  finally { if (fd >= 0) closeSync(fd); }
 }
 
 function evict(keep: string): void {
@@ -348,6 +509,11 @@ export interface FetchResult {
   pixelWidth: number;
   pixelHeight: number;
   pixelRatio: number;
+  /** Actual cached bytes, for clipboard MIME and sticker render selection. */
+  renderMime: string;
+  animated: boolean;
+  /** A transparent still is available, but its source animation could not be decoded. */
+  animationUnavailable: boolean;
 }
 
 /** An iPhone voice message (CAF, Opus inside) → Ogg Opus, so the default
@@ -383,24 +549,52 @@ export function fetchAttachment(
   mime: string,
   runner = spawnSync,
   maxBytes = FETCH_MAX_BYTES,
+  sticker = false,
 ): FetchResult {
   const fail = (error: string, online = true): FetchResult =>
-    ({ ok: false, online, path: "", url: "", error, ...EMPTY_IMAGE_METRICS });
+    ({ ok: false, online, path: "", url: "", error, ...EMPTY_IMAGE_METRICS,
+       renderMime: "", animated: false, animationUnavailable: false });
 
   if (!/^[0-9]{1,18}$/.test(id)) return fail("bad attachment id");
+  mime = String(mime || "").toLowerCase();
+  if (sticker && !["image/png", "image/apng", "image/jpeg", "image/gif", "image/webp"].includes(mime)
+      && !wantsStickerPng(mime) && !mime.startsWith("video/")) return fail("unsupported sticker media format");
   mkdirSync(CACHE_DIR, { recursive: true, mode: 0o700 });
 
-  const preview = maxBytes < FETCH_MAX_BYTES && isImageMime(mime) && !isAnimatedMime(mime);
-  const file = join(CACHE_DIR, cacheFileName(id, name, mime, preview));
-  try {
-    const st = lstatSync(file);
+  const auto = maxBytes < FETCH_MAX_BYTES;
+  const preview = auto && isImageMime(mime) && !isAnimatedMime(mime) && !sticker;
+  const png = sticker && wantsStickerPng(mime);
+  const animatedPreview = sticker && auto && ["image/png", "image/apng"].includes(mime.toLowerCase());
+  const sequencePreview = sticker && auto && (mime.toLowerCase().startsWith("video/")
+    || (png && !["image/heic", "image/heif"].includes(mime.toLowerCase())));
+  const rawFile = join(CACHE_DIR, cacheFileName(id, name, mime, preview, sticker));
+  const animationFile = join(CACHE_DIR, cacheFileName(id, name, "image/webp").replace(`${id}-orig-`, `${id}-anim-`));
+  const stillFile = join(CACHE_DIR, cacheFileName(id, name, "image/png").replace(`${id}-orig-`, `${id}-still-`));
+  let file = rawFile;
+  let cachedRaw: Buffer | undefined;
+  let renderMime = png ? "image/png" : preview || wantsJpeg(mime) ? "image/jpeg" : mime;
+  const sequenceStill = png && !["image/heic", "image/heif"].includes(mime.toLowerCase());
+  const candidates = sequencePreview ? [animationFile, stillFile].concat(png ? [rawFile] : [])
+    : animatedPreview ? [animationFile, rawFile] : [rawFile];
+  for (const candidate of candidates) try {
+    const st = lstatSync(candidate);
     // A symlink planted in the cache must never be followed (or touched).
-    if (st.isFile() && st.size > 0) {
+    if (st.isFile() && st.size > 0 && st.size <= Math.min(maxBytes, FETCH_MAX_BYTES)) {
       const now = new Date();
-      utimesSync(file, now, now); // mtime is the LRU clock
+      utimesSync(candidate, now, now); // mtime is the LRU clock
+      const cachedMime = candidate === animationFile ? "image/webp" : candidate === stillFile ? "image/png" : renderMime;
+      const { rasterMime, ...metrics } = cachedImageMetrics(candidate, cachedMime);
+      if (sticker && !cachedMime.startsWith("video/") && (rasterMime !== (cachedMime === "image/apng" ? "image/png" : cachedMime)
+          || metrics.pixelWidth <= 0 || metrics.pixelHeight <= 0 || metrics.pixelWidth > 2048 || metrics.pixelHeight > 2048))
+        return fail("sticker media is not a supported bounded raster image");
+      if (animatedPreview && candidate === rawFile && metrics.animationUnavailable) {
+        cachedRaw = cachedMediaBytes(candidate, Math.min(maxBytes, FETCH_MAX_BYTES));
+        if (cachedRaw) break; // convert an already cached APNG without another bridge read
+      }
       return {
-        ok: true, online: true, path: file, url: pathToFileURL(file).href, error: "",
-        ...cachedImageMetrics(file, mime),
+        ok: true, online: true, path: candidate, url: pathToFileURL(candidate).href, error: "",
+        renderMime: cachedMime, ...metrics,
+        animationUnavailable: candidate !== animationFile && (sequenceStill || candidate === stillFile || metrics.animationUnavailable),
       };
     }
   } catch { /* not cached */ }
@@ -415,10 +609,10 @@ export function fetchAttachment(
   // still fetch the untouched original into `<id>-orig-…`.
   const args = [
     "attachment", id,
-    ...(wantsJpeg(mime) || preview ? ["--jpeg"] : []),
+    ...(png && !sequencePreview ? ["--png"] : !sequencePreview && (wantsJpeg(mime) || preview) ? ["--jpeg"] : []),
     ...(preview ? ["--max-dim", String(PREVIEW_MAX_DIM)] : []),
   ];
-  const res = runner(shimPath("imsg"), args, {
+  const res = cachedRaw ? { status: 0, stdout: cachedRaw, stderr: "" } : runner(shimPath("imsg"), args, {
     timeout: 120000,
     maxBuffer: FETCH_MAX_BYTES + (1 << 20),
   });
@@ -430,9 +624,46 @@ export function fetchAttachment(
   const raw = res.stdout as Buffer;
   if (!raw || raw.length === 0) return fail("empty attachment stream");
   if (raw.length > Math.min(maxBytes, FETCH_MAX_BYTES)) return fail("attachment exceeds the fetch ceiling");
-  const bytes = String(mime || "").toLowerCase() === "audio/x-caf"
+  let bytes = String(mime || "").toLowerCase() === "audio/x-caf"
     ? rewrapCaf(raw, runner)
     : bakeOrientation(raw, runner);
+  let animationUnavailable = sequenceStill;
+  if (sequencePreview) {
+    const converted = stickerSequencePreview(bytes, mime, runner);
+    if (converted && converted.bytes.length <= Math.min(maxBytes, FETCH_MAX_BYTES)) {
+      bytes = converted.bytes;
+      file = converted.renderMime === "image/webp" ? animationFile : stillFile;
+      renderMime = converted.renderMime;
+      animationUnavailable = converted.unavailable;
+    } else if (png) {
+      // A missing ffmpeg, unknown HEICS layout, or oversized preview still
+      // gets the Mac's transparent first image. Never cache raw HEICS as PNG.
+      const fallback = runner(shimPath("imsg"), ["attachment", id, "--png"],
+        { timeout: 120000, maxBuffer: FETCH_MAX_BYTES + (1 << 20) });
+      if (fallback.status === 69 || fallback.status === 255) return fail("Mac unreachable", false);
+      const still = fallback.stdout as Buffer;
+      if (fallback.status !== 0 || !Buffer.isBuffer(still) || imageAnimation(still).format !== "png")
+        return fail("sticker animation and still preview unavailable");
+      if (still.length > Math.min(maxBytes, FETCH_MAX_BYTES)) return fail("sticker preview exceeds the fetch ceiling");
+      bytes = still;
+      animationUnavailable = true;
+    } else {
+      return fail("sticker video preview unavailable; open the original attachment");
+    }
+  }
+  if (animatedPreview) {
+    const converted = stickerAnimationPreview(bytes, runner);
+    animationUnavailable = converted.unavailable;
+    if (converted.converted) {
+      if (converted.bytes.length <= Math.min(maxBytes, FETCH_MAX_BYTES)) {
+        bytes = converted.bytes;
+        file = animationFile;
+        renderMime = "image/webp";
+      } else animationUnavailable = true;
+    }
+  }
+  if (sticker && !renderMime.startsWith("video/") && !stickerRasterValid(bytes.subarray(0, IMAGE_HEADER_BYTES), renderMime))
+    return fail("sticker media is not a supported bounded raster image");
 
   // tmp + fsync + rename: a killed fetch must never leave a cache hit that
   // looks complete.
@@ -446,10 +677,13 @@ export function fetchAttachment(
     closeSync(fd);
   }
   renameSync(tmp, file);
-  evict(cacheFileName(id, name, mime, preview));
+  evict(file.slice(file.lastIndexOf("/") + 1));
+  const animation = imageAnimation(bytes.subarray(0, IMAGE_HEADER_BYTES));
   return {
     ok: true, online: true, path: file, url: pathToFileURL(file).href, error: "",
-    ...imageMetrics(bytes.subarray(0, IMAGE_HEADER_BYTES), mime),
+    ...imageMetrics(bytes.subarray(0, IMAGE_HEADER_BYTES), renderMime), renderMime,
+    animated: animation.animated && animation.format !== "png",
+    animationUnavailable: animationUnavailable || (animation.animated && animation.format === "png"),
   };
 }
 
@@ -457,7 +691,7 @@ if (import.meta.main) {
   const [id, name, mime] = [process.argv[2] ?? "", process.argv[3] ?? "file", process.argv[4] ?? ""];
   const cap = Number(process.argv[5] ?? "");
   try {
-    console.log(JSON.stringify(fetchAttachment(id, name, mime, undefined, cap > 0 ? cap : FETCH_MAX_BYTES)));
+    console.log(JSON.stringify(fetchAttachment(id, name, mime, undefined, cap > 0 ? cap : FETCH_MAX_BYTES, process.argv.includes("--sticker"))));
   } catch (e) {
     console.log(JSON.stringify({ ok: false, online: true, path: "", url: "", error: String(e) }));
   }
