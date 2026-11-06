@@ -331,7 +331,7 @@ reports the live value as `scroll_gain=`.
 `~/.config/omarchy/plugins/nixfred.blip` and adds the bar widget)
 
 ```sh
-omarchy plugin add https://github.com/nixfred/blip.git --enable --yes
+omarchy plugin add git@github.com:marcus/blip.git --enable --yes
 ```
 
 It installs the current `main`, not a tagged release, so a fresh install
@@ -340,12 +340,16 @@ trust" prompt; drop it to be asked. Run it from a terminal inside your
 Omarchy session: enabling talks to the running shell, so over a bare ssh
 session it clones the plugin and then stops with `OMARCHY_PATH is not set`.
 
-(Manual alternative: `git clone https://github.com/nixfred/blip
+(This private continuation requires GitHub access to this repository.)
+
+(Manual alternative: `git clone git@github.com:marcus/blip.git
 ~/.config/omarchy/plugins/nixfred.blip`, then step 4.)
 
 **2. Run the wizard** (idempotent — re-run any time; it prints the
 `pacman` line for exactly the Linux packages you are missing and stops,
-and names `ffmpeg` and `mpv` as optional: voice messages need them)
+and checks the Qt Multimedia runtime used by inline audio. `ffmpeg` supplies
+CAF conversion, audio validation, and waveform analysis; `mpv` is only needed
+for optional external playback.)
 
 ```sh
 ~/.config/omarchy/plugins/nixfred.blip/scripts/blip-setup you@your-mac
