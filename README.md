@@ -172,7 +172,7 @@ Linux side. If the Mac is asleep, the widget dims and says so.
   "Blip documentation" must never be focused or closed by this shortcut:
   ```lua
   o.bind("SUPER + M", "Blip messages", [[sh -c '
-    blip() { hyprctl clients -j | jq -r ".[] | select(.class == \"org.quickshell\" and (.title | test(\"^Blip( [(][0-9]+[)])?$\"))) | .address" | head -1; }
+    blip() { hyprctl clients -j | jq -r ".[] | select(.class == \"org.quickshell\" and (.title | test(\"^(Messages|Blip( [(][0-9]+[)])?)$\"))) | .address" | head -1; }
     a=$(blip)
     if [ -z "$a" ]; then
       omarchy-shell nixfred.blip app >/dev/null

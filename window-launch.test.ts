@@ -14,6 +14,8 @@ const args = showApp.split("Quickshell.execDetached(")[1].trim().slice(0, -1);
 const launch = runInNewContext(args) as string[];
 
 const impostors = [
+  { class: "chromium", title: "Messages", address: "0x10" },
+  { class: "org.quickshell", title: "Messages documentation", address: "0x15" },
   { class: "codex", title: "Blip plugin missing", address: "0x11" },
   { class: "chromium", title: "Blip", address: "0x12" },
   { class: "org.quickshell", title: "Blip documentation", address: "0x13" },
@@ -48,7 +50,7 @@ esac
 }
 
 describe("Blip window launch identity", () => {
-  for (const title of ["Blip", "Blip (3)"]) {
+  for (const title of ["Messages", "Blip", "Blip (3)"]) {
     test(`shortcut focuses ${title}, not an earlier title match`, () => {
       expect(run(["sh", "-c", shortcut], title, false)).toEqual([
         'hl.dsp.focus({ window = "address:0x20" })',

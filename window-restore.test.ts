@@ -37,13 +37,15 @@ test("workspace names cannot inject Lua", () => {
 });
 
 test("the live home rule matches Blip and Blip (N), not a restore title", () => {
+  expect(isLiveBlipTitle("Messages")).toBe(true);
+  expect(isLiveBlipTitle("Messages documentation")).toBe(false);
   expect(isLiveBlipTitle("Blip")).toBe(true);
   expect(isLiveBlipTitle("Blip (3)")).toBe(true);
   expect(isLiveBlipTitle("Blip-restore-abcd-1234")).toBe(false);
   expect(isLiveBlipTitle("Blip documentation")).toBe(false);
   const rule = homeRule("2");
   expect(rule).toContain('name = "blip-session-home"');
-  expect(rule).toContain(`title = ${luaString("^Blip( \\([0-9]+\\))?$")}`);
+  expect(rule).toContain(`title = ${luaString("^(Messages|Blip( \\([0-9]+\\))?)$")}`);
   expect(rule).toContain(`workspace = ${luaString("2 silent")}`);
   expect(homeRule(undefined)).not.toContain("workspace =");
 });

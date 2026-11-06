@@ -21,9 +21,9 @@ import qs.Commons as Commons
 FloatingWindow {
   id: win
   property var hostWidget: null
-  // "Blip (3)" while unread exists — selectors match the "Blip" PREFIX.
+  // Stable user-facing title; launch and restore selectors also accept legacy Blip titles.
   property string restorationTitle: ""
-  title: restorationTitle || "Blip" + (hostWidget && hostWidget.unread > 0 ? " (" + hostWidget.unread + ")" : "")
+  title: restorationTitle || "Messages"
   // Same fill as Omarchy's other FloatingWindow (dev gallery). A 0.70
   // alpha assumed Hyprland blur, which Omarchy 4.x ships off.
   color: hostWidget && hostWidget.appearance ? hostWidget.appearance.background : Commons.Color.background
@@ -31,12 +31,13 @@ FloatingWindow {
   implicitHeight: 720
   minimumSize: Qt.size(720, 480)
   visible: false
-  // Focused = Hyprland's active toplevel is this window (title prefix "Blip").
+  // Focused = Hyprland's active toplevel belongs to this shell and exact title.
   // A visible-but-unfocused window keeps refreshing but does not mark read.
   // Exact title, not a prefix: a terminal or tab titled "Blip documentation"
   // used to count as this window being read (Astra A#6). The title is ours
-  // ("Blip" or "Blip (N)"), so equality identifies it.
+  // ("Messages"), and the PID guard excludes another app with the same title.
   readonly property bool focused: visible && Hyprland.activeToplevel !== null
+    && Number(Hyprland.activeToplevel.lastIpcObject.pid) === Quickshell.processId
     && String(Hyprland.activeToplevel.title || "") === win.title
 
   // Proxies BarWidget relies on (same names as the popout host).
@@ -137,7 +138,7 @@ FloatingWindow {
       if (name === "openwindow") {
         var open = win.eventParts(event, 4)
         var title = String(open[3] || "")
-        if (String(open[2] || "") === "org.quickshell" && /^Blip( \([0-9]+\))?$/.test(title))
+        if (String(open[2] || "") === "org.quickshell" && /^(Messages|Blip( \([0-9]+\))?)$/.test(title))
           win.applyWorkspaceDecision(String(open[1] || ""), "map", String(open[0] || ""))
       } else if (name === "movewindowv2") {
         var moved = win.eventParts(event, 3)

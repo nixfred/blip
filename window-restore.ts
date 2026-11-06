@@ -15,7 +15,7 @@ export function workspaceSelector(value: unknown): string | null {
 }
 
 export function isLiveBlipTitle(title: unknown): boolean {
-  return typeof title === "string" && /^Blip( \([0-9]+\))?$/.test(title);
+  return typeof title === "string" && /^(Messages|Blip( \([0-9]+\))?)$/.test(title);
 }
 
 export function windowAddress(value: unknown): string | null {
@@ -49,7 +49,7 @@ export function restoreRule(workspace: unknown, title: string): string {
 
 export function homeRule(workspace: unknown): string {
   const target = workspaceSelector(workspace);
-  return `hl.window_rule({ name = "blip-session-home", match = { class = ${luaString("^org\\.quickshell$")}, title = ${luaString("^Blip( \\([0-9]+\\))?$")} }, no_initial_focus = true${target ? `, workspace = ${luaString(target + " silent")}` : ""} })`;
+  return `hl.window_rule({ name = "blip-session-home", match = { class = ${luaString("^org\\.quickshell$")}, title = ${luaString("^(Messages|Blip( \\([0-9]+\\))?)$")} }, no_initial_focus = true${target ? `, workspace = ${luaString(target + " silent")}` : ""} })`;
 }
 
 export function silentMove(workspace: unknown, address: unknown): string | null {
