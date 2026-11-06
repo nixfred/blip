@@ -17,6 +17,13 @@ jobs:
           bun-version: latest
       - name: local background raster conversion
         run: |
+          # Some hosted runners reach the Azure mirror at only tens of KB/s.
+          # Use Ubuntu's main mirror, with the same signed package indexes.
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+            if [ -f "$source" ]; then
+              sudo sed -i 's|http://azure.archive.ubuntu.com|https://archive.ubuntu.com|g' "$source"
+            fi
+          done
           sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq
           sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -q imagemagick ffmpeg
       - name: unit tests (collector, thread, tier2, ui invariants)
