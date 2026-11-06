@@ -30,11 +30,13 @@ jobs:
           pactl set-default-sink blip_test
           python3 scripts/test-read-ui.py
           python3 scripts/test-reaction-ui.py
+          python3 scripts/test-reaction-badge-ui.py
           python3 scripts/test-background-ui.py
           python3 scripts/test-composer-emoji-ui.py
           python3 scripts/test-sticker-ui.py
           python3 scripts/test-audio-ui.py
           python3 scripts/test-audio-session-ui.py
+          python3 scripts/test-conversation-menu-ui.py
       - name: OTP desktop adapter (no desktop needed)
         run: |
           python3 -m py_compile otp-desktop.py

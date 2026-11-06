@@ -9,6 +9,10 @@ It is not an official upstream release; see [provenance](docs/CONTINUATION.md).
   centered circular contact photo/name, rounded composer controls, clearer sans
   typography, and a more compact conversation layout. Polish favorites spacing,
   avatar sizes, and glass-style buttons with consistent line icons.
+- Name the window Messages, move New Message into its conversation header,
+  remove the mark-all button, and align the composer controls. The roomier,
+  translucent conversation menu closes when clicked outside. Emoji and native
+  sticker reactions share round badges with a two-dot thought-bubble tail.
 - Choose a local PNG/JPEG background for a conversation or as a default. Imports
   are private, metadata-stripped copies; settings stay in `bridge.conf` and are
   local to this client, not synchronized to other participants.
@@ -20,6 +24,8 @@ It is not an official upstream release; see [provenance](docs/CONTINUATION.md).
   Native custom reactions require exact accessible Mac controls and a matching
   database receipt. Existing target restrictions apply; unsupported native paths
   report failure. See [reaction evidence and limits](docs/reactions.md).
+  Live macOS 27.2 self-tests verified custom add, replacement, removal, and a
+  complete variation-selector/ZWJ emoji through the exact native picker route.
 - Add synthetic bridge, media-conversion, keyboard, and background-race checks.
   Real native behavior is reported separately from synthetic validation.
 - Show audio messages inline with measured waveforms, playback progress,
