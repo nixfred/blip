@@ -693,5 +693,100 @@ class Siblings(unittest.TestCase):
         self.assertEqual(missing, [])
 
 
+class CustomEmojiTests(unittest.TestCase):
+    def setUp(self):
+        self.con = db()
+        self.con.execute("ALTER TABLE message ADD COLUMN associated_message_emoji TEXT")
+        add(self.con, 1, "M", "synthetic target", False, T0)
+        self.target = react.resolve(self.con, imsg, "M", [])
+        self.ui = FakeUI()
+
+    def tearDown(self):
+        self.con.close()
+
+    def row(self, emoji, type_=2006, date=None):
+        return add(self.con, 1, "R" + str(self.con.execute("SELECT COUNT(*) FROM message").fetchone()[0]),
+                   None, True, date or react.apple_now(), associated_message_type=type_,
+                   associated_message_guid="p:0/M", associated_message_emoji=emoji)
+
+    def run_custom(self, emoji, lands=None, type_=2006, remove=False):
+        calls = []
+        def runner(request):
+            calls.append(request)
+            if lands is not None:
+                self.row(lands, type_)
+            return {"ok": True}
+        with patch.object(react, "macos_major", return_value=26), \
+             patch.object(react, "system_events_consent", return_value=""), \
+             patch.object(react, "ROW_WAIT", 0):
+            result = react.react(self.con, self.target, 6, remove, [], self.ui, run=runner, emoji=emoji, name="rocket")
+        return result, calls
+
+    def test_add_custom_checks_exact_emoji_and_type(self):
+        result, calls = self.run_custom("🚀", lands="🚀")
+        self.assertEqual(result["type"], 2006)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["action"], "🚀")
+        self.assertEqual(self.ui.restored, ["Previous app"])
+
+    def test_same_type_different_emoji_is_never_success(self):
+        with self.assertRaises(react.Stop) as error:
+            self.run_custom("🚀", lands="🎉")
+        self.assertEqual(error.exception.result["code"], "unexpected-emoji")
+
+    def test_existing_different_custom_emoji_is_replaced(self):
+        self.row("🎉", date=T0 + 1)
+        result, calls = self.run_custom("🚀", lands="🚀")
+        self.assertEqual(result["result"], "added")
+        self.assertEqual(len(calls), 1)
+
+    def test_existing_exact_custom_emoji_is_noop(self):
+        self.row("🚀", date=T0 + 1)
+        result, calls = self.run_custom("🚀")
+        self.assertEqual(result["result"], "unchanged")
+        self.assertEqual(calls, [])
+        self.assertEqual(self.ui.selected, [])
+
+    def test_custom_remove_does_not_remove_other_emoji_or_classic(self):
+        self.row("🎉", date=T0 + 1)
+        result, calls = self.run_custom("🚀", remove=True)
+        self.assertEqual(result["result"], "unchanged")
+        self.assertEqual(calls, [])
+        self.row(None, type_=2001, date=T0 + 2)
+        result, calls = self.run_custom("👍", remove=True)
+        self.assertEqual(result["result"], "unchanged")
+        self.assertEqual(calls, [])
+
+    def test_remove_exact_custom_emoji_requires_removal_receipt(self):
+        self.row("🚀", date=T0 + 1)
+        result, calls = self.run_custom("🚀", lands="🚀", type_=3006, remove=True)
+        self.assertEqual(result["result"], "removed")
+        self.assertEqual(len(calls), 1)
+
+    def test_no_receipt_never_retries_a_press(self):
+        with self.assertRaises(react.Stop) as error:
+            self.run_custom("🚀")
+        self.assertEqual(error.exception.result["code"], "no-row")
+
+    def test_bounded_input_rejects_prose_multiple_emoji_and_controls(self):
+        for value in ["", "hello", "日本語", "🚀🚀", "hello🚀", "🚀\n", "🇺", "🏽", "\u200d🚀", "🚀\u200d"]:
+            with self.subTest(value=value), self.assertRaises(react.Stop):
+                react.read_emoji(io.StringIO(json.dumps({"emoji": value})))
+        for raw in ["[]", "null", "{", "x" * 2049]:
+            with self.assertRaises(react.Stop):
+                react.read_emoji(io.StringIO(raw))
+        for value in ["👩🏽‍💻", "👨‍👩‍👧‍👦", "🇬🇧", "1️⃣", "❤️"]:
+            self.assertEqual(react.read_emoji(io.StringIO(json.dumps({"emoji": value})))["emoji"], value)
+
+    def test_whole_unicode_catalogue_validates(self):
+        catalogue = Path(__file__).resolve().parents[2] / "emoji-catalogue.ts"
+        entries = [json.loads(line.strip().rstrip(",")) for line in catalogue.read_text().splitlines()
+                   if line.strip().startswith('["')]
+        self.assertGreater(len(entries), 3900)
+        for emoji, _, _ in entries:
+            with self.subTest(emoji=emoji):
+                self.assertTrue(react.valid_emoji(emoji))
+
+
 if __name__ == "__main__":
     unittest.main()

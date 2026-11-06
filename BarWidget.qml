@@ -72,12 +72,15 @@ BarWidget {
   property var tapbackFailures: ({})
   /** Every exit: (chat, ok). A view on that chat settles its pending pill. */
   signal tapbackExited(string chat, bool ok)
-  function runTapback(chat, argv) {
+  function runTapback(chat, argv, body) {
     if (reactProc.running) return false
     root.tapbackChat = String(chat)
     reactProc.lastErr = ""
     reactProc.command = argv
+    reactProc.stdinEnabled = true
     reactProc.running = true
+    if (body) reactProc.write(body)
+    reactProc.stdinEnabled = false
     return true
   }
   function tapbackFailed(chat, text) {

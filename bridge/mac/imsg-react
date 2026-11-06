@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""imsg-react — add or remove one classic tapback on one message.
+"""imsg-react — add or remove one classic or exact-emoji tapback on one message.
 
     imsg-react --guid <GUID> love             dry run: say what would happen
     imsg-react --guid <GUID> love --yes       add ❤️ (nothing to do if it is there)
     imsg-react --guid <GUID> love --remove --yes
 
 Tapbacks: love like dislike laugh emphasize question.
+Custom emoji: --emoji-stdin reads bounded JSON {"emoji":"…","name":"…"}.
+The optional name only searches; an exact Unicode AX identity must match
+before pressing, and type 2006/3006 plus associated_message_emoji verifies it.
 
 The old note said sending a tapback needs SIP off. That was true of code
 injection; it is not true of Accessibility. Every rendered bubble in Messages'
@@ -67,7 +70,9 @@ already allowed; a prompt at an empty Mac becomes a denial (#36). Exit 77.
 
 Refused before Messages is touched: groups (not tested yet), tapback rows,
 messages without text, attachments, links, and rich-link / app cards
-(their AX labels differ). Custom-emoji tapbacks are not here yet.
+(their AX labels differ). Custom emoji use an exact bubble action or picker
+identity, never a guessed index, image sticker, or typed message. If Messages
+does not expose that identity, the operation fails visibly without pressing.
 
 Enabled from Linux by tapbacks=on in bridge.conf (the shim refuses otherwise).
 Message text never rides argv: it goes to osascript on stdin.
@@ -92,6 +97,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import unicodedata
 
 APPLE_EPOCH = 978307200
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -283,8 +289,11 @@ def my_rows(con, guids: list, self_handles: list, since: int = 0) -> list:
     writes the tapback as an inbound echo from your own address."""
     handles = list(self_handles) or [""]
     aimed = " OR ".join("m.associated_message_guid LIKE '%' || ?" for _ in guids)
+    has_emoji = any(r[1] == "associated_message_emoji" for r in con.execute("PRAGMA table_info(message)"))
+    emoji_col = "m.associated_message_emoji" if has_emoji else "NULL"
     return [dict(r) for r in con.execute(
-        f"""SELECT m.ROWID, m.associated_message_type AS type, m.associated_message_guid AS ag, m.date
+        f"""SELECT m.ROWID, m.associated_message_type AS type, m.associated_message_guid AS ag, m.date,
+                   {emoji_col} AS emoji
               FROM message m LEFT JOIN handle h ON h.ROWID = m.handle_id
              WHERE m.associated_message_type BETWEEN 2000 AND 3999 AND m.date > ? AND ({aimed})
                AND (m.is_from_me = 1 OR h.id IN ({','.join('?' * len(handles))}))
@@ -328,6 +337,50 @@ def plan(current, kind: int, remove: bool):
     if remove:
         return 3000 + kind if current == kind else None
     return None if current == kind else 2000 + kind
+
+
+def emoji_plan(rows: list, emoji: str, remove: bool):
+    """2006 alone is insufficient: two different emoji share that row type."""
+    current = rows[-1] if rows else {}
+    same = current.get("type") == 2006 and current.get("emoji") == emoji
+    return (3006 if same else None) if remove else (None if same else 2006)
+
+
+def read_emoji(stream) -> dict:
+    """Content stays on bounded stdin. A label is search metadata, never an action identity."""
+    raw = stream.read(2049)
+    if len(raw) > 2048:
+        raise Stop("usage", EX_USAGE, "emoji request is too large")
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeError):
+        raise Stop("usage", EX_USAGE, "expected one emoji request on stdin")
+    emoji = data.get("emoji") if isinstance(data, dict) else None
+    name = data.get("name", "") if isinstance(data, dict) else None
+    # The exact sequence is additionally checked by Messages' identity and
+    # chat.db. Reject prose/control chars before any database or UI access.
+    if (not valid_emoji(emoji)
+            or not isinstance(name, str) or len(name) > 160
+            or any(unicodedata.category(c).startswith("C") for c in name)):
+        raise Stop("usage", EX_USAGE, "expected one emoji sequence and an optional search name")
+    return {"emoji": emoji, "name": name}
+
+
+def valid_emoji(value) -> bool:
+    """Single bounded emoji sequence; same grammar as tapback-actions.ts."""
+    if not isinstance(value, str) or not 1 <= len(value.encode("utf-16-le", "surrogatepass")) // 2 <= 64:
+        return False
+    if re.fullmatch(r"[\U0001f1e6-\U0001f1ff]{2}|[0-9#*]\ufe0f?\u20e3", value):
+        return True
+    base = (r"[\U0001f000-\U0001f1e5\U0001f200-\U0001f3fa\U0001f400-\U0001faff\u2600-\u27bf"
+            r"\u00a9\u00ae\u203c\u2049\u2122\u2139\u2194-\u2199\u21a9\u21aa"
+            r"\u231a\u231b\u2328\u23cf\u23e9-\u23f3\u23f8-\u23fa\u24c2"
+            r"\u25aa\u25ab\u25b6\u25c0\u25fb-\u25fe\u2934\u2935\u2b05-\u2b07"
+            r"\u2b1b\u2b1c\u2b50\u2b55\u3030\u303d\u3297\u3299]")
+    unit = base + r"[\ufe0e\ufe0f]?[\U0001f3fb-\U0001f3ff]?"
+    if re.fullmatch(r"\U0001f3f4[\ufe0e\ufe0f]?[\U000e0020-\U000e007e]+\U000e007f", value):
+        return True
+    return re.fullmatch(unit + r"(?:\u200d" + unit + r")*", value) is not None
 
 
 def answer(con, target: dict, self_handles: list, since: int, pause=0.2):
@@ -384,6 +437,62 @@ function bodyIs(body, want) {
   if (body === want) return true;
   if (!body.startsWith(want + ", ")) return false;
   return /^\d+ reactions?(, .+ this)*$/.test(body.slice(want.length + 2));
+}
+function attribute(el, name) { return safe(() => el.attributes.byName(name).value(), null); }
+function emojiIdentity(el, emoji) {
+  return String(attribute(el, "AXIdentifier") || "") === emoji ||
+    String(attribute(el, "AXValue") || "") === emoji;
+}
+function pickerTargetMatches(q) {
+  if (!q.text) return false;
+  const els = safe(() => win().entireContents(), []);
+  const descriptions = els.map(e => String(safe(() => e.description(), "")));
+  const labels = descriptions.filter(d => /^Message, /.test(d));
+  return descriptions.indexOf("Tapback Picker") >= 0 && labels.length === 1 &&
+    bodyIs(norm(labels[0].slice(9)), q.text);
+}
+// No arrow-count or Return fallback. A search result must expose the exact
+// requested sequence, including skin tone, ZWJ and variation selectors.
+// Beeper's platform-imessage documents direct action names and picker ids;
+// detached/inaccessible CharacterPalette windows fail closed here.
+function pressEmoji(els, emoji, q) {
+  const hits = els.filter(e => ["AXButton", "AXCell"].indexOf(safe(() => e.role(), "")) >= 0 && emojiIdentity(e, emoji) &&
+    safe(() => e.enabled(), false) === true &&
+    safe(() => e.actions.name(), []).indexOf("AXPress") >= 0);
+  if (hits.length !== 1) return { ok: false, error: hits.length ? "ambiguous-emoji" : "emoji-not-offered" };
+  const el = hits[0];
+  if (!pickerTargetMatches(q) || !safe(() => proc.frontmost(), false) || !emojiIdentity(el, emoji) || !safe(() => el.enabled(), false))
+    return { ok: false, error: "moved" };
+  try { el.actions.byName("AXPress").perform(); return { ok: true }; }
+  catch (e) { return { ok: false, error: "perform-failed" }; }
+}
+function emojiPicker(q) {
+  if (!pickerTargetMatches(q)) return { ok: false, error: "picker-elsewhere" };
+  let popover = null;
+  for (let n = 0; n < 8 && !popover; n++) {
+    delay(0.2);
+    // Restrict inspection to Messages' own windows and AXPopover elements.
+    // Never search arbitrary app windows or type into the compose field.
+    const windows = safe(() => proc.windows(), []);
+    const pops = [];
+    for (const w of windows) {
+      const els = [w].concat(safe(() => w.entireContents(), []));
+      for (const el of els) if (safe(() => el.role(), "") === "AXPopover" || safe(() => el.roleDescription(), "") === "popover") pops.push(el);
+    }
+    if (pops.length === 1) popover = pops[0];
+    else if (pops.length > 1) return { ok: false, error: "ambiguous-emoji" };
+  }
+  if (!popover) return { ok: false, error: "emoji-picker-unavailable" };
+  let els = safe(() => popover.entireContents(), []);
+  const direct = pressEmoji(els, q.emoji, q);
+  if (direct.ok || direct.error !== "emoji-not-offered") return direct;
+  const fields = els.filter(e => safe(() => e.subrole(), "") === "AXSearchField" && safe(() => e.enabled(), false));
+  if (fields.length !== 1 || !q.name || !pickerTargetMatches(q) || !safe(() => proc.frontmost(), false))
+    return { ok: false, error: "emoji-not-offered" };
+  // The name narrows results, but does not determine what is pressed.
+  try { fields[0].value = q.name; } catch (e) { return { ok: false, error: "emoji-picker-unavailable" }; }
+  delay(0.8);
+  return pressEmoji(safe(() => popover.entireContents(), []), q.emoji, q);
 }
 // The transcript is one group whose child groups are the message rows, each
 // labelled like its bubble; their labels come in bulk reads, since one AX
@@ -502,8 +611,21 @@ function picker(q) {
     out.error = "picker-elsewhere";
     return out;
   }
+  if (q.emoji) {
+    const children = safe(() => pk.entireContents(), []);
+    const direct = pressEmoji(children, q.emoji, q);
+    if (direct.ok || direct.error !== "emoji-not-offered") return direct;
+    if (q.remove) return direct; // removing must select the exact existing reaction
+    const add = children.filter(e => safe(() => e.role(), "") === "AXButton" &&
+      String(safe(() => e.description(), "")) === "Add custom emoji reaction" && safe(() => e.enabled(), false));
+    if (add.length !== 1 || !safe(() => proc.frontmost(), false)) return direct;
+    try { add[0].actions.byName("AXPress").perform(); }
+    catch (e) { return { ok: false, error: "emoji-picker-unavailable" }; }
+    return emojiPicker(q);
+  }
   const btn = safe(() => pk.entireContents(), []).find(e =>
-    safe(() => e.role(), "") === "AXButton" && String(safe(() => e.description(), "")) === q.action);
+    safe(() => e.role(), "") === "AXButton" && String(safe(() => e.description(), "")) === q.action
+      && safe(() => e.enabled(), false));
   if (!btn) { se.keyCode(53); out.error = "not-offered"; out.offered = []; return out; }
   // The action's NAME is AXPress; "press" is only its description.
   try { btn.actions.byName("AXPress").perform(); out.ok = true; }
@@ -513,6 +635,7 @@ function picker(q) {
 function run() {
   const input = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
   const q = JSON.parse(String(ObjC.unwrap($.NSString.alloc.initWithDataEncoding(input, $.NSUTF8StringEncoding))));
+  if (q.mode === "emoji") return JSON.stringify(emojiPicker(q));
   if (q.mode === "page") {
     // Live bubbles carry the transcript's page-scroll actions. No page below
     // means already at the bottom.
@@ -596,7 +719,7 @@ def perform(target: dict, action: str, run=jxa, deadline=None) -> dict:
     that finds it where the last one did. Paging and settling are the only
     things repeated, and they stop at `deadline` (time.monotonic())."""
     request = {"text": target["text"], "from_me": target["from_me"], "hhmm": target["hhmm"],
-               "ordinal": target["ordinal"], "newest": target["newest"], "actions": ACTIONS,
+               "ordinal": target["ordinal"], "newest": target["newest"], "actions": ACTIONS + [action],
                "action": action, "frame": "", "mode": "perform"}
     down = up = settles = 0
     looked_again = bottom_seen = False
@@ -739,11 +862,12 @@ def system_events_consent(path: str = USER_TCC, probe=ae_permission) -> str:
 
 # --------------------------------------------------------------------- run
 
-def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, run=jxa) -> dict:
+def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, run=jxa, emoji="", name="") -> dict:
     """Steps 3-4: one press, then chat.db (see the module docstring). `ui` is the
     imsg-read module (lock, selection, focus); tests pass a stand-in."""
-    action = TAPBACKS_BY_KIND[kind]
-    expected = plan(current_kind(my_rows(con, target["guids"], self_handles)), kind, remove)
+    action = emoji if emoji else TAPBACKS_BY_KIND[kind]
+    rows = my_rows(con, target["guids"], self_handles)
+    expected = emoji_plan(rows, emoji, remove) if emoji else plan(current_kind(rows), kind, remove)
     if expected is None:
         return {"ok": True, "result": "unchanged"}
     if macos_major() >= 27 and not is_last(con, target):   # refused before Messages is touched
@@ -768,10 +892,19 @@ def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, ru
         since = apple_now()
         # macOS 27 bubbles carry no tapbacks, so the bubble search cannot even
         # page (it pages with a live bubble's actions): straight to the picker.
-        r = (picker_route(con, target, action, run) if macos_major() >= 27
+        r = (picker_route(con, target, action, run, emoji=emoji, name=name, remove=remove) if macos_major() >= 27
              else perform(target, action, run=run, deadline=deadline))
         if r.get("error") == "not-offered" and PICKER_SIGN in r.get("offered", []):
-            r = picker_route(con, target, action, run)   # a 27-style bubble on an older version
+            r = picker_route(con, target, action, run, emoji=emoji, name=name, remove=remove)
+        elif emoji and not remove and r.get("error") == "not-offered":
+            # Opening the catalogue is not sending. The final choice still
+            # needs exact AX identity; a missing/ambiguous result is refused.
+            if time.monotonic() >= deadline:
+                raise Stop("timeout", EX_TEMPFAIL, "emoji selection deadline reached; nothing was sent")
+            opened = perform(target, "Add Emoji as Tapback", run=run, deadline=deadline)
+            if opened.get("ok") and time.monotonic() >= deadline:
+                raise Stop("timeout", EX_TEMPFAIL, "emoji selection deadline reached; nothing was sent")
+            r = run({"mode": "emoji", "emoji": emoji, "name": name, "text": target["text"]}) if opened.get("ok") else opened
         if not r.get("ok") and r.get("error") not in MAYBE_PERFORMED:
             raise failure(r, action)   # nothing was pressed
         row = answer(con, target, self_handles, since)
@@ -782,6 +915,9 @@ def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, ru
         if row["type"] != expected:
             raise Stop("unexpected", EX_TEMPFAIL, f"chat.db shows tapback type {row['type']}, not {expected}",
                        type=row["type"])
+        if emoji and row.get("emoji") != emoji:
+            raise Stop("unexpected-emoji", EX_TEMPFAIL,
+                       "chat.db did not confirm the exact requested emoji; check the reaction in Messages")
     finally:
         ui.restore_front(prev)
     return {"ok": True, "result": "removed" if expected >= 3000 else "added", "type": expected,
@@ -813,14 +949,17 @@ def click_picker_item() -> str:
     return "" if r.returncode == 0 else r.stderr.decode("utf-8", "replace").strip()[-200:]
 
 
-def picker_route(con, target: dict, action: str, run, click=None) -> dict:
+def picker_route(con, target: dict, action: str, run, click=None, emoji="", name="", remove=False) -> dict:
     if not is_last(con, target):
         raise Stop("not-last", EX_UNSUPPORTED,
                    "on this macOS only the newest message in a conversation can take a tapback")
     why = (click or click_picker_item)()
     if why:
         return {"ok": False, "error": "no-picker", "detail": why}
-    return run({"mode": "picker", "text": target["text"], "action": action})
+    request = {"mode": "picker", "text": target["text"], "action": action}
+    if emoji:
+        request.update(emoji=emoji, name=name, remove=remove)
+    return run(request)
 
 
 def is_last(con, target: dict) -> bool:
@@ -838,6 +977,10 @@ def is_last(con, target: dict) -> bool:
 
 def failure(r: dict, action: str) -> Stop:
     error = r.get("error") or "failed"
+    if error in {"emoji-not-offered", "emoji-picker-unavailable", "ambiguous-emoji"}:
+        return Stop(error, EX_NOT_OFFERED,
+                    "Messages did not expose that exact emoji as an accessible reaction; nothing was sent. "
+                    "Try a recently used emoji or a classic Tapback")
     if error == "picker-elsewhere":
         return Stop(error, EX_TEMPFAIL, "the tapback picker opened on another message; nothing was done")
     if error == "no-picker":
@@ -854,8 +997,9 @@ def failure(r: dict, action: str) -> Stop:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="imsg-react", add_help=True,
                                 description="Add or remove one tapback. Dry run unless --yes.")
-    p.add_argument("tapback", choices=sorted(TAPBACKS))
+    p.add_argument("tapback", nargs="?", choices=sorted(TAPBACKS))
     p.add_argument("--guid", required=True, help="the message's GUID (message.guid)")
+    p.add_argument("--emoji-stdin", action="store_true", help="read an exact emoji and optional search name as JSON on stdin")
     p.add_argument("--remove", action="store_true", help="remove this tapback instead of adding it")
     p.add_argument("--yes", action="store_true", help="act; without it nothing on the Mac changes")
     try:
@@ -864,7 +1008,10 @@ def main(argv=None) -> int:
         return EX_USAGE if e.code else 0
     if not re.fullmatch(r"[A-Za-z0-9:/_-]{1,128}", a.guid):
         return emit(Stop("usage", EX_USAGE, "that is not a message GUID"))
+    if bool(a.tapback) == bool(a.emoji_stdin):
+        return emit(Stop("usage", EX_USAGE, "choose one classic tapback or --emoji-stdin"))
     try:
+        custom = read_emoji(sys.stdin) if a.emoji_stdin else {"emoji": "", "name": ""}
         imsg = sibling("imsg")
         try:
             self_handles = sibling("imsg-send").detect_self_handles()
@@ -873,14 +1020,15 @@ def main(argv=None) -> int:
         con = sqlite3.connect(f"file:{imsg.DB_PATH}?mode=ro", uri=True, timeout=5)
         con.row_factory = sqlite3.Row
         target = resolve(con, imsg, a.guid, self_handles)
-        action, kind = TAPBACKS[a.tapback]
+        action, kind = (custom["emoji"], 6) if a.emoji_stdin else TAPBACKS[a.tapback]
         if not a.yes:
-            expected = plan(current_kind(my_rows(con, target["guids"], self_handles)), kind, a.remove)
+            rows = my_rows(con, target["guids"], self_handles)
+            expected = emoji_plan(rows, custom["emoji"], a.remove) if a.emoji_stdin else plan(current_kind(rows), kind, a.remove)
             would = "unchanged" if expected is None else ("remove" if expected >= 3000 else "add")
             return emit({"ok": True, "result": "dry-run", "would": would, "action": action})
         ui = sibling("imsg-read")
         with ui.messages_ui_lock():
-            return emit(react(con, target, kind, a.remove, self_handles, ui))
+            return emit(react(con, target, kind, a.remove, self_handles, ui, **custom))
     except Stop as stop:
         return emit(stop)
     except TimeoutError as exc:   # the Messages lock; before OSError, which it is

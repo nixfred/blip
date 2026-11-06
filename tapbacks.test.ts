@@ -108,6 +108,7 @@ describe("message menu: tapbacks", () => {
   const view = readFileSync(new URL("./BlipView.qml", import.meta.url), "utf8");
   const widget = readFileSync(new URL("./BarWidget.qml", import.meta.url), "utf8");
   const menu = readFileSync(new URL("./MessageMenu.qml", import.meta.url), "utf8");
+  const picker = readFileSync(new URL("./ReactionPicker.qml", import.meta.url), "utf8");
 
   test("off by default, from the same parser as the tests above", () => {
     expect(widget).toContain("property bool tapbacks: false");
@@ -123,14 +124,19 @@ describe("message menu: tapbacks", () => {
     expect(view).toContain("if (root.tapbacksBusy || !root.tapbacksOn || !hostWidget || !TapbackActions.canTapback(message, root.activeIsGroup)) return");
     expect(widget).toContain("if (reactProc.running) return false");
     expect(menu).toContain("visible: menu.tapbacksShown");
-    expect(menu).toContain("enabled: !menu.tapbacksBusy");
+    expect(menu).toContain("busy: menu.tapbacksBusy");
+    expect(picker).toContain("enabled: !picker.busy");
   });
 
   test("spawned through the conversation's source, add or remove decided by tapback-actions.ts", () => {
     expect(view).toContain('SourceId.bridgeArgv(chat, "imsg-react", hostWidget.binDir)');
     // the pending pill and the tool are told the same thing
     expect(view).toContain("TapbackActions.pendingTapback(chat, String(message.guid), kind, current)");
-    expect(view).toContain("TapbackActions.tapbackArgs(String(message.guid), kind, current)");
+    expect(view).toContain("TapbackActions.tapbackRequest(String(message.guid), kind, current)");
+    expect(view).toContain('if (!request) { root.note = "That reaction is not supported"; return }');
+    expect(view).toContain("hostWidget.runTapback(chat, argv, request.stdin)");
+    expect(widget).toContain("if (body) reactProc.write(body)");
+    expect(widget).toContain("reactProc.stdinEnabled = false");
   });
 
   test("keyboard: Ctrl+E on the selected bubble opens the menu, 1–6 in it pick a tapback", () => {
@@ -146,18 +152,20 @@ describe("message menu: tapbacks", () => {
     expect(menu).toContain("onCurrentIndexChanged: if (menu.currentIndex === 0 && menu.tapbacksShown) tapbackStrip.forceActiveFocus()");
     expect(menu).toContain("    activeFocusOnTab: menu.tapbacksShown");
     expect(menu.indexOf("id: tapbackStrip")).toBeLessThan(menu.indexOf("MenuItem {"));
-    expect(menu).toContain("var kind = marked ? TapbackActions.TAPBACKS[tapbackStrip.cursor].kind : TapbackActions.tapbackForKey(event.text)");
+    expect(picker).toContain("var kind = marked ? TapbackActions.TAPBACKS[cursor].kind : TapbackActions.tapbackForKey(event.text)");
     // the number keys go through the same signal and busy gate as a click
-    const strip = menu.slice(menu.indexOf("Keys.onPressed"), menu.indexOf("Row {"));
-    expect(strip).toContain("menu.pickTapback(kind)");
-    expect(menu).toContain("onTapped: menu.pickTapback(tapbackCell.modelData.kind)");
+    const strip = picker.slice(picker.indexOf("Keys.onPressed"), picker.indexOf("contentItem: Column"));
+    expect(strip).toContain("choose(kind)");
+    expect(menu).toContain("onChosen: function(kind) { menu.pickTapback(kind) }");
+    expect(picker).toContain("else picker.choose(entry.kind)");
     const pick = menu.slice(menu.indexOf("function pickTapback"), menu.indexOf("onOpened:"));
     expect(pick.indexOf("if (menu.tapbacksBusy) return")).toBeLessThan(pick.indexOf("menu.tapbackRequested(kind)"));
     // Left/Right mark one along the row, Enter/Space pick it; unmarked, Enter stays the menu's
-    expect(strip).toContain("tapbackStrip.cursor = TapbackActions.moveTapbackCursor(tapbackStrip.cursor, event.key === Qt.Key_Right ? 1 : -1)");
-    expect(strip).toContain("var marked = tapbackStrip.cursor >= 0 && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space)");
-    expect(menu).toContain("tapbackStrip.cursor = TapbackActions.initialTapbackCursor(menu.myTapback, menu.keyHints)");
-    expect(menu).toContain("readonly property bool marked: tapbackStrip.activeFocus && tapbackStrip.cursor === index");
+    expect(strip).toContain("cursor = TapbackActions.moveTapbackCursor(cursor, event.key === Qt.Key_Right ? 1 : -1, 7)");
+    expect(strip).toContain("var marked = cursor >= 0 && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space)");
+    expect(menu).toContain("tapbackStrip.reset(menu.keyHints)");
+    expect(picker).toContain("cursor = TapbackActions.initialTapbackCursor(currentKind, keyboard)");
+    expect(picker).toContain("picker.activeFocus && picker.cursor === classic.index");
   });
 
   test("an open menu survives a reload and follows its message (Ctrl+E while a tapback lands)", () => {
