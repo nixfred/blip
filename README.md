@@ -1,3 +1,5 @@
+> **Private continuation:** This repository preserves the recovered Blip 2.6.2 history and develops a Messages-style interface. It is not an official upstream release. See [provenance and development notes](docs/CONTINUATION.md). The upstream documentation below is retained; new capability limits are documented alongside each feature.
+
 <p align="center">
   <img src="docs/blip-hero@2x.png" alt="Blip: iMessage. On Linux. For real." width="920">
 </p>
