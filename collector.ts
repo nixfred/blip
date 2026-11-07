@@ -94,7 +94,7 @@ export interface ImsgMessage {
   tapbacks?: Tapback[] | null;
   attachments?: AttachmentMeta[] | null;
   stickers?: import("./stickers").StickerOverlay[] | null;
-  reply_to?: { text: string; from_me: boolean } | null;
+  reply_to?: { text: string; from_me: boolean; attachment?: AttachmentMeta | null } | null;
   edited?: boolean | null;
   retracted?: boolean | null;
   effect?: string | null;

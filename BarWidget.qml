@@ -61,6 +61,9 @@ BarWidget {
    *  drives Messages through Accessibility, by action names Apple can rename.
    *  The shim refuses the tool without the same key. */
   property bool tapbacks: false
+  /** `replies=on` in bridge.conf: Reply in the message menu sends a native reply
+   *  through the Mac's imsg-reply. OFF by default, like tapbacks. */
+  property bool replies: false
 
   // The imsg-react run lives HERE, not in the view that asked for it: the
   // popout's surface and the app window are destroyed on close, and a run
@@ -1221,9 +1224,10 @@ BarWidget {
       root.touchpadScrollGain = root.parseGain(t, /^\s*touchpad_scroll_gain\s*=\s*['"]?(\d*\.?\d+)/mi)
       root.smoothScroll = /^\s*smooth_scroll\s*=\s*['"]?(on|true|1|yes)\b/mi.test(t)
       root.tapbacks = TapbackActions.tapbacksOn(t)
+      root.replies = TapbackActions.repliesOn(t)
       root.bridgeConfLoaded = true
     }
-    onLoadFailed: { root.otpAutofill = false; root.automationOn = false; root.uiFontTheme = false; root.uiFontSize = 0; root.scrollGain = 1.0; root.touchpadScrollGain = 1.0; root.smoothScroll = false; root.tapbacks = false; root.binDir = root.home + "/bin"; root.bridgeConfLoaded = true }
+    onLoadFailed: { root.replies = false; root.otpAutofill = false; root.automationOn = false; root.uiFontTheme = false; root.uiFontSize = 0; root.scrollGain = 1.0; root.touchpadScrollGain = 1.0; root.smoothScroll = false; root.tapbacks = false; root.binDir = root.home + "/bin"; root.bridgeConfLoaded = true }
   }
   IpcHandler {
     target: root.moduleName
@@ -1239,6 +1243,7 @@ BarWidget {
         + " scroll_gain=" + root.scrollGain + (root.touchpadScrollGain !== 1 ? "/" + root.touchpadScrollGain : "")
         + (root.smoothScroll ? " smooth_scroll=on" : "")
         + (root.tapbacks ? " tapbacks=on" : "")
+        + (root.replies ? " replies=on" : "")
         + (root.lastError !== "" ? " error=" + root.lastError : "")
     }
     function threads(): string { return root.automationOn ? JSON.stringify(root.threads) : root.automationOff }

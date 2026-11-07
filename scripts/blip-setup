@@ -7,7 +7,7 @@
 #   1. ~/.config/blip/bridge.conf   host= (and remote_bin=, python=)
 #   2. ~/.ssh/config                 ControlMaster block for the host (47 ms warm
 #                                    round trips — Blip polls; this is required)
-#   3. ~/bin/{imsg,imsg-send,imsg-read,imsg-react,contacts,contact-save}  the bridge shim (existing
+#   3. ~/bin/{imsg,imsg-send,imsg-read,imsg-react,imsg-reply,contacts,contact-save}  the bridge shim (existing
 #                                    files backed up; claude-on-mac remote shims are left
 #                                    alone), plus ~/bin/blip-bridged, the persistent-channel
 #                                    daemon the bar widget runs. bin_dir= in bridge.conf, or
@@ -143,7 +143,7 @@ kept=""
 [[ -r "$conf" ]] && kept="$(grep -vE '^[[:space:]]*(#|$|host=|remote_bin=|python=|key=|automation=|country_code=|bin_dir[[:space:]]*=)' "$conf" || true)"
 mkdir -p "$conf_dir"
 {
-  echo "# Blip bridge — read (never sourced) by the imsg, imsg-send, imsg-read, imsg-react, contacts, contact-save shims"
+  echo "# Blip bridge — read (never sourced) by the imsg, imsg-send, imsg-read, imsg-react, imsg-reply, contacts, contact-save shims"
   echo "host=$host"
   echo "# single-quoted on purpose: expanded on the MAC, not here"
   echo "remote_bin='\$HOME/.blip/bin'"
@@ -184,7 +184,7 @@ fi
 
 # 3. shims
 mkdir -p "$bin_dir"
-for t in imsg imsg-send imsg-read imsg-react contacts contact-save; do
+for t in imsg imsg-send imsg-read imsg-react imsg-reply contacts contact-save; do
   target="$bin_dir/$t"
   if [[ -e "$target" && ! -L "$target" ]] && ! grep -q "blip-shim" "$target" 2>/dev/null; then
     cp -p "$target" "$target.pre-blip.$(date +%s)"
@@ -193,7 +193,7 @@ for t in imsg imsg-send imsg-read imsg-react contacts contact-save; do
   install -m 0755 "$here/bridge/linux/blip-shim" "$target"
 done
 install -m 0755 "$here/bridge/linux/blip-bridged" "$bin_dir/blip-bridged"
-echo "✓ shims installed in $bin_dir: imsg imsg-send imsg-read imsg-react contacts contact-save blip-bridged"
+echo "✓ shims installed in $bin_dir: imsg imsg-send imsg-read imsg-react imsg-reply contacts contact-save blip-bridged"
 echo "• Save contact helpers are included. Mac permission guide: $here/docs/SAVE-CONTACT.md"
 # blip-bridged holds `imsg serve` channels open so a query costs the query
 # instead of ~90 ms of ssh + two Python starts + opening a 218 MB chat.db.

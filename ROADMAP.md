@@ -15,6 +15,8 @@ changes to the Mac beyond claude-on-mac updates.
 - [x] **Tapbacks on bubbles** — shipped 0.8.0: corner pills, net add/remove
   per sender, custom emoji included; the `Loved "…"` pseudo-rows are folded.
 - [x] **Inline replies** — shipped 0.8.0: quoted snippet above the bubble.
+- [x] **Sending native replies** — text and single pictures in a 1:1 through
+  `imsg-reply`, opt-in with `replies=on`. What is left and why: docs/replies.md.
 - [x] **Edited / unsent markers** — shipped 0.8.0: "· Edited" in the time row,
   "unsent a message" tombstone.
 - [x] **Attachment previews (stage 1)** — shipped 0.8.0: one chip per row

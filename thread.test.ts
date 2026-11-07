@@ -16,6 +16,7 @@ import {
   parsePendingSends,
   pendingBubble,
   readReceipt,
+  replyAttachmentLabel,
   selectThread,
   withPendingSends,
 } from "./thread";
@@ -583,6 +584,24 @@ describe("rich decoration", () => {
     const two = dedupeSelfEcho([echo, emptySent], ["me"]);
     expect(two).toHaveLength(1);
     expect(two[0]).toMatchObject({ from_me: true, delivered: true, read_at: "2026-08-31T10:08:02Z" });
+  });
+
+  test("a reply to a picture names the picture where there is no text to quote", () => {
+    const photo = { id: "9", name: "IMG_1.heic", mime: "image/heic", bytes: 5 };
+    const b = decorate([msg({ reply_to: { text: "￼", from_me: true, attachment: photo } })], today)[0]!;
+    expect(b).toMatchObject({ replyText: "Photo", replyMine: true, replyAttachment: photo });
+    const captioned = decorate([msg({ reply_to: { text: "look", from_me: false, attachment: photo } })], today)[0]!;
+    expect(captioned).toMatchObject({ replyText: "look", replyAttachment: null });
+    expect(replyAttachmentLabel({ name: "a.mov", mime: "video/quicktime", bytes: 1 })).toBe("Video");
+    expect(replyAttachmentLabel({ name: "a.m4a", mime: "audio/mp4", bytes: 1 })).toBe("Audio message");
+    expect(replyAttachmentLabel({ name: "a.pdf", mime: "application/pdf", bytes: 1 })).toBe("a.pdf");
+  });
+
+  test("a pending reply keeps its context through a reload", () => {
+    const send = { chat: "1", text: "b", ts: "2026-08-31T10:02:00Z", replyText: "Photo", replyMine: false,
+                   replyAttachment: { id: "9", name: "x.png", mime: "image/png", bytes: 1 } };
+    const { bubbles } = withPendingSends([], [send], today, undefined, Date.parse(send.ts));
+    expect(bubbles[0]).toMatchObject({ replyText: "Photo", replyAttachment: { id: "9" } });
   });
 
   test("a send in flight takes over the status line from the message before it", () => {

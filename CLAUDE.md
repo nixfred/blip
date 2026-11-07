@@ -12,7 +12,7 @@ treating a Mac as the gateway. Read this before touching anything.
               blip-dispatch         forced-command gate for ~/.ssh/blip_ed25519: only the tools in its TOOLS set run.
                                     imsg: sqlite read of chat.db, `--rich` (tapbacks/read_at/reply_to/
                                     attachments/error), `watch`, `attachment`, `chats`; Recently Deleted hidden.
-(Linux side)  bridge/linux/blip-shim installed as ~/bin/{imsg,imsg-send,imsg-read,imsg-react,contacts,contact-save} by scripts/blip-setup
+(Linux side)  bridge/linux/blip-shim installed as ~/bin/{imsg,imsg-send,imsg-read,imsg-react,imsg-reply,contacts,contact-save} by scripts/blip-setup
                                     (bin_dir= in bridge.conf moves them; bin-dir.ts parses it);
                                     reads ~/.config/blip/bridge.conf (host=, remote_bin='$HOME/.blip/bin'
                                     — single-quoted, expands on the MAC). `ssh -n` preflight; exit 69 offline.
@@ -587,6 +587,8 @@ Never inject keystrokes (`wtype`) unless the panel is confirmed open — they go
 to whatever has focus otherwise.
 
 ## Things that are not possible
+
+Native replies are possible and shipped; read `docs/replies.md` before changing them.
 
 - ~~Tapbacks, edits, typing indicators out — needs SIP-off code injection.~~
   **Half wrong; do not quote this as settled** (2026-09-07). macOS 26 Messages

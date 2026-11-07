@@ -13,6 +13,8 @@ The catalogue contains the 3,963 fully qualified Emoji 18.0 sequences, from
 Font and receiving-device support can lag that catalogue. The data's Unicode
 License v3 is included in [UNICODE-LICENSE.txt](UNICODE-LICENSE.txt).
 
+Native replies use the same bubble search; see [replies.md](replies.md).
+
 ## What the bridge does
 
 Sending still requires `tapbacks=on` and the Mac's existing Accessibility and

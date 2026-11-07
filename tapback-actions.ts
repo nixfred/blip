@@ -62,11 +62,20 @@ export function moveTapbackCursor(cursor: number, dir: number, n = TAPBACKS.leng
  *  dropped, one pair of quotes stripped, the last line wins, on/yes/true/1 in
  *  any case. */
 export function tapbacksOn(conf: string): boolean {
+  return confOn(conf, "tapbacks");
+}
+
+/** `replies=` read the same way: the menu's half of the shim's gate on imsg-reply. */
+export function repliesOn(conf: string): boolean {
+  return confOn(conf, "replies");
+}
+
+function confOn(conf: string, key: string): boolean {
   let v = "";
   for (const raw of String(conf || "").split("\n")) {
     const line = raw.replace(/#.*/, "").replace(/\s+/g, "");
     const eq = line.indexOf("=");
-    if (eq < 0 || line.slice(0, eq) !== "tapbacks") continue;
+    if (eq < 0 || line.slice(0, eq) !== key) continue;
     v = line.slice(eq + 1).replace(/^"/, "").replace(/"$/, "").replace(/^'/, "").replace(/'$/, "");
   }
   return ["on", "yes", "true", "1"].includes(v.toLowerCase());

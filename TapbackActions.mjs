@@ -4001,12 +4001,18 @@ function moveTapbackCursor(cursor, dir, n = TAPBACKS.length) {
   return (cursor + (dir > 0 ? 1 : n - 1)) % n;
 }
 function tapbacksOn(conf) {
+  return confOn(conf, "tapbacks");
+}
+function repliesOn(conf) {
+  return confOn(conf, "replies");
+}
+function confOn(conf, key) {
   let v = "";
   for (const raw of String(conf || "").split(`
 `)) {
     const line = raw.replace(/#.*/, "").replace(/\s+/g, "");
     const eq = line.indexOf("=");
-    if (eq < 0 || line.slice(0, eq) !== "tapbacks")
+    if (eq < 0 || line.slice(0, eq) !== key)
       continue;
     v = line.slice(eq + 1).replace(/^"/, "").replace(/"$/, "").replace(/^'/, "").replace(/'$/, "");
   }
@@ -4208,6 +4214,7 @@ export {
   pendingAfterLoad,
   pendingTapback,
   reactionEmoji,
+  repliesOn,
   searchReactionEmoji,
   shownTapbacks,
   tapbackArgs,

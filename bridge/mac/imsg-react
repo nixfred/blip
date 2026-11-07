@@ -441,7 +441,7 @@ function parseLabel(d) {
   let h = parseInt(m[2], 10);
   if (m[4] === "PM" && h < 12) h += 12;
   if (m[4] === "AM" && h === 12) h = 0;
-  return { time: (h < 10 ? "0" : "") + h + ":" + m[3], body: norm(m[1].replace(/^[^,]*, /, "")) };
+  return { time: (h < 10 ? "0" : "") + h + ":" + m[3], body: norm(m[1].replace(/^[^,]*, /, "").replace(/^Reply…, /, "")) };
 }
 // Exactly the text, or the text followed by the tapback annotation, which
 // opens with its count: "ok" must not match a neighbouring "ok, see you", nor
@@ -513,8 +513,10 @@ function emojiPicker(q) {
 // read per element costs ~70 ms. A row holds the live bubble somewhere below
 // it, at a depth that varies by kind; the row itself offers only scrolling
 // and the menu (see LIVE).
-function collect() {
+function collect(q) {
   const all = win().entireContents();
+  // A picture's live bubble is a button below its row (imsg-reply, 27.2).
+  const kinds = q && q.picture ? /\.(groups|uiElements|buttons)\.at\(\d+\)$/ : /\.(groups|uiElements)\.at\(\d+\)$/;
   const paths = all.map(el => Automation.getDisplayString(el));
   const at = {}, kids = {}, fields = [];
   paths.forEach((s, i) => {
@@ -543,7 +545,7 @@ function collect() {
   const copies = row => {
     const out = [];
     paths.forEach((s, i) => {
-      if (s !== row.path && !(s.startsWith(row.path + ".") && /\.(groups|uiElements)\.at\(\d+\)$/.test(s))) return;
+      if (s !== row.path && !(s.startsWith(row.path + ".") && kinds.test(s))) return;
       const L = parseLabel(String(safe(() => all[i].description(), "") || ""));
       if (L && L.time === row.L.time && L.body === row.L.body) out.push(all[i]);
     });
@@ -559,7 +561,7 @@ function liveCopies(els, q) {
   return els.map(el => ({ el, names: actionNames(el) })).filter(c => live(c.names, q));
 }
 function scan(q) {
-  const { rows, copies, fields } = collect();
+  const { rows, copies, fields } = collect(q);
   // The compose field spans the transcript: its centre splits sent from received.
   let wide = null;
   for (const f of fields) { const fr = frame(f); if (!wide || fr.w > wide.w) wide = fr; }
@@ -653,7 +655,7 @@ function run() {
   if (q.mode === "page") {
     // Live bubbles carry the transcript's page-scroll actions. No page below
     // means already at the bottom.
-    const { rows, copies } = collect();
+    const { rows, copies } = collect(q);
     const down = q.direction === "down";
     let c = null;
     for (let n = 0; n < rows.length && !c; n++) c = liveCopies(copies(rows[down ? rows.length - 1 - n : n]), q)[0];
@@ -1142,7 +1144,7 @@ def perform(target: dict, action: str, run=jxa, deadline=None) -> dict:
     things repeated, and they stop at `deadline` (time.monotonic())."""
     request = {"text": target["text"], "from_me": target["from_me"], "hhmm": target["hhmm"],
                "ordinal": target["ordinal"], "newest": target["newest"], "actions": ACTIONS + [action],
-               "action": action, "frame": "", "mode": "perform"}
+               "action": action, "frame": "", "mode": "perform", "picture": bool(target.get("picture"))}
     down = up = settles = 0
     looked_again = bottom_seen = False
     while True:

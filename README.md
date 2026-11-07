@@ -134,7 +134,7 @@ Linux side. If the Mac is asleep, the widget dims and says so.
 - sender names above each run in a group
 - **tapbacks** — ❤️👍😂 pills on the bubble corner, custom emoji included
 - **"Delivered", then "Read 4:42 PM"** under your newest message. Reading in Blip does not send a receipt; *mark all read* asks the Mac to mark everything read, and then your Messages read-receipt setting applies (`push_read=off` in `bridge.conf` keeps the Mac out of it)
-- **inline replies** quoted above the bubble · **Edited** tags · "unsent a message" tombstones
+- **native replies** to text and single pictures (`replies=on`), with the message or picture shown above the bubble · **Edited** tags · "unsent a message" tombstones
 - **link cards** — URL messages show the preview image, title, and host, like Messages. Apple only decorates some links; for the rest Blip fetches the page's own Open Graph card itself, so a bare URL still gets its picture. Click opens the link, **right-click opens the share sheet** (open · copy · QR for your phone · send to a device via LocalSend, Omarchy's share). `link_previews=off` in `bridge.conf` disables the fetching
 - **iMessage-app cards read as text** — Ask to Buy, Fitness sharing, Find My: the sentence Messages shows for them, instead of a replacement character
 - **photos render inline** — images ≤5MB auto-fetch over SSH (HEIC converted on the Mac); click opens full-size. PDFs/videos are chips — click fetches and opens them. **Right-click a photo** for Open · Copy image (the picture itself, on the clipboard) · Save image… (a file picker starting in Downloads with the original name; the full original is saved, and an existing file is never replaced — a taken name becomes `name (2).jpg`). Media and PDF chips get Open · Save…
@@ -784,7 +784,7 @@ cards are not edited or merged. See [contact saving setup](docs/SAVE-CONTACT.md)
 | thread | `Ctrl+V` | paste — an image on the clipboard becomes a queued file, text pastes normally |
 | thread | `/attach <path>` + `Enter` | queue any file on this machine; drag-and-drop works too |
 | thread | `↑` / `↓` | move through draft lines; on the first / last visual line, jump to the beginning / end of the draft |
-| thread | `Enter` · `Ctrl+C` · `Ctrl+R` (bubble selected) | open its attachment or link · copy its text, or the picture itself when the bubble is only a picture · quote it into the compose field (`> …`) |
+| thread | `Enter` · `Ctrl+C` · `Ctrl+R` (bubble selected; a native reply with `replies=on`, otherwise a quote) | open its attachment or link · copy its text, or the picture itself when the bubble is only a picture · quote it into the compose field (`> …`) |
 | thread | `PgUp` / `PgDn` (Fn+`↑`/`↓` on a Mac keyboard) | select the topmost / bottommost visible bubble, then a screen further each press — also with text in the compose field, since they move no caret |
 | thread | `Ctrl+E` (bubble selected) · `1`–`6` or `←`/`→` + `Enter` | the message menu under the bubble · with `tapbacks=on`, the tapback with that number, or the one the arrows marked (the one you have takes it back) |
 | thread | `Shift+PgUp` / `Shift+PgDn` | one bubble at a time from anywhere in a draft, without moving the caret first |
