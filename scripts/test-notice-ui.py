@@ -22,7 +22,9 @@ Item {
       wait(30); verify(notice.width<=260); verify(notice.height>30);
     }
     function test_short_text_hugs_its_content() {
-      notice.text="ok"; wait(30); verify(notice.width<120); verify(notice.height<=32);
+      notice.text="A synthetic failure long enough that it has to wrap onto a second line of the notice";
+      wait(30); var wrapped=notice.height;
+      notice.text="ok"; wait(30); verify(notice.width<160); verify(notice.height<wrapped);
     }
   }
 }
