@@ -572,6 +572,19 @@ describe("rich decoration", () => {
     expect(readReceipt("2026-08-30T21:03:00Z", today)).toEqual({ receipt: "Read", receiptDetail: "Yesterday" });
   });
 
+  test("a self-thread keeps the sent row's status when its two rows fold into one", () => {
+    const ts = "2026-08-31T10:08:00Z";
+    const sent = msg({ ts, id: 2, from_me: true, text: "note", chat: "me", handle: "me", delivered: true, read_at: "2026-08-31T10:08:02Z" });
+    const echo = msg({ ts, id: 1, from_me: false, text: "note", chat: "me", handle: "me" });
+    const one = dedupeSelfEcho([echo, sent], ["me"]);
+    expect(one).toHaveLength(1);
+    expect(one[0]).toMatchObject({ from_me: true, delivered: true, read_at: "2026-08-31T10:08:02Z" });
+    const emptySent = { ...sent, text: "" };
+    const two = dedupeSelfEcho([echo, emptySent], ["me"]);
+    expect(two).toHaveLength(1);
+    expect(two[0]).toMatchObject({ from_me: true, delivered: true, read_at: "2026-08-31T10:08:02Z" });
+  });
+
   test("a send in flight takes over the status line from the message before it", () => {
     const real = decorate([msg({ ts: "2026-08-31T10:00:00Z", from_me: true, text: "a", read_at: "2026-08-31T10:01:00Z" })], today);
     const send = { chat: "1", text: "b", ts: "2026-08-31T10:02:00Z" };

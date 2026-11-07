@@ -104,6 +104,7 @@ function conversation(): Row[] {
       read: true,
       tapback: m.tapback === true,
       error: 0,
+      delivered: m.from_me === true || null,
       read_at: m.read_at ? stamp(Number(m.min) + 2) : null,
       tapbacks: m.tapbacks || null,
       stickers: Array.isArray(m.stickers) ? (m.stickers as any[]).map(sticker => ({...sticker, ts: stamp(Number(m.min) + 1)})) : [],

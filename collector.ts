@@ -495,6 +495,11 @@ export function mergeTapbacks(a?: Tapback[] | null, b?: Tapback[] | null): Tapba
   });
 }
 
+function sentReceipt(a: Pick<ImsgMessage, "delivered" | "read_at"> | undefined, b: ImsgMessage): Pick<ImsgMessage, "delivered" | "read_at"> {
+  const read_at = a?.read_at ?? b.read_at;
+  return { ...(a?.delivered || b.delivered ? { delivered: true } : {}), ...(read_at ? { read_at } : {}) };
+}
+
 export function dedupeSelfEcho(msgs: ImsgMessage[], knownSelfChats: string[] = []): ImsgMessage[] {
   const contextKey = (m: ImsgMessage) => `${chatKey(m)}\u0000${m.handle || ""}\u0000${m.ts}`;
   const contentKey = (m: ImsgMessage) => `${contextKey(m)}\u0000${m.text}`;
@@ -510,12 +515,16 @@ export function dedupeSelfEcho(msgs: ImsgMessage[], knownSelfChats: string[] = [
   const emptySentTapbacks = new Map<string, Tapback[] | undefined>();
   const emptySentStickers = new Map<string, StickerOverlay[] | undefined>();
   const emptySentActivity = new Map<string, string>();
+  // Delivery and read state live only on the sent row, so the row that stays
+  // takes them too, or a self-thread could never show its status line.
+  const emptySentReceipt = new Map<string, Pick<ImsgMessage, "delivered" | "read_at">>();
   for (const m of msgs) {
     if (selfChats.has(chatKey(m)) && m.from_me && m.text === "") {
       const k = contextKey(m);
       emptySentTapbacks.set(k, mergeTapbacks(emptySentTapbacks.get(k), m.tapbacks));
       emptySentStickers.set(k, mergeStickers(emptySentStickers.get(k), m.stickers));
       if (m.activity_ts && m.activity_ts > (emptySentActivity.get(k) ?? "")) emptySentActivity.set(k, m.activity_ts);
+      emptySentReceipt.set(k, sentReceipt(emptySentReceipt.get(k), m));
     }
   }
   const retractedSent = new Set(
@@ -548,7 +557,7 @@ export function dedupeSelfEcho(msgs: ImsgMessage[], knownSelfChats: string[] = [
         const stickers = mergeStickers(kept.stickers, m.stickers);
         const activity = [kept.activity_ts ?? "", m.activity_ts ?? ""].sort().at(-1);
         out[idx] = { ...kept, from_me: kept.from_me || m.from_me, tapbacks: mergeTapbacks(kept.tapbacks, m.tapbacks),
-          ...(stickers ? { stickers } : {}), ...(activity ? { activity_ts: activity } : {}) };
+          ...sentReceipt(kept, m), ...(stickers ? { stickers } : {}), ...(activity ? { activity_ts: activity } : {}) };
         continue;
       }
       selfText.set(key, out.length);
@@ -558,7 +567,7 @@ export function dedupeSelfEcho(msgs: ImsgMessage[], knownSelfChats: string[] = [
       const stickers = mergeStickers(m.stickers, emptySentStickers.get(context));
       const activity = [m.activity_ts ?? "", emptySentActivity.get(context) ?? ""].sort().at(-1);
       out.push({ ...m, from_me: true, tapbacks: mergeTapbacks(m.tapbacks, emptySentTapbacks.get(context)),
-        ...(stickers ? { stickers } : {}), ...(activity ? { activity_ts: activity } : {}) });
+        ...emptySentReceipt.get(context), ...(stickers ? { stickers } : {}), ...(activity ? { activity_ts: activity } : {}) });
       continue;
     }
     out.push(m);
