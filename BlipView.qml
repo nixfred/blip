@@ -3311,7 +3311,7 @@ FocusScope {
             id: newMessageButton
             visible: root.splitView && root.online && !root.newMode
             anchors.left: parent.left
-            anchors.top: parent.top
+            anchors.verticalCenter: parent.verticalCenter
             iconName: "compose"
             fill: root.backgroundUrl !== "" ? Qt.alpha(appearance.background, 0.76) : Qt.alpha(root.foreground, 0.10)
             tooltipText: "New message (n)"

@@ -1249,7 +1249,9 @@ test("New Message sits across the sidebar divider with a compact popout fallback
   const headerAction = panel.slice(action, panel.indexOf("onClicked: root.startNew()", action));
   expect(headerAction).toContain("visible: root.splitView && root.online && !root.newMode");
   expect(headerAction).toContain("anchors.left: parent.left");
-  expect(headerAction).toContain("anchors.top: parent.top");
+  expect(headerAction).toContain("anchors.verticalCenter: parent.verticalCenter");
+  const actions = panel.indexOf("id: conversationActions");
+  expect(panel.slice(actions, panel.indexOf("iconName:", actions))).toContain("anchors.verticalCenter: parent.verticalCenter");
   const compact = panel.indexOf("id: compactNewMessageButton");
   expect(compact).toBeLessThan(panel.indexOf("id: conversationPane"));
   expect(panel.slice(compact, compact + 200)).toContain("visible: !root.splitView && root.online && !root.newMode");
