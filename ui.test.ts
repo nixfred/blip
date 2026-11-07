@@ -614,9 +614,8 @@ describe("QML safety invariants", () => {
     expect(panel).toContain('var keepInline = ((root.fetchJobAction === "copy" || root.fetchJobAction === "save") && !!root.attFiles[id]) || (root.fetchJobSticker && root.fetchJobAction === "open")');
     expect(panel).not.toContain("fetchJobOpen");
     expect(qmlFunction("quoteBubble")).toContain("leaveBubbles()");
-    // Empty status does not reserve a row; only failures are red.
-    expect(panel).toContain('visible: root.note !== ""');
-    expect(panel).toContain("color: calm ? root.canvasDim : root.urgent");
+    // Status floats over the view (notices.ts) and never reserves a row.
+    expect(panel).toContain("Notices.activeNotices(root.note");
     // secondary text dims by alpha, which reads right on light and dark themes alike;
     // Qt.darker on the foreground only works on a dark one
     expect(panel).toContain("readonly property color dim: appearance.muted");

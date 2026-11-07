@@ -57,8 +57,8 @@ badges with emoji reactions. See [stickers](STICKERS.md), [audio](AUDIO.md), and
 Native testing on macOS 27.2 verified classic Heart, a searched custom emoji,
 replacement with another custom emoji, exact custom removal, and a complete
 variation-selector/ZWJ emoji. The route verifies database receipts and never
-retries an uncertain send. Current Mac targeting is limited to the newest
-eligible plain-text direct message; groups, attachments, and cards are refused.
+retries an uncertain send. Current Mac targeting is any eligible plain-text direct message;
+groups, attachments, and cards are refused.
 Skin-tone variant selection remains unverified. See [reactions](reactions.md).
 
 Sending native stickers or sticker reactions is still unfinished. A public AppKit

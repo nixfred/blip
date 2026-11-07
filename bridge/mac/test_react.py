@@ -278,9 +278,6 @@ class React(unittest.TestCase):
         self.wait = patch.object(react, "ROW_WAIT", 0.05)
         self.wait.start()
         self.addCleanup(self.wait.stop)
-        clicked = patch.object(react, "click_picker_item", return_value="")
-        clicked.start()
-        self.addCleanup(clicked.stop)
         logged = patch.object(react, "log_outcome")
         logged.start()
         self.addCleanup(logged.stop)
@@ -322,49 +319,51 @@ class React(unittest.TestCase):
     # macOS 27: a bubble offers Tapback Details… and none of the six.
     MACOS27 = {"ok": False, "error": "not-offered", "offered": ["press", "Tapback Details…", "Reply…", "Copy"]}
 
-    def test_macos27_newest_message_goes_through_the_picker(self):
-        result, messages = self.run_react([self.MACOS27, {"ok": True, "lands": 2000}])
+    def test_macos27_sign_opens_the_picker_from_the_target_bubble(self):
+        result, messages = self.run_react([self.MACOS27, OK, {"ok": True, "lands": 2000}])
         self.assertEqual((result["result"], result["type"]), ("added", 2000))
+        self.assertEqual(messages.performs[-1]["action"], "Tapback Details…")
         self.assertEqual(len(messages.pickers), 1)
         self.assertEqual((messages.pickers[0]["text"], messages.pickers[0]["action"]), ("see you", "Heart"))
         self.assertEqual(self.ui.restored, ["Previous app"])
 
-    def test_macos27_an_older_message_is_refused_before_any_picker(self):
+    def test_macos27_an_older_message_takes_a_tapback(self):
         add(self.con, 1, "N", "later", True, T0 + MINUTE)
-        stop, messages = self.run_react([self.MACOS27])
-        self.assertEqual((stop.exit_code, stop.result["code"]), (react.EX_UNSUPPORTED, "not-last"))
-        self.assertEqual(messages.pickers, [])
-
-    def test_macos27_a_later_tapback_does_not_make_it_older(self):
-        tapback(self.con, 1, "M", 2001, from_me=False, handle=2, date=T0 + MINUTE)
-        result, messages = self.run_react([self.MACOS27, {"ok": True, "lands": 2000}])
+        with patch.object(react, "macos_major", return_value=27):
+            result, messages = self.run_react([OK, {"ok": True, "lands": 2000}])
         self.assertEqual(result["result"], "added")
+        self.assertEqual((len(messages.performs), len(messages.pickers)), (1, 1))
 
     def test_macos27_a_picker_on_another_message_presses_nothing(self):
-        stop, messages = self.run_react([self.MACOS27, {"ok": False, "error": "picker-elsewhere"}])
+        stop, messages = self.run_react([self.MACOS27, OK, {"ok": False, "error": "picker-elsewhere"}])
         self.assertEqual((stop.exit_code, stop.result["code"]), (react.EX_TEMPFAIL, "picker-elsewhere"))
         self.assertEqual(len(messages.pickers), 1)
 
-    def test_on_macos27_the_bubble_search_is_skipped(self):
+    def test_macos27_the_picker_opens_only_after_the_bubble_settles(self):
         with patch.object(react, "macos_major", return_value=27):
-            result, messages = self.run_react([{"ok": True, "lands": 2000}])
+            result, messages = self.run_react([{"ok": False, "error": "unsettled", "frame": "1,2,3,4"}, OK,
+                                               {"ok": True, "lands": 2000}])
         self.assertEqual(result["result"], "added")
-        self.assertEqual((len(messages.performs), len(messages.pickers)), (0, 1))
+        self.assertEqual(messages.performs[-1]["frame"], "1,2,3,4")
 
-    def test_on_macos27_an_older_message_touches_nothing(self):
-        add(self.con, 1, "N", "later", True, T0 + MINUTE)
+    def test_macos27_a_bubble_that_is_not_found_opens_no_picker(self):
         with patch.object(react, "macos_major", return_value=27):
-            stop, messages = self.run_react([])
-        self.assertEqual(stop.result["code"], "not-last")
-        self.assertEqual(messages.requests, [])
-        self.assertEqual(self.ui.selected, [])   # Messages never opened the conversation
+            stop, messages = self.run_react([{"ok": False, "error": "ambiguous"}])
+        self.assertEqual(stop.result["code"], "ambiguous")
+        self.assertEqual(messages.pickers, [])
 
-    def test_macos27_a_menu_click_that_fails_presses_nothing(self):
-        with patch.object(react, "macos_major", return_value=27), \
-             patch.object(react, "click_picker_item", return_value="no Edit menu"):
-            stop, messages = self.run_react([])
+    def test_macos27_an_uncertain_open_never_chooses_a_tapback(self):
+        with patch.object(react, "macos_major", return_value=27):
+            stop, messages = self.run_react([{"ok": False, "error": "timeout"}])
         self.assertEqual(stop.result["code"], "no-picker")
-        self.assertEqual(messages.requests, [])
+        self.assertEqual(messages.pickers, [])
+
+    def test_the_reacted_label_grammar_measured_on_macos27(self):
+        for suffix in ("2 reactions, You laughed at this", "Ann loved this", "Ann reacted with \U0001FABF", "1 reaction",
+                       "2 reactions, You laughed at this, Ann loved this"):
+            self.assertTrue(react.REACTED.fullmatch(suffix), suffix)
+        for suffix in ("see you tomorrow", "I love this", "I loved this", "2 reactions, and more"):
+            self.assertFalse(react.REACTED.fullmatch(suffix), suffix)
 
     def test_a_renamed_action_without_the_macos27_sign_never_opens_the_picker(self):
         stop, messages = self.run_react([{"ok": False, "error": "not-offered", "offered": ["Coeur"]}])

@@ -18,13 +18,11 @@ SIP on, under the Accessibility grant imsg-read already holds. Going through
 Messages means the tapback syncs like one sent from the phone.
 
 macOS 27 took those actions off the bubbles (measured 27.0.1: a bubble offers
-"Tapback Details…", "Reply…", "Copy" and the like, none of the six). What it
-kept is Edit ▸ "Tapback Last Message…", which opens the Tapback Picker on the
-conversation's newest message, with the six as buttons of the same names.
-Neither a click nor an AX press selects an older bubble, so on 27 only the
-newest message can take a tapback; anything older is refused (exit 65). The
-picker names the message it opened on, and nothing is pressed unless that is
-the target's text. chat.db still decides success.
+"Tapback Details…", "Reply…", "Copy" and the like, none of the six). Performing
+"Tapback Details…" opens the Tapback Picker on that bubble, any bubble, with the
+six as buttons of the same names (measured 27.2). The picker names the message
+it opened on, and nothing is pressed unless that is the target's text. chat.db
+still decides success.
 
 macOS 27.2 custom emoji use public native AX APIs to find the presentation
 and its detached CharacterPalette. A result must expose the exact sequence
@@ -136,6 +134,7 @@ LATER_SCAN = 5000   # later rows checked for an identical HH:MM twin; at the cap
 EX_NOT_OFFERED, EX_USAGE, EX_UNSUPPORTED, EX_UNAVAILABLE, EX_SOFTWARE, EX_TEMPFAIL, EX_NOPERM = 1, 64, 65, 69, 70, 75, 77
 # osascript errors that may come after the action went through
 MAYBE_PERFORMED = {"timeout", "osascript", "perform-failed"}
+NOT_OPENED = {"unsettled", "not-rendered", "ambiguous", "not-offered", "no-conversation"}
 
 USER_TCC = os.path.expanduser("~/Library/Application Support/com.apple.TCC/TCC.db")
 SSH_CLIENT = "/usr/libexec/sshd-keygen-wrapper"   # the TCC client every ssh session runs as
@@ -189,6 +188,12 @@ MSG_COLS = """m.ROWID, m.guid, m.text, m.attributedBody, m.is_from_me, m.date, m
 # A link turns the bubble into a preview card whose label is the page's
 # title, not the text, even with no balloon_bundle_id on the row.
 LINK = re.compile(r"://|\bwww\.", re.I)
+# What a reacted bubble's label adds after its text, measured on 27.2 ("2 reactions,
+# You laughed at this", "Ann loved this", "Ann reacted with 🪿"). The JXA bodyIs twin
+# must match. A sender is never "I", so a real "ok, I loved this" stays its own text;
+# only the time, side and ordinal tell "ok" from a real "ok, Ann loved this".
+_REACTION = r"(\d+ reactions?|(?!I )[^,]+ (loved|liked|disliked|laughed at|emphasized|questioned) this|(?!I )[^,]+ reacted with [^,]+)"
+REACTED = re.compile(_REACTION + "(, " + _REACTION + ")*")
 
 # A bubble: a real message, not a tapback row. Same filter the transcript uses.
 BUBBLE = "m.item_type = 0 AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000 OR m.associated_message_type >= 4000)"
@@ -444,7 +449,8 @@ function parseLabel(d) {
 function bodyIs(body, want) {
   if (body === want) return true;
   if (!body.startsWith(want + ", ")) return false;
-  return /^\d+ reactions?(, .+ this)*$/.test(body.slice(want.length + 2));
+  return /^(\d+ reactions?|(?!I )[^,]+ (loved|liked|disliked|laughed at|emphasized|questioned) this|(?!I )[^,]+ reacted with [^,]+)(, (\d+ reactions?|(?!I )[^,]+ (loved|liked|disliked|laughed at|emphasized|questioned) this|(?!I )[^,]+ reacted with [^,]+))*$/
+    .test(body.slice(want.length + 2));
 }
 function attribute(el, name) { return safe(() => el.attributes.byName(name).value(), null); }
 function emojiIdentity(el, emoji) {
@@ -990,6 +996,12 @@ def native_emoji_picker(q, ax=None, pause=time.sleep, open_picker=None):
             pause(0.3)
         if len(matches) != 1:
             return {"ok": False, "error": "no-picker" if not matches else "ambiguous-emoji"}
+        # A press during the picker's opening transition is acknowledged and
+        # then ignored (27.2), for classic buttons and glyphs alike.
+        pause(0.8)
+        matches = ax.pickers()
+        if len(matches) != 1:
+            return {"ok": False, "error": "no-picker" if not matches else "ambiguous-emoji"}
         picker, container = matches[0]
         origin = ax.origin(picker, container)
 
@@ -1005,8 +1017,19 @@ def native_emoji_picker(q, ax=None, pause=time.sleep, open_picker=None):
                 if label.startswith("Message, "):
                     labels.append(norm(label[9:]))
             return bool(labels) and all(label == q["text"] or
-                (label.startswith(q["text"] + ", ") and re.fullmatch(r"\d+ reactions?(, .+ this)*", label[len(q["text"]) + 2:]))
+                (label.startswith(q["text"] + ", ") and REACTED.fullmatch(label[len(q["text"]) + 2:]))
                 for label in labels)
+
+        if not q.get("emoji"):
+            hits = [el for el, _ in ax.walk(picker) if ax.attr(el, "AXRole") == "AXButton"
+                    and ax.attr(el, "AXDescription") == q["action"] and ax.attr(el, "AXEnabled") is True]
+            if len(hits) != 1:
+                return {"ok": False, "error": "not-offered", "offered": []}
+            if not context():
+                return {"ok": False, "error": "picker-elsewhere"}
+            pressed = True
+            # A slow AX acknowledgement proves nothing either way: chat.db decides.
+            return {"ok": True} if ax.press(hits[0]) else {"ok": False, "error": "perform-failed"}
 
         def exact(el):
             if ax.attr(el, "AXRole") == "AXUnknown":
@@ -1269,9 +1292,6 @@ def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, ru
     expected = emoji_plan(rows, emoji, remove) if emoji else plan(current_kind(rows), kind, remove)
     if expected is None:
         return {"ok": True, "result": "unchanged"}
-    if macos_major() >= 27 and not is_last(con, target):   # refused before Messages is touched
-        raise Stop("not-last", EX_UNSUPPORTED,
-                   "on this macOS only the newest message in a conversation can take a tapback")
     why = system_events_consent()   # before ensure_messages: it is already a System Events call
     if why:
         raise Stop("consent", EX_NOPERM, why)
@@ -1289,12 +1309,11 @@ def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, ru
         if why:
             raise Stop("unavailable", EX_UNAVAILABLE, why)
         since = apple_now()
-        # macOS 27 bubbles carry no tapbacks, so the bubble search cannot even
-        # page (it pages with a live bubble's actions): straight to the picker.
-        r = (picker_route(con, target, action, run, emoji=emoji, name=name, remove=remove) if macos_major() >= 27
+        # macOS 27 bubbles carry no tapbacks, only the way to their picker.
+        r = (picker_route(target, action, run, emoji=emoji, name=name, remove=remove, deadline=deadline) if macos_major() >= 27
              else perform(target, action, run=run, deadline=deadline))
         if r.get("error") == "not-offered" and PICKER_SIGN in r.get("offered", []):
-            r = picker_route(con, target, action, run, emoji=emoji, name=name, remove=remove)
+            r = picker_route(target, action, run, emoji=emoji, name=name, remove=remove, deadline=deadline)
         elif emoji and not remove and r.get("error") == "not-offered":
             # Opening the catalogue is not sending. The final choice still
             # needs exact AX identity; a missing/ambiguous result is refused.
@@ -1305,9 +1324,13 @@ def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, ru
                 raise Stop("timeout", EX_TEMPFAIL, "emoji selection deadline reached; nothing was sent")
             r = run({"mode": "emoji", "emoji": emoji, "name": name, "text": target["text"]}) if opened.get("ok") else opened
         if not r.get("ok") and r.get("error") not in MAYBE_PERFORMED:
+            if macos_major() >= 27 and run is jxa and r.get("error") not in NOT_OPENED:
+                close_picker()
             raise failure(r, action)   # nothing was pressed
         row = answer(con, target, self_handles, since)
         if row is None:
+            if macos_major() >= 27 and run is jxa:
+                close_picker()
             if not r.get("ok"):
                 raise failure(r, action)
             raise Stop("no-row", EX_TEMPFAIL, f"'{action}' was performed but no tapback row reached chat.db")
@@ -1330,50 +1353,49 @@ def macos_major() -> int:
         return 0
 
 
-CLICK_PICKER = """tell application "Messages" to activate
-delay 0.6
-ignoring application responses
-  tell application "System Events" to click menu item "Tapback Last Message…" of menu 1 of menu bar item "Edit" of menu bar 1 of process "Messages"
-end ignoring"""
-
-
-def click_picker_item() -> str:
-    """Edit ▸ Tapback Last Message…, without waiting for Messages to answer:
-    a System Events click on it can block until the picker closes (27.0.1,
-    by index and by name alike). "" or why it could not be sent."""
-    try:
-        r = subprocess.run(["/usr/bin/osascript", "-e", CLICK_PICKER], capture_output=True, timeout=15)
-    except subprocess.TimeoutExpired:
-        return "the menu click timed out"
-    return "" if r.returncode == 0 else r.stderr.decode("utf-8", "replace").strip()[-200:]
-
-
-def picker_route(con, target: dict, action: str, run, click=None, emoji="", name="", remove=False) -> dict:
-    if not is_last(con, target):
-        raise Stop("not-last", EX_UNSUPPORTED,
-                   "on this macOS only the newest message in a conversation can take a tapback")
+def picker_route(target: dict, action: str, run, emoji="", name="", remove=False, deadline=None) -> dict:
+    """macOS 27: open the picker from the target bubble, then choose in it. The
+    bubble search finds, settles and re-reads the bubble before that one press."""
+    if run is jxa:
+        clear_stale_picker()
+    opened = perform(target, PICKER_SIGN, run=run, deadline=deadline)
+    if not opened.get("ok"):
+        # Nothing was chosen, even if the press landed: only the picker sends.
+        return {"ok": False, "error": "no-picker"} if opened.get("error") in MAYBE_PERFORMED else opened
     request = {"mode": "picker", "text": target["text"], "action": action}
     if emoji:
         request.update(emoji=emoji, name=name, remove=remove)
-        if run is jxa:
-            return native_emoji_picker(request, open_picker=click or click_picker_item)
-    why = (click or click_picker_item)()
-    if why:
-        return {"ok": False, "error": "no-picker", "detail": why}
+    if run is jxa:
+        return native_emoji_picker(request)
     return run(request)
 
 
-def is_last(con, target: dict) -> bool:
-    """Whether the target is the conversation's newest message: the one Edit ▸
-    Tapback Last Message… opens the picker on. Tapbacks and announcements are
-    not messages; Recently Deleted ones are not drawn."""
-    marks = ",".join("?" * len(target["chats"]))
-    row = con.execute(
-        f"""SELECT m.guid FROM message m JOIN chat_message_join j ON j.message_id = m.ROWID
-            WHERE j.chat_id IN ({marks}) AND m.associated_message_type = 0 AND m.item_type = 0
-              AND m.ROWID NOT IN (SELECT message_id FROM chat_recoverable_message_join)
-            ORDER BY m.date DESC, m.ROWID DESC LIMIT 1""", list(target["chats"])).fetchone()
-    return row is not None and row["guid"] in target["guids"]
+def close_picker() -> None:
+    """Escape out of a picker a run left open. Left there it blocks the next run,
+    and the JXA scan's entireContents would then walk the whole emoji catalogue,
+    pinning Messages' main thread for minutes (27.2). Only ever to Messages."""
+    script = 'tell application "System Events" to if frontmost of process "Messages" then key code 53'
+    try:
+        subprocess.run(["/usr/bin/osascript", "-e", script], capture_output=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def clear_stale_picker() -> None:
+    """Before any scan: the native check never enumerates the catalogue. Each
+    Escape closes one layer, the catalogue first and then the picker under it."""
+    for _ in range(3):
+        ax = NativeAX(time.monotonic() + 5)
+        try:
+            stale = bool(ax.pickers() or ax.popovers())
+        except Exception:
+            stale = False
+        finally:
+            ax.close()
+        if not stale:
+            return
+        close_picker()
+        time.sleep(0.5)
 
 
 def failure(r: dict, action: str) -> Stop:

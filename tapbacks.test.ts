@@ -89,6 +89,12 @@ describe("imsg-react: bubble label matching", () => {
     expect(matches("Ann, a, b, 18:03", "a, b")).toBe(true);
   });
 
+  test("reaction annotations measured on macOS 27 still match", () => {
+    expect(matches("Ann, ok, Ann loved this, 18:03", "ok")).toBe(true);
+    expect(matches("Ann, ok, Ann reacted with 🪿, 18:03", "ok")).toBe(true);
+    expect(matches("Ann, ok, 2 reactions, You laughed at this, Ann loved this, 18:03", "ok")).toBe(true);
+  });
+
   test("never a longer text that starts the same way", () => {
     expect(matches("Ann, ok, see you, 18:03", "ok")).toBe(false);
     expect(matches("Ann, ok, I loved this, 18:03", "ok")).toBe(false);

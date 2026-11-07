@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.0-private.3 — Reactions on any message, floating notices
+
+- Send Tapbacks and custom emoji reactions to any eligible message on macOS 27,
+  not only the newest, in about 10 seconds instead of 30. Requires the updated
+  `imsg-react` on the Mac.
+- Show status and errors as small floating notices at the top right, in plain
+  words, that dismiss themselves or on a click.
+
 ## 2.7.0-private.2 — Swipe to reveal message times
 
 - Replace the hover tooltip with a Messages-style sideways swipe on a trackpad

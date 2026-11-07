@@ -18,8 +18,15 @@ License v3 is included in [UNICODE-LICENSE.txt](UNICODE-LICENSE.txt).
 Sending still requires `tapbacks=on` and the Mac's existing Accessibility and
 Automation grants. It never requests new consent as part of a reaction. The
 existing target restrictions remain: delivered plain-text direct-message
-bubbles, without attachments or link/app cards; on macOS 27, the newest
-message only. Opening Messages can briefly change focus on the Mac.
+bubbles, without attachments or link/app cards. Opening Messages can briefly
+change focus on the Mac.
+
+On macOS 27, the bubble's "Tapback Details…" action opens the picker on any
+message, so older messages work. The picker needs about 0.8 s to settle: a press
+during its opening transition is acknowledged and then ignored. Never run a JXA
+`entireContents` while the emoji catalogue is open. It walks thousands of cells
+and pins Messages' main thread for minutes, so a run first closes any picker a
+previous run left behind, one Escape per layer.
 
 Classic requests retain the original command protocol. Custom emoji use
 `imsg-react --guid GUID --emoji-stdin --yes`, with a bounded JSON object

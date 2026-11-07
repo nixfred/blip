@@ -13,11 +13,11 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.7.0--private.2-0a84ff?style=flat-square">
+  <img alt="version" src="https://img.shields.io/badge/version-2.7.0--private.3-0a84ff?style=flat-square">
   <img alt="Omarchy" src="https://img.shields.io/badge/Omarchy-plugin-5fd7ff?style=flat-square">
   <img alt="QuickShell" src="https://img.shields.io/badge/QuickShell-QML-0a84ff?style=flat-square">
   <img alt="bun" src="https://img.shields.io/badge/bun-TypeScript-f9f1e1?style=flat-square">
-  <img alt="tests" src="https://img.shields.io/badge/tests-865%20passing-2ea043?style=flat-square">
+  <img alt="tests" src="https://img.shields.io/badge/tests-871%20passing-2ea043?style=flat-square">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
@@ -565,11 +565,10 @@ answers. Needs a
 the Mac and the `imsg-react` shim on Linux.
 
 On a macOS 27 gateway the bubbles no longer carry the tapbacks, so
-`imsg-react` opens Messages' own Edit ▸ Tapback Last Message… picker instead,
-checks that it opened on your message, and presses the tapback there. That
-picker only ever opens on a conversation's newest message, so on 27 only the
-newest message can take a tapback; an older one is refused with that reason.
-A run takes 15–20 seconds. Each run's outcome (code and exit status, never
+`imsg-react` performs the bubble's own "Tapback Details…" action to open
+Messages' picker on that message, checks that it opened there, and presses the
+tapback. Any delivered plain-text message in a direct conversation can take
+one. A run takes about 10 seconds. Each run's outcome (code and exit status, never
 text) is appended to `~/.blip/react.log` on the Mac.
 
 **Two or more monitors:** one bar widget per screen is normal; only the one

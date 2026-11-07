@@ -4,6 +4,7 @@ import "SendState.mjs" as SendState
 import "MessageActions.mjs" as MessageActions
 import "SourceId.mjs" as SourceId
 import "TapbackActions.mjs" as TapbackActions
+import "Notices.mjs" as Notices
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -2612,17 +2613,6 @@ FocusScope {
           }
         }
 
-        Text {
-          objectName: "blipToastErrorList"
-          Layout.fillWidth: true
-          visible: root.toastAllowlistError !== ""
-          text: "Blip notifications: " + root.toastAllowlistError
-          textFormat: Text.PlainText
-          color: root.urgent
-          font.family: root.fontFamily
-          font.pixelSize: root.fontCaption
-          wrapMode: Text.WordWrap
-        }
 
         // ---------------------------------------------------- scroll body
         Flickable {
@@ -2682,19 +2672,6 @@ FocusScope {
                   + "Wake the Mac (or check the network) and Blip reconnects on its own."
               textFormat: Text.PlainText
               color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: root.fontBodySmall
-              wrapMode: Text.WordWrap
-            }
-            // Reachable but broken — say exactly what to fix (Full Disk Access,
-            // Automation, blip-setup). collector.explainBridgeError writes it.
-            Text {
-              Layout.fillWidth: true
-              visible: root.online && root.hostWidget && !root.hostWidget.healthy
-                       && String(root.hostWidget.lastError || "") !== ""
-              text: "⚠ " + String(root.hostWidget ? root.hostWidget.lastError : "")
-              textFormat: Text.PlainText
-              color: root.urgent
               font.family: root.fontFamily
               font.pixelSize: root.fontBodySmall
               wrapMode: Text.WordWrap
@@ -3414,17 +3391,6 @@ FocusScope {
           }
         }
 
-        Text {
-          objectName: "blipToastErrorThread"
-          Layout.fillWidth: true
-          visible: !root.listShowing && root.toastAllowlistError !== ""
-          text: "Blip notifications: " + root.toastAllowlistError
-          textFormat: Text.PlainText
-          color: root.urgent
-          font.family: root.fontFamily
-          font.pixelSize: root.fontCaption
-          wrapMode: Text.WordWrap
-        }
 
         // ---------------------------------------------------- scroll body
         Flickable {
@@ -4543,20 +4509,46 @@ FocusScope {
           }
         }
 
-        // No empty status row below the composer. The resize grip overlays
-        // the panel corner independently of this layout.
-        Text {
-          visible: root.note !== ""
-          Layout.fillWidth: true
-          text: root.note
-          textFormat: Text.PlainText
-          readonly property bool calm: root.note === "copied" || root.note === "sending…"
-            || root.note === "sent to LocalSend" || root.note.indexOf("attached") === 0
-          color: calm ? root.canvasDim : root.urgent
-          font.family: root.fontFamily
-          font.pixelSize: root.fontCaption
-          wrapMode: Text.WordWrap
-        }
+      }
+    }
+  }
+
+  // Notices float over the top right, below the header's buttons, and never
+  // move the transcript. Wording and lifetimes live in notices.ts.
+  property var dismissedNotices: ({})
+  readonly property var notices: Notices.activeNotices(root.note, [
+    { kind: "notifications", text: root.toastAllowlistError === "" ? "" : "Blip notifications: " + root.toastAllowlistError },
+    // Reachable but broken: says exactly what to fix (collector.explainBridgeError).
+    { kind: "bridge", text: root.online && root.hostWidget && !root.hostWidget.healthy ? String(root.hostWidget.lastError || "") : "" }
+  ], root.dismissedNotices)
+  function dismissNotice(notice) {
+    if (notice.kind === "note") { root.note = ""; return }
+    var next = Object.assign({}, root.dismissedNotices)
+    next[notice.kind] = notice.text
+    root.dismissedNotices = next
+  }
+  Column {
+    objectName: "blipNotices"
+    z: 1000
+    anchors.top: parent.top
+    anchors.right: parent.right
+    anchors.topMargin: Style.space(64)
+    anchors.rightMargin: Style.space(14)
+    spacing: Style.space(6)
+    Repeater {
+      model: root.notices
+      delegate: NoticeOverlay {
+        required property var modelData
+        anchors.right: parent ? parent.right : undefined
+        text: modelData.text
+        error: modelData.error
+        timeoutMs: modelData.timeoutMs
+        maximumWidth: Math.min(Style.space(340), root.width * 0.7)
+        foreground: "white"
+        accent: root.urgent
+        fontFamily: root.fontFamily
+        fontPixelSize: root.fontBodySmall
+        onDismissed: root.dismissNotice(modelData)
       }
     }
   }
