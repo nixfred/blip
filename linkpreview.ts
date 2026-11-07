@@ -50,7 +50,7 @@ export const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const FETCH_TIMEOUT_MS = 8000;
 export const MAX_HOPS = 3;
 /** Sent so a site can identify (and refuse) Blip rather than seeing a blank. */
-export const UA = "Mozilla/5.0 (X11; Linux x86_64) Blip/2.3 (+https://github.com/nixfred/blip) like Gecko";
+export const UA = "Mozilla/5.0 (X11; Linux x86_64) like Gecko";
 
 export interface Preview {
   ok: boolean;

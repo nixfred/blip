@@ -7,7 +7,7 @@ treating a Mac as the gateway. Read this before touching anything.
 
 ```
 (Mac side)    bridge/mac/           VENDORED from claude-on-mac (pin in bridge/BRIDGE-VERSION; refresh with
-              imsg imsg-send        scripts/sync-bridge.sh <rev>). Installed to ~/.blip/bin on the Mac by
+              imsg imsg-send        now maintained here). Installed to ~/.blip/bin on the Mac by
               contacts tcc-check    bridge/mac/install.sh. Blip is ONE source for release (Fred's rule).
               blip-dispatch         forced-command gate for ~/.ssh/blip_ed25519: only the tools in its TOOLS set run.
                                     imsg: sqlite read of chat.db, `--rich` (tapbacks/read_at/reply_to/

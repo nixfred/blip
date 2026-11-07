@@ -2,7 +2,7 @@ claude-on-mac 3f93270 (v2.0.0, 2026-09-16; Blip's fixes upstreamed)
 vendored: imsg imsg-send contacts tcc-check
 blip-only (NOT upstream): imsg-read imsg-react blip-check blip-dispatch
 blip extensions: Messages pin order; bounded read-only contact review, store-fingerprint audit, and card availability check
-sync: scripts/sync-bridge.sh <sha-or-tag>
+sync: none; the upstream account is gone, so these copies are maintained here
 blip deviations from upstream v2.0.0: imsg-send consent banner prints body LENGTH only and only on a TTY (stderr lands in journald); imsg CONTACT_HELPER path; Blip wording in comments; imsg exposes chat_cluster_ids() as a supported entry point (was _group_photo_chat_ids, alias kept) so imsg-read can scope a read push to the cluster; imsg serve (the read-only persistent channel blip-bridged holds open) with memoised group clusters, pins and Contacts index, each keyed on what it derives from
 
 private continuation: sticker attribution/association metadata, alpha-preserving PNG export, and exact-identity custom emoji reactions; upstream pin above is unchanged. See docs/STICKERS.md and docs/reactions.md.

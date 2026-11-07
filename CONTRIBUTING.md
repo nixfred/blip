@@ -53,8 +53,8 @@ you touched one.
 
 ## Mac-side tools
 
-`bridge/mac/*` is vendored from [claude-on-mac](https://github.com/nixfred/claude-on-mac)
-(pinned in `bridge/BRIDGE-VERSION`). Fixes to `imsg`, `imsg-send`, or
+`bridge/mac/*` began as a copy of claude-on-mac, whose repository no longer
+exists (see `bridge/BRIDGE-VERSION`). Fixes to `imsg`, `imsg-send`, or
 `contacts` are welcome here; Blip-only tools (`blip-check`, `blip-dispatch`)
 live only here.
 
