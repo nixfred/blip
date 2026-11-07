@@ -15,7 +15,7 @@ import {
   minutesBetween,
   parsePendingSends,
   pendingBubble,
-  receiptLabel,
+  readReceipt,
   selectThread,
   withPendingSends,
 } from "./thread";
@@ -183,7 +183,8 @@ describe("decorate", () => {
     );
     expect(b[0]!.day).toBe("28.08");
     expect(b[0]!.time).toBe("16:42");
-    expect(b[0]!.receipt).toBe("Read 28.08 16:45");
+    expect(b[0]!.receipt).toBe("Read");
+    expect(b[0]!.receiptDetail).toBe("28.08");
   });
 
   test("consecutive messages from one sender form a single group", () => {
@@ -527,22 +528,58 @@ describe("linkify", () => {
 describe("rich decoration", () => {
   const today = "2026-08-31";
 
-  test("receipt lands only on the NEWEST read from-me bubble", () => {
+  test("the status line sits only under your newest message", () => {
     const out = decorate(
       [
         msg({ ts: "2026-08-31T10:00:00Z", from_me: true, read_at: "2026-08-31T10:00:30Z" }),
         msg({ ts: "2026-08-31T10:05:00Z", from_me: false }),
         msg({ ts: "2026-08-31T10:06:00Z", from_me: true, read_at: "2026-08-31T10:07:12Z" }),
-        msg({ ts: "2026-08-31T10:08:00Z", from_me: true }), // sent, not yet read
+        msg({ ts: "2026-08-31T10:08:00Z", from_me: true, delivered: true }),
       ],
       today,
     );
-    expect(out.map((b) => b.receipt)).toEqual(["", "", "Read 10:07 AM", ""]);
+    expect(out.map((b) => b.receipt)).toEqual(["", "", "", "Delivered"]);
   });
 
-  test("receipt from an earlier day carries the day label", () => {
-    expect(receiptLabel("2026-08-30T21:03:00Z", today)).toBe("Read Yesterday 9:03 PM");
-    expect(receiptLabel("2026-08-31T16:42:00Z", today)).toBe("Read 4:42 PM");
+  test("Read takes the place of Delivered without changing the line's height", () => {
+    const base = { ts: "2026-08-31T10:08:00Z", from_me: true, delivered: true };
+    const before = decorate([msg(base)], today)[0]!;
+    const after = decorate([msg({ ...base, read_at: "2026-08-31T16:42:00Z" })], today)[0]!;
+    expect([before.receipt, before.receiptDetail, before.receiptSlot]).toEqual(["Delivered", "", true]);
+    expect([after.receipt, after.receiptDetail, after.receiptSlot]).toEqual(["Read", "4:42 PM", true]);
+  });
+
+  test("the line is held open before delivery, but only at the end of the thread", () => {
+    const sent = msg({ ts: "2026-08-31T10:08:00Z", from_me: true });
+    expect(decorate([sent], today)[0]).toMatchObject({ receipt: "", receiptSlot: true });
+    const replied = decorate([sent, msg({ ts: "2026-08-31T10:09:00Z", from_me: false })], today);
+    expect(replied[0]).toMatchObject({ receipt: "", receiptSlot: false });
+    expect(replied[1]).toMatchObject({ receipt: "", receiptSlot: false });
+  });
+
+  test("a failed, unsent or scheduled message gets no status line", () => {
+    const failed = msg({ ts: "2026-08-31T10:08:00Z", from_me: true, delivered: true, error: 22 });
+    expect(decorate([failed], today)[0]).toMatchObject({ receipt: "", receiptSlot: false });
+    const read = { ts: "2026-08-31T10:00:00Z", from_me: true, read_at: "2026-08-31T16:42:00Z" };
+    const unsent = msg({ ts: "2026-08-31T10:08:00Z", from_me: true, retracted: true });
+    expect(decorate([msg(read), unsent], today).map((b) => b.receipt)).toEqual(["Read", ""]);
+    const later = msg({ ts: "2026-09-01T10:08:00Z", from_me: true, scheduled: true });
+    expect(decorate([msg(read), later], today).map((b) => b.receipt)).toEqual(["Read", ""]);
+  });
+
+  test("a read receipt keeps the clock today and only the day before that", () => {
+    expect(readReceipt("2026-08-31T16:42:00Z", today)).toEqual({ receipt: "Read", receiptDetail: "4:42 PM" });
+    expect(readReceipt("2026-08-30T21:03:00Z", today)).toEqual({ receipt: "Read", receiptDetail: "Yesterday" });
+  });
+
+  test("a send in flight takes over the status line from the message before it", () => {
+    const real = decorate([msg({ ts: "2026-08-31T10:00:00Z", from_me: true, text: "a", read_at: "2026-08-31T10:01:00Z" })], today);
+    const send = { chat: "1", text: "b", ts: "2026-08-31T10:02:00Z" };
+    const now = Date.parse(send.ts);
+    const { bubbles } = withPendingSends(real, [send], today, undefined, now);
+    expect(bubbles.map((b) => [b.receipt, b.receiptSlot])).toEqual([["", false], ["Sending…", true]]);
+    const failed = withPendingSends(real, [{ ...send, failed: true }], today, undefined, now).bubbles;
+    expect(failed.map((b) => [b.receipt, b.receiptSlot])).toEqual([["", false], ["", false]]);
   });
 
   test("link-preview payload pseudo-attachments are filtered out", () => {

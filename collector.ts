@@ -89,6 +89,8 @@ export interface ImsgMessage {
   scheduled?: boolean | null;
   // ---- imsg --rich extras (claude-on-mac ≥ 1.5.0); absent on plain fetches
   read_at?: string | null;
+  /** An own iMessage or RCS the recipient's device has acknowledged. */
+  delivered?: boolean | null;
   tapbacks?: Tapback[] | null;
   attachments?: AttachmentMeta[] | null;
   stickers?: import("./stickers").StickerOverlay[] | null;

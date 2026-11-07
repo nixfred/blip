@@ -11,7 +11,7 @@ changes to the Mac beyond claude-on-mac updates.
   roadmap (imsg resolves Contacts natively). Contact PHOTOS still open —
   needs image transfer + the same cache decision as attachments.
 - [x] **Read receipts (inbound)** — shipped 0.8.0 via `imsg --rich` `read_at`;
-  "Read 4:42 PM" under the newest read from-me bubble only.
+  one "Delivered" or "Read 4:42 PM" line, under your newest message.
 - [x] **Tapbacks on bubbles** — shipped 0.8.0: corner pills, net add/remove
   per sender, custom emoji included; the `Loved "…"` pseudo-rows are folded.
 - [x] **Inline replies** — shipped 0.8.0: quoted snippet above the bubble.

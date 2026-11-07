@@ -137,7 +137,7 @@ describe("QML safety invariants", () => {
     expect(panel).toContain('"--pending-stdin"');
     expect(panel).toContain("threadProc.write(JSON.stringify(pending))");
     expect(panel).toContain("root.failPending(completedChat, completedId, reason, completedText, completedStamp)");
-    expect(panel).toContain('modelData.pending === true ? "Sending…"');
+    expect(panel).toContain('receipt: "Sending…", receiptDetail: "", receiptSlot: true');
     // the read watermark never takes a pending bubble's local-clock stamp
     expect(panel).toContain("if (list[k].pending === true || list[k].scheduled === true) continue");
   });

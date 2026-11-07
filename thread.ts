@@ -75,8 +75,13 @@ export interface Bubble {
   groupEnd: boolean;
   /** "9:41 PM" (or whatever `timeFormat` says), revealed by a sideways swipe. */
   time: string;
-  /** "Read 4:42 PM" — only on the NEWEST read from-me bubble, like iMessage. */
+  /** "Read", "Delivered" or "Sending…", on your newest message only. */
   receipt: string;
+  /** Drawn lighter after the receipt: "4:42 PM" today, "Yesterday" before. */
+  receiptDetail: string;
+  /** Hold the receipt's line open even while it is empty, so the transcript
+   *  does not move when the status first appears. */
+  receiptSlot: boolean;
   /** Reactions folded onto this bubble; [] when none. */
   tapbacks: Tapback[];
   /** Attachment chips ("📷 IMG_4502.png"); metadata only, files stay on the Mac. */
@@ -103,7 +108,7 @@ export interface Bubble {
    *  rendered as a red "Not Delivered" tag. */
   failed: boolean;
   /** Drawn the moment Enter was pressed, before the Mac has written the row;
-   *  "Sending…" replaces the time. Absent on every real bubble. */
+   *  "Sending…" takes the status line. Absent on every real bubble. */
   pending?: boolean;
   /** A Send Later message still waiting on the Mac: "Scheduled for Tomorrow
    *  6:00 PM" replaces the time, and it is never counted as seen. */
@@ -282,10 +287,13 @@ export function minutesBetween(a: string, b: string): number {
 export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_FORMATS): Bubble[] {
   const out: Bubble[] = [];
 
-  // iMessage shows "Read" under only the newest read message you sent.
+  // One status line, under your newest message. Keeping an older "Read" while
+  // a newer message is only "Delivered" would make the line vanish from the
+  // older bubble when the newer one is read, shifting the transcript.
   let receiptIdx = -1;
   for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i]!.from_me && msgs[i]!.read_at) { receiptIdx = i; break; }
+    const m = msgs[i]!;
+    if (m.from_me && !m.retracted && !m.scheduled) { receiptIdx = i; break; }
   }
 
   for (let i = 0; i < msgs.length; i++) {
@@ -327,7 +335,7 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
       groupStart,
       groupEnd,
       time: clockLabel(m.ts, formats.time),
-      receipt: i === receiptIdx ? receiptLabel(m.read_at!, today, formats) : "",
+      ...receiptFor(i === receiptIdx ? m : null, i === msgs.length - 1, today, formats),
       tapbacks: m.tapbacks ?? [],
       // Belt to imsg 1.5.1's suspenders: link-preview payloads are not files.
       attachments: (m.attachments ?? []).filter(
@@ -425,7 +433,9 @@ export function pendingBubble(prev: Bubble | undefined, send: PendingSend, today
     groupStart,
     groupEnd: true,
     time: clockLabel(ts, formats.time),
-    receipt: "",
+    receipt: send.failed === true ? "" : "Sending…",
+    receiptDetail: "",
+    receiptSlot: send.failed !== true,
     tapbacks: [],
     attachments: [],
     stickers: [],
@@ -474,8 +484,14 @@ export function withPendingSends(bubbles: Bubble[], pending: PendingSend[], toda
     }
     if (hit >= 0) taken.add(hit); else open.push(p);
   }
-  const out = bubbles.slice();
+  // The status line belongs to the newest message, which is now a pending one.
+  const out = open.length === 0 ? bubbles.slice() : bubbles.map((b) => b.receipt || b.receiptSlot
+    ? { ...b, receipt: "", receiptDetail: "", receiptSlot: false } : b);
   for (const p of open) {
+    if (out.length > 0) {
+      const last = out[out.length - 1]!;
+      if (last.pending) out[out.length - 1] = { ...last, receipt: "", receiptSlot: false };
+    }
     const { bubble, prev } = pendingBubble(out[out.length - 1], p, today, formats);
     if (prev && out.length) out[out.length - 1] = prev;
     out.push(bubble);
@@ -493,12 +509,18 @@ export function parsePendingSends(raw: string): PendingSend[] {
   } catch { return []; }
 }
 
-/** "Read 4:42 PM" today, "Read Yesterday 9:03 AM" otherwise. */
-export function receiptLabel(readAt: string, today: string, formats = DEFAULT_FORMATS): string {
+/** "Read" and its lighter detail: the clock today, just the day before that. */
+export function readReceipt(readAt: string, today: string, formats = DEFAULT_FORMATS): { receipt: string; receiptDetail: string } {
   const clock = clockLabel(readAt, formats.time);
-  if (!clock) return "Read";
+  if (!clock) return { receipt: "Read", receiptDetail: "" };
   const day = dayLabel(readAt, today, formats);
-  return day === "Today" ? `Read ${clock}` : `Read ${day} ${clock}`;
+  return { receipt: "Read", receiptDetail: day === "Today" ? clock : day };
+}
+
+function receiptFor(m: ImsgMessage | null, last: boolean, today: string, formats: typeof DEFAULT_FORMATS): Pick<Bubble, "receipt" | "receiptDetail" | "receiptSlot"> {
+  if (!m || (m.error ?? 0) !== 0) return { receipt: "", receiptDetail: "", receiptSlot: false };
+  if (m.read_at) return { ...readReceipt(m.read_at, today, formats), receiptSlot: last };
+  return { receipt: m.delivered ? "Delivered" : "", receiptDetail: "", receiptSlot: last };
 }
 
 /** Local calendar date — toISOString() is UTC and flips "Today" at 8pm EDT. */

@@ -78,6 +78,7 @@ FocusScope {
   readonly property real uiFontScale: appearance.uiFontScale
   readonly property int fontTitle: appearance.fontTitle
   readonly property int fontCaption: appearance.fontCaption
+  FontMetrics { id: receiptMetrics; font.family: root.fontFamily; font.pixelSize: root.fontCaption }
   readonly property int fontBodySmall: appearance.fontBodySmall
   readonly property int fontBody: appearance.fontBody
   readonly property color dim: appearance.muted
@@ -1801,7 +1802,12 @@ FocusScope {
    *  draw the bubble in the right run with the right clock. Every reload
    *  replaces it with the TypeScript version until the real row lands. */
   function appendPendingBubble(list, text, stamp, localId) {
-    var out = (list || []).slice()
+    // The status line belongs to the newest message, which this one now is.
+    var out = (list || []).map(function(b) {
+      if (!b.receipt && !b.receiptSlot) return b
+      var cleared = Object.assign({}, b); cleared.receipt = ""; cleared.receiptDetail = ""; cleared.receiptSlot = false
+      return cleared
+    })
     var prev = out.length ? out[out.length - 1] : null
     var newDay = !prev || root.localDay(prev.ts) !== root.localDay(stamp)
     var gapMin = prev ? (root.stampMs(stamp) - root.stampMs(prev.ts)) / 60000 : Infinity
@@ -1809,7 +1815,7 @@ FocusScope {
     if (!start) { var p = Object.assign({}, prev); p.groupEnd = false; out[out.length - 1] = p }
     out.push({ localId: localId, ts: stamp, from_me: true, name: "", text: String(text).trim(), day: newDay ? "Today" : "",
                groupStart: start, groupEnd: true, time: Qt.formatTime(new Date(), root.timeFormat),
-               receipt: "", tapbacks: [], attachments: [], replyText: "", replyMine: false, edited: false,
+               receipt: "Sending…", receiptDetail: "", receiptSlot: true, tapbacks: [], attachments: [], replyText: "", replyMine: false, edited: false,
                link: null, retracted: false, effect: "", audio: false, html: "", failed: false, pending: true })
     return out
   }
@@ -4121,8 +4127,7 @@ FocusScope {
                 RowLayout {
                   Layout.fillWidth: true
                   visible: modelData.edited === true || String(modelData.effect || "") !== "" ||
-                           modelData.failed === true || modelData.pending === true ||
-                           modelData.scheduled === true
+                           modelData.failed === true || modelData.scheduled === true
                   spacing: 0
                   Item { Layout.fillWidth: true; visible: bubbleRow.mine }
                   Text {
@@ -4132,7 +4137,6 @@ FocusScope {
                     wrapMode: Text.WrapAnywhere
                     text: [modelData.failed === true ? "⚠ Not Delivered" : "",
                            modelData.failed === true ? String(modelData.failureReason || "")
-                             : modelData.pending === true ? "Sending…"
                              : modelData.scheduled === true ? "Scheduled for " + String(modelData.scheduledFor || "")
                              : "",
                            modelData.edited === true ? "Edited" : "",
@@ -4194,29 +4198,51 @@ FocusScope {
                   font.pixelSize: root.fontCaption
                 }
 
-                // "Read 4:42 PM" — only ever under the newest read from-me bubble
+                // "Delivered" or "Read 4:42 PM" under your newest message. A fixed
+                // height: one status replacing another must not move the transcript.
                 RowLayout {
+                  id: receiptRow
+                  readonly property string label: modelData.failed === true ? "" : String(modelData.receipt || "")
+                  readonly property string detail: label === "" ? "" : String(modelData.receiptDetail || "")
                   Layout.fillWidth: true
-                  visible: String(modelData.receipt || "") !== ""
+                  Layout.topMargin: Style.space(3)
+                  Layout.bottomMargin: Style.space(4)
+                  Layout.preferredHeight: Math.ceil(receiptMetrics.height)
+                  visible: label !== "" || (modelData.receiptSlot === true && modelData.failed !== true)
                   spacing: 0
                   Item { Layout.fillWidth: true }
-                  Text {
+                  Item {
                     Layout.rightMargin: Style.space(6)
-                    text: String(modelData.receipt || "")
+                    implicitWidth: receiptText.implicitWidth
+                    implicitHeight: receiptText.implicitHeight
                     Rectangle {
                       anchors.fill: parent
                       anchors.margins: -Style.space(3)
-                      z: -1
-                      visible: root.backgroundUrl !== ""
+                      visible: root.backgroundUrl !== "" && receiptRow.label !== ""
                       radius: Style.space(8)
                       color: Qt.alpha(appearance.background, 0.74)
                     }
-                    textFormat: Text.PlainText
-                    color: root.canvasDim
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fontCaption
-                    font.bold: true
-                    bottomPadding: Style.space(4)
+                    Row {
+                      id: receiptText
+                      spacing: Style.space(4)
+                      Text {
+                        text: receiptRow.label
+                        textFormat: Text.PlainText
+                        color: root.canvasDim
+                        font.family: root.fontFamily
+                        font.pixelSize: root.fontCaption
+                        font.weight: Font.Medium
+                      }
+                      Text {
+                        visible: text !== ""
+                        text: receiptRow.detail
+                        textFormat: Text.PlainText
+                        color: root.canvasDim
+                        font.family: root.fontFamily
+                        font.pixelSize: root.fontCaption
+                        font.weight: Font.Normal
+                      }
+                    }
                   }
                 }
 
@@ -4232,6 +4258,13 @@ FocusScope {
               color: root.canvasDim
               font.family: root.fontFamily
               font.pixelSize: root.fontBodySmall
+            }
+
+            // Breathing room between the newest message and the composer.
+            Item {
+              visible: root.inThread
+              Layout.fillWidth: true
+              Layout.preferredHeight: Style.space(8)
             }
           }
         }

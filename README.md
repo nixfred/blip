@@ -133,7 +133,7 @@ Linux side. If the Mac is asleep, the widget dims and says so.
 - grouped into runs with one timestamp per run, day dividers, squared "tail" corner
 - sender names above each run in a group
 - **tapbacks** — ❤️👍😂 pills on the bubble corner, custom emoji included
-- **"Read 4:42 PM"** under the last message of yours they've read. Reading in Blip does not send a receipt; *mark all read* asks the Mac to mark everything read, and then your Messages read-receipt setting applies (`push_read=off` in `bridge.conf` keeps the Mac out of it)
+- **"Delivered", then "Read 4:42 PM"** under your newest message. Reading in Blip does not send a receipt; *mark all read* asks the Mac to mark everything read, and then your Messages read-receipt setting applies (`push_read=off` in `bridge.conf` keeps the Mac out of it)
 - **inline replies** quoted above the bubble · **Edited** tags · "unsent a message" tombstones
 - **link cards** — URL messages show the preview image, title, and host, like Messages. Apple only decorates some links; for the rest Blip fetches the page's own Open Graph card itself, so a bare URL still gets its picture. Click opens the link, **right-click opens the share sheet** (open · copy · QR for your phone · send to a device via LocalSend, Omarchy's share). `link_previews=off` in `bridge.conf` disables the fetching
 - **iMessage-app cards read as text** — Ask to Buy, Fitness sharing, Find My: the sentence Messages shows for them, instead of a replacement character
