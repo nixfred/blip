@@ -91,6 +91,21 @@ never reaches Linux disk or argv.
   under the email chat. Confirm by thread and text, never by chat. Filtering by chat
   made working replies look lost during the investigation.
 
+## Known limits
+
+- **The Mac must be unlocked.** A locked Mac fails with a clear message and nothing is
+  sent. Native tapbacks have the same limit.
+- **A reply can appear in another of the person's conversations.** When someone has two
+  addresses that Blip hasn't merged, the reply may land under the other one. Messages
+  draws them as one thread; Blip shows the reply under the other chat, and the pending
+  bubble here expires after two minutes. It was seen in a self-thread, where the email
+  and phone chats aren't merged. Addresses merged through `chatAliases` are read
+  together, so they shouldn't show this, but no merged conversation has been tested.
+- **In a self-thread, a picture shows twice in Blip**: the sent row and its echo. Replying
+  to either works. Blip's echo folding doesn't cover this case.
+- **The whole path has only been exercised in a self-thread.** Real one-to-one
+  conversations use the same route, but no reply has been sent in one during testing.
+
 ## Dead ends
 
 - **AppleScript has no reply.** `send` takes no reply target.
@@ -111,6 +126,12 @@ never reaches Linux disk or argv.
   loose label filter prints other people's conversation previews. Filter on bubbles
   offering `Reply…`, and keep to the self-thread.
 - Never run `entireContents` while the emoji catalogue is open. See `reactions.md`.
+- Any query that looks for test rows must filter on your marker text. A filter on
+  `ROWID` alone also returns other conversations' messages that arrived in between.
+- A self-thread can span several chats, so check that a surprising chat is really yours
+  before assuming: its participants must all be in `detect_self_handles()`.
+- `grim -g` captures the screen, not the window. A Blip window on another workspace gets
+  whatever is on top at those coordinates.
 - `imsg-send` takes attachments with `--file-stdin --file-bytes N --name X`.
 
 ## Not built, and what it would take
