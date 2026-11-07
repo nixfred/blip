@@ -129,7 +129,8 @@ class ReactionReadBoundary(unittest.TestCase):
     def test_folded_reactions_and_removals_keep_their_activity_timestamp(self):
         imsg = load_tool('imsg')
         target = {"ROWID": 1, "guid": "target", "assoc_type": 0,
-                  "date_read": 0, "is_from_me": 1, "orig_guid": None,
+                  "date_read": 0, "is_delivered": 0, "service": "iMessage",
+                  "is_from_me": 1, "orig_guid": None,
                   "style_id": None, "is_audio_message": 0,
                   "balloon_bundle_id": None, "payload_data": None}
         for kind in [2004, 3004]:
@@ -141,6 +142,27 @@ class ReactionReadBoundary(unittest.TestCase):
             self.assertEqual(kept, [target])
             self.assertEqual(extras[1]['activity_ts'], imsg.fmt_ts(810000000000000000))
             self.assertEqual(len(extras[1].get('tapbacks', [])), 1 if kind == 2004 else 0)
+
+
+class DeliveryState(unittest.TestCase):
+    def delivered(self, service, is_delivered=1, is_from_me=1):
+        imsg = load_tool('imsg')
+        row = {"ROWID": 1, "guid": "m", "assoc_type": 0, "date_read": 0,
+               "is_delivered": is_delivered, "service": service, "is_from_me": is_from_me,
+               "orig_guid": None, "style_id": None, "is_audio_message": 0,
+               "balloon_bundle_id": None, "payload_data": None}
+        con = Mock()
+        con.execute.return_value = []
+        with patch.object(imsg, '_has_col', return_value=False), patch.object(imsg, '_chunked_in', return_value=[]):
+            _, extras = imsg.enrich(con, [row], with_names=False)
+        return extras[1].get('delivered', False)
+
+    def test_only_own_imessage_and_rcs_report_delivery(self):
+        self.assertTrue(self.delivered('iMessage'))
+        self.assertTrue(self.delivered('RCS'))
+        self.assertFalse(self.delivered('SMS'))
+        self.assertFalse(self.delivered('iMessage', is_delivered=0))
+        self.assertFalse(self.delivered('iMessage', is_from_me=0))
 
 
 class Actions(unittest.TestCase):
