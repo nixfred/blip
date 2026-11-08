@@ -1230,3 +1230,25 @@ describe("mark all read is not gated on Blip's own unread count", () => {
     expect(view).not.toMatch(/id: markAllBtn\s*visible: root\.unread > 0/);
   });
 });
+
+// #153: Omarchy 4.0.2 ships an OpticalGlyph with no paintedSize. A QML file that
+// assigns an unknown property does not compile, and when BarWidget.qml itself
+// assigned it the whole widget vanished from the bar (Test Drive, 4.0.2). The
+// assignment lives in its own file behind a Loader, with plain text as the fallback.
+describe("the bar glyph survives an Omarchy whose OpticalGlyph has no paintedSize", () => {
+  const optical = readFileSync(new URL("./OpticalBarGlyph.qml", import.meta.url), "utf8");
+
+  test("BarWidget.qml never assigns paintedSize itself", () => {
+    expect(widget).not.toMatch(/^\s*paintedSize\s*:/m);
+  });
+
+  test("the optical glyph is loaded from its own file, and plain text covers its absence", () => {
+    expect(widget).toContain('setSource("OpticalBarGlyph.qml"');
+    expect(widget).toMatch(/visible: !glyphSlot\.optical/);
+    expect(widget).toMatch(/readonly property bool optical: opticalGlyph\.status === Loader\.Ready/);
+  });
+
+  test("the one file that assigns paintedSize scales to the stock bar icon size", () => {
+    expect(optical).toMatch(/^\s*paintedSize\s*:\s*Style\.bar\.iconSize\s*$/m);
+  });
+});

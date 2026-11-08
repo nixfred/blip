@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **The bar glyph is drawn like the stock bar icons (#153, thanks @jmeller).** The speech bubble sat
+  visibly smaller than every other icon in the bar: Blip drew its glyph as plain body-size text, and Nerd
+  Font glyphs carry padding inside the em box, while stock widgets hand their icons to `OpticalGlyph`,
+  which scales the glyph's ink to `Style.bar.iconSize`. Blip now does the same. The iMessage blue when
+  unread, the outline, filled and slashed states and the unread count are unchanged. **Changed in the
+  merge:** on Omarchy 4.0.2 `OpticalGlyph` has no `paintedSize`, and a QML file that assigns an unknown
+  property does not compile, so the PR as written took the whole widget off the bar there (Test Drive
+  on 4.0.2: `Plugin widget nixfred.blip failed: Cannot assign to non-existent property "paintedSize"`).
+  The optical glyph now lives in `OpticalBarGlyph.qml` behind a Loader, with the old plain text as the
+  fallback. On 4.0.2 Blip is back on the bar with the old glyph and one warning in the shell log; with a
+  4.5 `OpticalGlyph` the Loader is Ready and the bindings flow. Three new tests keep the assignment out
+  of `BarWidget.qml`.
+
 - **A green DM stays green when your own failed send is the newest row (#151, thanks @dimagrigorchuk).**
   When a contact moves from iPhone to Android, the Mac keeps the old iMessage chat row in the same
   conversation cluster. One send that went out as iMessage and failed (error 22) became the cluster's

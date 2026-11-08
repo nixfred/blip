@@ -1320,16 +1320,43 @@ BarWidget {
       anchors.centerIn: parent
       spacing: Style.spaceReal(4)
 
-      Text {
+      // Stock bar icons are drawn by OpticalGlyph, which scales the glyph's ink (not
+      // its em box) to Style.bar.iconSize. As plain body-size text the speech bubble
+      // sat visibly smaller than its neighbours, because Nerd Font glyphs carry
+      // padding inside the em (#153, Jason Meller). OpticalGlyph only has paintedSize
+      // from Omarchy 4.5: on 4.0.2 a file that assigns it does not compile, which
+      // took the whole widget off the bar. So the optical glyph is its own file
+      // behind a Loader. Where that file cannot compile the Loader reports Error
+      // (one warning in the shell log) and the plain text below draws the same glyph
+      // at body size, as it did before.
+      Item {
+        id: glyphSlot
         anchors.verticalCenter: parent.verticalCenter
-        // Nerd Font: filled speech bubble when unread, outline when quiet,
-        // slashed when the bridge is down.
-        text: !root.online ? "󰻞" : (root.hasUnread ? "󰭹" : "󰭻")
-        textFormat: Text.PlainText
-        color: root.hasUnread ? root.blipAccent : button.foreground
-        font.family: button.fontFamily
-        font.pixelSize: Style.font.body
-        renderType: Text.NativeRendering
+        readonly property bool optical: opticalGlyph.status === Loader.Ready
+        width: optical ? Style.bar.iconCanvas : plainGlyph.implicitWidth
+        height: optical ? Style.bar.iconCanvas : plainGlyph.implicitHeight
+
+        Loader {
+          id: opticalGlyph
+          anchors.fill: parent
+          Component.onCompleted: setSource("OpticalBarGlyph.qml", {
+            "text": Qt.binding(function() { return root.glyphText }),
+            "fontFamily": Qt.binding(function() { return button.fontFamily }),
+            "fontSize": Qt.binding(function() { return button.fontSize }),
+            "color": Qt.binding(function() { return root.hasUnread ? root.blipAccent : button.foreground })
+          })
+        }
+        Text {
+          id: plainGlyph
+          anchors.verticalCenter: parent.verticalCenter
+          visible: !glyphSlot.optical
+          text: root.glyphText
+          textFormat: Text.PlainText
+          color: root.hasUnread ? root.blipAccent : button.foreground
+          font.family: button.fontFamily
+          font.pixelSize: Style.font.body
+          renderType: Text.NativeRendering
+        }
       }
 
       Text {
@@ -1354,4 +1381,7 @@ BarWidget {
   property alias appearance: blipAppearance
   BlipAppearance { id: blipAppearance; hostWidget: root; themeFont: button.fontFamily }
   readonly property color blipAccent: blipAppearance.accent
+  // Nerd Font: filled speech bubble when unread, outline when quiet, slashed when
+  // the bridge is down.
+  readonly property string glyphText: !root.online ? "󰻞" : (root.hasUnread ? "󰭹" : "󰭻")
 }
