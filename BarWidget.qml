@@ -1320,16 +1320,24 @@ BarWidget {
       anchors.centerIn: parent
       spacing: Style.spaceReal(4)
 
-      Text {
+      // Draw the glyph the way stock bar icons are drawn (WidgetButton →
+      // OpticalGlyph: the ink, not the em box, is scaled to Style.bar.iconSize).
+      // As plain body-size text the speech bubble sat visibly smaller than
+      // its neighbours, because Nerd Font glyphs carry padding inside the em.
+      Item {
         anchors.verticalCenter: parent.verticalCenter
-        // Nerd Font: filled speech bubble when unread, outline when quiet,
-        // slashed when the bridge is down.
-        text: !root.online ? "󰻞" : (root.hasUnread ? "󰭹" : "󰭻")
-        textFormat: Text.PlainText
-        color: root.hasUnread ? root.blipAccent : button.foreground
-        font.family: button.fontFamily
-        font.pixelSize: Style.font.body
-        renderType: Text.NativeRendering
+        width: Style.bar.iconCanvas
+        height: Style.bar.iconCanvas
+        OpticalGlyph {
+          anchors.fill: parent
+          // Nerd Font: filled speech bubble when unread, outline when quiet,
+          // slashed when the bridge is down.
+          text: !root.online ? "󰻞" : (root.hasUnread ? "󰭹" : "󰭻")
+          fontFamily: button.fontFamily
+          fontSize: button.fontSize
+          paintedSize: Style.bar.iconSize
+          color: root.hasUnread ? root.blipAccent : button.foreground
+        }
       }
 
       Text {
