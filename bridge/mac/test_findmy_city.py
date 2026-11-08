@@ -254,7 +254,7 @@ class BoundaryTests(unittest.TestCase):
                     row_reader=lambda **kwargs: [row(age=age)], card_loader=loader,
                     refresher=refresher, now=NOW)
                 self.assertEqual(result["city"], "Boston, MA")
-                refresher.assert_called_once_with(enabled=True)
+                refresher.assert_called_once_with(enabled=True, handle=HANDLE)
                 self.assertEqual(loader.call_count, 2)
         # An unchanged last-known observation retains its old timestamp; the
         # caller displays its age instead of inventing a fresh location.
@@ -293,27 +293,122 @@ class BoundaryTests(unittest.TestCase):
                     refresher=refresh, now=NOW)
                 refresh.assert_not_called()
 
-    def test_paused_refresh_requires_unique_requested_identity_and_revalidates(self):
-        paused = row(age="Paused")
-        refresher = mock.Mock(return_value=[row()])
-        loader = mock.Mock(return_value=[card()])
-        result = city.shared_city(HANDLE, None, enabled=True,
-                                  row_reader=lambda **kwargs: [paused], card_loader=loader,
-                                  refresher=refresher, now=NOW)
-        self.assertEqual(result["city"], "Boston, MA")
-        refresher.assert_called_once_with(enabled=True)
-        self.assertEqual(loader.call_count, 2)
-        for rows, cards in (([row("Other Person", age="Paused")], [card()]),
-                            ([paused, paused], [card()]),
-                            ([paused], [card(), card(phone=OTHER)])):
-            refresh = mock.Mock()
-            self.assertIsNone(city.shared_city(HANDLE, None, enabled=True,
-                              row_reader=lambda **kwargs: rows, card_loader=lambda module: cards,
-                              refresher=refresh, now=NOW)["city"])
-            refresh.assert_not_called()
-        self.assertIsNone(city.shared_city(HANDLE, None, enabled=True,
-                          row_reader=lambda **kwargs: [paused], card_loader=lambda module: [card()],
-                          refresher=lambda **kwargs: [row("Other Person")], now=NOW)["city"])
+    def test_paused_never_refreshes_and_reports_location_unavailable(self):
+        for value in (row(age="Paused"), row(HANDLE, age="Paused")):
+            refresher = mock.Mock()
+            result = city.shared_city(HANDLE, None, enabled=True,
+                row_reader=lambda **kwargs: [value], card_loader=lambda module: [card()],
+                refresher=refresher, now=NOW)
+            self.assertIsNone(result["city"])
+            self.assertEqual(result["reason"], "location-unavailable")
+            refresher.assert_not_called()
+        self.assertFalse(city.needs_refresh(row(age="Paused"), NOW))
+
+    def test_stale_lookups_share_persistent_cooldown_and_keep_passive_age(self):
+        clock = mock.Mock(return_value=1000)
+        runner = mock.Mock(side_effect=lambda argv, **kwargs: SimpleNamespace(
+            returncode=0, stdout='{"previousPid":10,"findmyPid":20}' if argv[-1] == "start" else '{}'))
+        with tempfile.TemporaryDirectory() as directory:
+            def lookup(handle=HANDLE, age="7 min. ago", cards=None):
+                # Recreate the adapter on each request, as separate bridge calls do.
+                def refresh(**kwargs):
+                    return city.foreground_rows(**kwargs, runner=runner, sleeper=lambda seconds: None,
+                        row_reader=lambda **kw: [row(handle, age=age)], reader_factory=FakeAX,
+                        lock_directory=directory, clock=clock)
+                return city.shared_city(handle, None, enabled=True,
+                    row_reader=lambda **kw: [row(handle, age=age)],
+                    card_loader=lambda module: cards or [], refresher=refresh, now=NOW)
+            first = lookup()
+            self.assertEqual(runner.call_count, 2)
+            clock.return_value = 1060
+            self.assertEqual(lookup(), first)
+            self.assertEqual(runner.call_count, 2)
+            # A second handle has its own cooldown, shared by normalized identities.
+            lookup(OTHER)
+            self.assertEqual(runner.call_count, 4)
+            lookup("+1 (555) 010-0001")
+            self.assertEqual(runner.call_count, 4)
+            clock.return_value = 999  # Wall-clock rollback must not bypass it.
+            lookup()
+            self.assertEqual(runner.call_count, 4)
+            clock.return_value = 1899
+            lookup()
+            self.assertEqual(runner.call_count, 4)
+            clock.return_value = 1900
+            lookup()
+            self.assertEqual(runner.call_count, 6)
+            # Cooldown does not retain rows, bypass identity checks or extend age limits.
+            self.assertIsNone(lookup(age="24 hr. ago")["city"])
+            result = city.shared_city(HANDLE, None, enabled=True,
+                row_reader=lambda **kw: [row()], card_loader=lambda module: [card(phone=OTHER)], now=NOW)
+            self.assertEqual(result["reason"], "no-match")
+            state = Path(directory, "findmy-refresh.json")
+            raw = state.read_text()
+            self.assertNotIn(HANDLE, raw)
+            self.assertNotIn("Boston", raw)
+            self.assertNotIn("Rivera", raw)
+            self.assertEqual(state.stat().st_mode & 0o777, 0o600)
+
+    def test_cooldown_is_shared_by_independent_bridge_processes(self):
+        script = """
+import sys
+import findmy_city as city
+with city.refresh_lock(sys.argv[1]):
+    print(city.claim_refresh(sys.argv[2], sys.argv[1], lambda: float(sys.argv[3])))
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            def claim(stamp):
+                return subprocess.run([sys.executable, "-c", script, directory, HANDLE, str(stamp)],
+                    cwd=Path(__file__).parent, capture_output=True, text=True, check=True).stdout.strip()
+            self.assertEqual(claim(1000), "True")
+            self.assertEqual(claim(1060), "False")
+            self.assertEqual(claim(1900), "True")
+
+    def test_failed_focus_attempt_is_throttled_and_lock_contention_never_focuses(self):
+        runner = mock.Mock(side_effect=subprocess.TimeoutExpired("fake", 2))
+        with tempfile.TemporaryDirectory() as directory:
+            kwargs = dict(enabled=True, handle=HANDLE, runner=runner, reader_factory=FakeAX,
+                          lock_directory=directory, clock=lambda: 1000)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                city.foreground_rows(**kwargs)
+            self.assertIsNone(city.foreground_rows(**kwargs))
+            runner.assert_called_once()
+            with city.refresh_lock(directory):
+                with self.assertRaises(BlockingIOError):
+                    city.foreground_rows(**kwargs)
+            runner.assert_called_once()
+
+    def test_cooldown_state_rejects_unsafe_corrupt_and_oversized_files(self):
+        for kind in ("symlink", "hardlink", "public", "corrupt", "oversized", "invalid-stamp"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory, "findmy-refresh.json")
+                target = Path(directory, "target")
+                target.write_text("untouched")
+                if kind == "symlink":
+                    path.symlink_to(target)
+                elif kind == "hardlink":
+                    path.hardlink_to(target)
+                else:
+                    path.write_text({"corrupt": "{", "oversized": "x" * (city.MAX_REFRESH_STATE_BYTES + 1),
+                                     "invalid-stamp": '{"' + "a" * 64 + '":NaN}'}.get(kind, "{}"))
+                    path.chmod(0o644 if kind == "public" else 0o600)
+                runner = mock.Mock()
+                with self.assertRaises(Exception):
+                    city.foreground_rows(enabled=True, handle=HANDLE, runner=runner,
+                        reader_factory=FakeAX, lock_directory=directory, clock=lambda: 1000)
+                runner.assert_not_called()
+                self.assertEqual(target.read_text(), "untouched")
+
+    def test_cooldown_state_is_bounded_and_prunes_expired_handles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, "findmy-refresh.json")
+            entries = {format(i, "064x"): 1000 for i in range(city.MAX_REFRESH_HANDLES)}
+            path.write_text(json.dumps(entries))
+            path.chmod(0o600)
+            with city.refresh_lock(directory):
+                self.assertFalse(city.claim_refresh(HANDLE, directory, lambda: 1001))
+                self.assertTrue(city.claim_refresh(HANDLE, directory, lambda: 1900))
+            self.assertEqual(len(json.loads(path.read_text())), 1)
 
     def test_foreground_restoration_runs_on_success_and_snapshot_failure(self):
         for failed in (False, True):
@@ -322,7 +417,7 @@ class BoundaryTests(unittest.TestCase):
                 SimpleNamespace(returncode=0, stdout='{}')])
             rows = mock.Mock(side_effect=city.Unavailable()) if failed else mock.Mock(return_value=[row()])
             with tempfile.TemporaryDirectory() as directory:
-                kwargs = dict(enabled=True, row_reader=rows, runner=runner, sleeper=mock.Mock(),
+                kwargs = dict(enabled=True, handle=HANDLE, row_reader=rows, runner=runner, sleeper=mock.Mock(),
                               lock_directory=directory, reader_factory=FakeAX)
                 if failed:
                     with self.assertRaises(city.Unavailable):
@@ -334,11 +429,11 @@ class BoundaryTests(unittest.TestCase):
     def test_foreground_untrusted_and_disabled_never_activate(self):
         runner = mock.Mock()
         factory = mock.Mock()
-        self.assertEqual(city.foreground_rows(enabled=False, runner=runner, reader_factory=factory), [])
+        self.assertEqual(city.foreground_rows(enabled=False, handle=HANDLE, runner=runner, reader_factory=factory), [])
         factory.assert_not_called()
         reader = FakeAX()
         reader.ax.AXIsProcessTrusted = lambda: False
-        self.assertEqual(city.foreground_rows(enabled=True, runner=runner,
+        self.assertEqual(city.foreground_rows(enabled=True, handle=HANDLE, runner=runner,
                                               reader_factory=lambda: reader), [])
         runner.assert_not_called()
 
@@ -448,7 +543,7 @@ console.log('PASS');
         for rows, reason in (([], "source-unavailable"), ([row("Other Person")], "no-match"),
                              (["Alex Rivera · No location found"], "location-unavailable")):
             result = city.shared_city(HANDLE, None, enabled=True,
-                row_reader=lambda **kwargs: [row(age="Paused")], card_loader=lambda module: [card()],
+                row_reader=lambda **kwargs: [row(age="7 min. ago")], card_loader=lambda module: [card()],
                 refresher=lambda **kwargs: rows, now=NOW)
             self.assertEqual(result["reason"], reason)
             self.assertIsNone(result["city"])

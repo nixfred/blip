@@ -23,10 +23,13 @@ selected. Accessibility must already be granted to the SSH host process
 (`sshd-keygen-wrapper`), as for optional read pushes. Blip checks the existing
 grant without prompting. It can open Find My in the background, but never
 switches tabs, selects a person, or changes sharing. For an exactly matched
-person whose location is stale or says **Paused**, it briefly brings Find My forward to
+person whose numeric location age is stale, it briefly brings Find My forward to
 refresh, then restores the previous Mac app unless you chose another app in
-the meantime. Enabling `shared_city` opts into this brief focus change. If Find My is opening
-for the first time, let it finish loading; the next refresh will try again.
+the meantime. Each handle can trigger this at most once every 15 minutes,
+including failed attempts. **Paused** rows never change focus and show
+**Location unavailable**, because their observation age is unknown. Enabling
+`shared_city` opts into this brief focus change. If Find My is opening for the
+first time, let it finish loading; a later lookup can try again after the cooldown.
 
 The accessibility layout was verified on macOS 27.2. This first version
 recognizes English distance/age labels and unambiguous `City, ST` places with
@@ -47,8 +50,8 @@ Find My rows, and incomplete lookups are suppressed.
 Blip checks the visible direct conversation once a minute. Each successful
 snapshot expires within five minutes. Location observations up to 24 hours old
 can be shown with their age; older observations are hidden. Stale observations
-trigger a refresh attempt before being displayed, and retain their actual
-observation timestamp. The UI checks expiry and age every second.
+trigger a refresh attempt when the 15-minute cooldown allows it, and retain
+their actual observation timestamp. The UI checks expiry and age every second.
 A failed refresh removes the city; changing conversations
 or closing the surface clears it immediately. Late replies from an earlier
 conversation are discarded, including when returning to that conversation.
@@ -59,6 +62,13 @@ accessibility descriptions remain on the Mac. City data lives in memory;
 there is no history, notification, message read, or message send.
 An empty private `$HOME/.blip/findmy-ui.lock` on the Mac serializes the focus
 refresh across the two surfaces. It contains no location or contact data.
+A private (0600) sibling `findmy-refresh.json` stores at most 256 SHA-256
+handle hashes and last-attempt timestamps, shared across bridge processes.
+These hashes are identifiers, not anonymization. No names, cities, or location
+history are stored. Expired entries are pruned on the next allowed attempt;
+full, corrupt, or unsafe state suppresses foreground refreshes. During a
+cooldown, Blip uses the current passive snapshot with the usual identity and
+24-hour age checks; it never reuses a persisted city.
 
 Disable the feature with `shared_city=off`. Changes take effect on the next
 lookup (within a minute while a conversation is open).

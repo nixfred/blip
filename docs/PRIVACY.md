@@ -13,9 +13,14 @@ city, and observation/expiry timestamps return over SSH. City data stays in
 memory, each snapshot expires within five minutes, and is cleared on a failed refresh,
 conversation change, or close. Blip records no location history or
 screenshots, sends no coordinates to a geocoder, and never opens Messages
-for this lookup. A stale or paused location for the exact sharing contact can briefly
-activate Find My and restore prior Mac focus. An empty private
+for this lookup. A stale numeric location age for the exact sharing contact can briefly
+activate Find My and restore prior Mac focus, at most once per handle every
+15 minutes (including failed attempts). Paused rows never activate Find My. An empty private
 `$HOME/.blip/findmy-ui.lock` serializes that refresh; it contains no user data.
+A private sibling `findmy-refresh.json` holds up to 256 SHA-256 handle hashes
+and last-attempt timestamps. Hashes are identifiers, not anonymization; no
+names, cities, or location history are stored. Expired entries are pruned on
+the next allowed attempt.
 Older observations are labeled with their age and hidden after 24 hours.
 See [shared city setup and limits](SHARED-CITY.md).
 
@@ -89,6 +94,8 @@ screen reader. That shared bus remains enabled when Blip stops.
 | Path | Contains |
 |---|---|
 | `~/.blip/bin/` | the bridge tools (`imsg`, `imsg-send`, `imsg-read`, `imsg-react`, `contacts`, `contact-save`, `tcc-check`, `blip-check`, `blip-dispatch`) |
+| `~/.blip/findmy-ui.lock` | empty shared-city foreground refresh lock |
+| `~/.blip/findmy-refresh.json` (0600) | bounded handle hashes and foreground attempt timestamps; no cities |
 | `~/.blip/contact-save.lock` | empty serialization lock; no message or contact data |
 | `~/.blip/src/` | the installer's copy of the same files |
 | `~/Pictures/.blip-outbox/<id>/` | a file you are sending, for the seconds until Messages copies it into its own store; then moved to `~/.blip/sent` (leftovers older than an hour are swept) |

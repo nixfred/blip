@@ -11,7 +11,9 @@ from contextlib import closing, contextmanager
 import ctypes
 from datetime import datetime, timedelta, timezone
 import fcntl
+import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -27,6 +29,9 @@ MAX_NODES = 4096
 MAX_DEPTH = 24
 MAX_AGE_SECONDS = 300
 MAX_LOCATION_AGE_SECONDS = 24 * 60 * 60
+REFRESH_COOLDOWN_SECONDS = 15 * 60
+MAX_REFRESH_HANDLES = 256
+MAX_REFRESH_STATE_BYTES = 32 * 1024
 AX_TIMEOUT_SECONDS = 4
 _UNSAFE = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
@@ -177,7 +182,7 @@ def select_city(handle: str, rows: list[str], cards: list[dict], now: datetime) 
 
 
 def needs_refresh(description: object, now: datetime) -> bool:
-    """Refresh a recognized city row whose displayed age is stale or paused.
+    """Refresh a recognized city row whose numeric age is stale.
 
     Validate identity text, distance and locality independently from age before
     activating Find My. Unknown labels or unsupported places never trigger it.
@@ -188,8 +193,6 @@ def needs_refresh(description: object, now: datetime) -> bool:
     if len(parts) != 4 or parse_row("·".join(parts[:-1]) + "·Now", now) is None:
         return False
     age = parts[-1].strip()
-    if age == "Paused":
-        return True
     seconds = age_seconds(age)
     return seconds is not None and seconds >= MAX_AGE_SECONDS
 
@@ -414,12 +417,56 @@ def refresh_lock(directory=None):
         os.close(descriptor)
 
 
-def foreground_rows(*, enabled: bool, row_reader=read_rows, runner=subprocess.run,
-                    sleeper=time.sleep, lock_directory=None, reader_factory=AccessibilityReader) -> list[str]:
-    """Refresh a paused target with a brief, explicitly opted-in focus bounce.
+def claim_refresh(handle, directory, clock):
+    """Under refresh_lock, persist a bounded per-handle attempt before focusing.
+
+    Hashes avoid plaintext handles on disk; they are identifiers, not secrets.
+    Corrupt or unsafe state fails closed. Future stamps (clock rollback) keep
+    their cooldown rather than permitting repeated focus changes.
+    """
+    key = hashlib.sha256(normalize_handle(handle).encode("utf-8")).hexdigest()
+    stamp = clock()
+    if type(stamp) not in (int, float) or not math.isfinite(stamp) or stamp < 0:
+        raise Unavailable()
+    path = os.path.join(directory or os.path.expanduser("~/.blip"), "findmy-refresh.json")
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    with os.fdopen(descriptor, "r+", encoding="ascii") as state_file:
+        info = os.fstat(state_file.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_size > MAX_REFRESH_STATE_BYTES):
+            raise Unavailable()
+        raw = state_file.read(MAX_REFRESH_STATE_BYTES + 1)
+        entries = json.loads(raw) if raw else {}
+        if (not isinstance(entries, dict) or len(entries) > MAX_REFRESH_HANDLES
+                or any(not re.fullmatch(r"[0-9a-f]{64}", key)
+                       or type(value) not in (int, float) or not math.isfinite(value) or value < 0
+                       for key, value in entries.items())):
+            raise Unavailable()
+        entries = {key: value for key, value in entries.items()
+                   if stamp - value < REFRESH_COOLDOWN_SECONDS}
+        if key in entries or len(entries) >= MAX_REFRESH_HANDLES:
+            return False
+        entries[key] = stamp
+        encoded = json.dumps(entries, separators=(",", ":"))
+        if len(encoded) > MAX_REFRESH_STATE_BYTES:
+            raise Unavailable()
+        state_file.seek(0)
+        state_file.write(encoded)
+        state_file.truncate()
+        state_file.flush()
+        os.fsync(state_file.fileno())
+        return True
+
+
+def foreground_rows(*, enabled: bool, handle: str, row_reader=read_rows, runner=subprocess.run,
+                    sleeper=time.sleep, lock_directory=None, reader_factory=AccessibilityReader,
+                    clock=time.time) -> list[str] | None:
+    """Refresh a stale target with a brief, explicitly opted-in focus bounce.
 
     AppKit calls require no Apple Events grant and never change Find My's tab.
     Restore only while Find My is still frontmost, including on AX failures.
+    None means cooldown: the caller can keep its passive, revalidated snapshot.
     """
     if not enabled:
         return []
@@ -429,6 +476,8 @@ def foreground_rows(*, enabled: bool, row_reader=read_rows, runner=subprocess.ru
     if not reader.ax.AXIsProcessTrusted():
         return []
     with refresh_lock(lock_directory):
+        if not claim_refresh(handle, lock_directory, clock):
+            return None
         command = ["/usr/bin/osascript", "-l", "JavaScript", "-e", _FOCUS_SCRIPT]
         started = runner(command + ["start"], capture_output=True, text=True, timeout=2)
         if started.returncode != 0 or len(started.stdout or "") > 256:
@@ -477,6 +526,8 @@ def unavailable_reason(target: object, now: datetime) -> str:
         return "location-unavailable"
     if len(parts) != 4 or parse_row("·".join(parts[:-1]) + "·Now", now) is None:
         return "unsupported-location"
+    if parts[-1].strip() == "Paused":
+        return "location-unavailable"
     seconds = age_seconds(parts[-1].strip())
     if seconds is not None and seconds >= MAX_LOCATION_AGE_SECONDS:
         return "observation-too-old"
@@ -499,12 +550,14 @@ def shared_city(handle: object, contacts, *, enabled: bool, row_reader=read_rows
         cards = [] if direct or not rows else card_loader(contacts)
         target = matching_row(canonical, rows, cards)
         if needs_refresh(target, now or datetime.now(timezone.utc)):
-            rows = refresher(enabled=True)
-            if not isinstance(rows, list) or not rows or len(rows) > MAX_ROWS:
-                return result
-            direct = any(_same_handle(row_identity(row), canonical) for row in rows)
-            # Sharing, names, and the address book can change during refresh.
-            cards = [] if direct or not rows else card_loader(contacts)
+            refreshed = refresher(enabled=True, handle=canonical)
+            if refreshed is not None:
+                rows = refreshed
+                if not isinstance(rows, list) or not rows or len(rows) > MAX_ROWS:
+                    return result
+                direct = any(_same_handle(row_identity(row), canonical) for row in rows)
+                # Sharing, names, and the address book can change during refresh.
+                cards = [] if direct or not rows else card_loader(contacts)
         city = select_city(canonical, rows, cards, now or datetime.now(timezone.utc))
         if city:
             result.update(city)
