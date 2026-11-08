@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A green DM stays green when your own failed send is the newest row (#151, thanks @dimagrigorchuk).**
+  When a contact moves from iPhone to Android, the Mac keeps the old iMessage chat row in the same
+  conversation cluster. One send that went out as iMessage and failed (error 22) became the cluster's
+  newest row, so `imsg chats` called the DM iMessage, `mergeChats` let that override the window's SMS
+  answer, and every later send went out as iMessage and failed the same way. The list may now move a
+  green DM onto iMessage only when its newest row is inbound, because our own send proves nothing. It
+  is the mirror of the #97 guard. @ianswope reviewed it and checked the paths on both sides. Verified:
+  791 bun tests pass, the new test fails when the fix line is removed, and `last_from_me` is a field
+  `imsg chats` really emits. Not run: a live send to an Android contact.
+
 - **Hide Alerts works on macOS 27 (#132, #149, thanks @ianswope).** Messages on 27 no longer records a mute in
   `chat.properties`: it keeps it in `com.apple.MobileSMS.CKDNDList` (`CKDNDListKey`, handle → expiry,
   `distantFuture` for "until I turn it back on"). Blip read only the old flag, so a 27 mute was
