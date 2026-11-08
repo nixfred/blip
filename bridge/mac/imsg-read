@@ -486,6 +486,91 @@ ACTIONS = {
 TOGGLES = {"--unmute": "Hide Alerts"}
 # A toggle clicked in the wrong state does the opposite, so these check first.
 CHECK_FIRST = ("--mute", "--unmute")
+# macOS 27 has no Pin or Unpin in the Conversation menu (#132). The sidebar
+# still offers both, as Accessibility custom actions on the SELECTED
+# conversation: a row says "Pin <short name>", a pinned tile says "Unpin".
+SIDEBAR = {"--pin": "Pin", "--unpin": "Unpin"}
+
+# Run with `osascript -l JavaScript`, argv[0] = "Pin" or "Unpin". Talks to the
+# Accessibility API directly: walking the same tree through System Events cost
+# 3 to 27 s (every element is an Apple Event round trip), this costs ~0.4 s.
+# Only the direct children of the sidebar group ("Conversations") are
+# candidates, and only the one Messages reports as selected: a message bubble
+# offers a bare "Pin" of its own, which pins the MESSAGE, and must never match.
+# Prints one word: done, already (the tile/row shows the asked-for state), or
+# none / error followed by a reason.
+SIDEBAR_JS = r"""
+ObjC.import('ApplicationServices');
+ObjC.import('AppKit');
+function attr(el, name) {
+  const ref = Ref();
+  if ($.AXUIElementCopyAttributeValue(el, $(name), ref) !== 0) return null;
+  try { return ObjC.unwrap(ObjC.castRefToObject(ref[0])); } catch (e) { return null; }
+}
+function kids(el) {
+  const ref = Ref();
+  if ($.AXUIElementCopyAttributeValue(el, $('AXChildren'), ref) !== 0) return [];
+  const arr = ObjC.castRefToObject(ref[0]), out = [];
+  for (let i = 0; i < arr.count; i++) out.push(arr.objectAtIndex(i));
+  return out;
+}
+function actions(el) {
+  const ref = Ref(), out = [];
+  if ($.AXUIElementCopyActionNames(el, ref) !== 0) return out;
+  const arr = ObjC.castRefToObject(ref[0]);
+  for (let i = 0; i < arr.count; i++) out.push(ObjC.unwrap(arr.objectAtIndex(i)));
+  return out;
+}
+function run(argv) {
+  const want = argv[0];
+  const apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.MobileSMS');
+  if (apps.count === 0) return 'none Messages is not running';
+  const app = $.AXUIElementCreateApplication(apps.objectAtIndex(0).processIdentifier);
+  const stack = kids(app).filter(k => attr(k, 'AXRole') === 'AXWindow');
+  if (!stack.length) return 'none Messages has no accessible window';
+  let list = null, budget = 5000;
+  while (stack.length && budget-- > 0) {
+    const el = stack.pop();
+    if (attr(el, 'AXDescription') === 'Conversations') { list = el; break; }
+    for (const k of kids(el)) stack.push(k);
+  }
+  if (!list) return 'none the conversation list was not found';
+  const picked = kids(list).filter(k => attr(k, 'AXSelected') === true);
+  if (picked.length !== 1) return 'none ' + picked.length + ' conversations are selected in the sidebar';
+  const el = picked[0];
+  const tile = String(attr(el, 'AXDescription') || '').endsWith(', Pinned');
+  const names = actions(el);
+  const first = n => n.split('\n')[0];
+  const unpin = names.find(n => first(n) === 'Name:Unpin');
+  const pin = names.find(n => first(n).startsWith('Name:Pin '));
+  if (want === 'Pin' && tile && unpin) return 'already';
+  if (want === 'Unpin' && !tile && pin) return 'already';
+  const act = want === 'Pin' ? (!tile && pin) : (tile && unpin);
+  if (!act) return 'none the selected conversation offers no ' + want;
+  const err = $.AXUIElementPerformAction(el, $(act));
+  return err === 0 ? 'done' : 'error AXError ' + err;
+}
+"""
+
+
+def sidebar_action(item: str) -> tuple[bool, str]:
+    """Pin or Unpin the selected conversation through its sidebar entry.
+    Returns (did_it_or_already_so, error). The last thing tried, so a
+    sidebar that offers nothing is an error that says why."""
+    try:
+        r = subprocess.run(["osascript", "-l", "JavaScript", "-e", SIDEBAR_JS, item],
+                           capture_output=True, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return False, "osascript timed out"
+    out = (r.stdout or r.stderr).decode("utf-8", "replace").strip()
+    if r.returncode != 0:
+        return False, out or "the sidebar could not be read"
+    word, _, why = out.partition(" ")
+    if word in ("done", "already"):
+        return True, ""
+    if word == "none":
+        return False, f"{item} is not in the Conversation menu or the sidebar ({why})"
+    return False, why or out
 
 
 def conversation_action(flag: str, handle: str) -> None:
@@ -527,13 +612,19 @@ def conversation_action(flag: str, handle: str) -> None:
             ok, err = click(item)
         if not ok and not err and flag in TOGGLES:
             ok, err = click(TOGGLES[flag])
+        if not ok and not err and flag in SIDEBAR:
+            ok, err = sidebar_action(SIDEBAR[flag])
         if err:
             sys.stderr.write(f"imsg-read: {err}\n")
             sys.exit(1)
         if not ok:
             sys.stderr.write(f"imsg-read: {item!r} was not available\n")
             sys.exit(1)
-        got = settle_flag(lambda: probe(handle), want)
+        # A sidebar pin on macOS 27 reached the pin list 4.4 to 5.5 s after
+        # the action returned (six live round trips, 2026-11-04), past the
+        # default ~3.5 s. The wait ends the moment the record agrees.
+        got = settle_flag(lambda: probe(handle), want,
+                          **({"tries": 30, "pause": 0.5} if flag in SIDEBAR else {}))
     finally:
         # Even a failed click opened the conversation; put its unread back
         # while it is still the selected one, then hand focus back.

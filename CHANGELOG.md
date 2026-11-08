@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Pin and Unpin work on macOS 27 (#132, #150, thanks @ianswope).** Messages on 27 dropped Pin and Unpin from the Conversation
+  menu, so `imsg-read --pin`/`--unpin` found nothing to click. The sidebar still offers both, as
+  Accessibility custom actions on the selected conversation: a row carries `Pin <short name>`, a pinned
+  tile carries a bare `Unpin`, and both work with Messages in the background. After the menu, `imsg-read`
+  now falls back to those actions. It asks only the sidebar list's own entries, and only the one Messages
+  reports as selected, because a message bubble also offers a bare `Pin` (which pins the message). It
+  goes through the Accessibility API from JXA rather than System Events: walking the same tree
+  through System Events took 3 to 27 s, this takes about 0.4 s. The pin list trailed the action by 4.4 to 5.5 s, so a pin waits up
+  to 15 s for it. Verified on a macOS 27.0.1 gateway: six pin/unpin round trips all verified, then the
+  shipped script pinned and unpinned with exit 0, front app unchanged, pins left as they were.
+  Checked again before merging: the JXA is a fixed script whose only argument is `Pin` or `Unpin` from a
+  fixed table, so no message text or handle reaches it; all 20 bridge suites and 794 bun tests pass; and
+  undoing the fallback, the longer pin wait, or the selected-only filter makes Ian's tests fail. The live
+  round trip is Ian's, on 27.0.1; it has not been repeated on a 27.2 gateway.
+  Deploy `bridge/mac/imsg-read` to the Mac (re-run `blip-setup` or `install.sh`).
+
 - **The bar glyph is drawn like the stock bar icons (#153, thanks @jmeller).** The speech bubble sat
   visibly smaller than every other icon in the bar: Blip drew its glyph as plain body-size text, and Nerd
   Font glyphs carry padding inside the em box, while stock widgets hand their icons to `OpticalGlyph`,
