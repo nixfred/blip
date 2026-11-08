@@ -55,7 +55,9 @@ reconstructed on Sunday from memory.
   "paintedSize"`). Folded into the merge: the optical glyph lives in OpticalBarGlyph.qml behind a Loader, with
   the old text as fallback, so 4.0.2 shows Blip as before and 4.5 gets his sizing; three tests keep the
   assignment out of BarWidget.qml. Checked on 4.0.2 (fallback) and with a 4.5 OpticalGlyph overlaid (loaded
-  path). The sizing itself rests on his before/after screenshots on Omarchy 4.5.0 and a check on the gus bar.
+  path). The sizing itself rests on his before/after screenshots on Omarchy 4.5.0: Fred's own bar runs a dev-linked
+  shell whose OpticalGlyph also lacks paintedSize, so on gus the PR as written would have removed Blip from
+  the bar, and with the fallback it looks exactly as before (before and after strips compared 8 Nov).
 - **#150 Pin and Unpin work on macOS 27.** Ian Swope (https://x.com/ianfs). On 27 the Conversation menu has
   neither item; the sidebar offers both as Accessibility custom actions on the selected conversation (`Pin
   <name>` on a row, `Unpin` on a pinned tile). He took Pin on #132 on 4 Nov and wrote it, with six live
@@ -64,7 +66,8 @@ reconstructed on Sunday from memory.
   acts only on the sidebar entry Messages reports as selected. Verified by Larry: all 20 bridge suites and 794
   bun tests pass, and undoing the fallback, the longer wait or the selected-only filter each fails his tests.
   NOT verified: a live Pin on the 27.2 gateway; Larry did not drive Messages on it unasked. This is the last
-  open piece of #132.
+  open piece of #132, which Larry closed 8 Nov with a summary and an invitation to reopen. The new imsg-read
+  is on the gateway Mac (sha256 equals main; parses and starts under its stock Python 3.9.6).
 - **#152 Find My shared cities in conversation headers, NOT merged.** mmdisbrow (github.com/mmdisbrow, no
   name or X on the profile, first PR). Off by default (`shared_city=on`), 1,987 lines, careful about privacy,
   and its tests pass on gus (36 Python, 12 bun, two QML view checks). It scripts Find My on the Mac, and when a
@@ -97,8 +100,8 @@ reconstructed on Sunday from memory.
   Fred: Fileri on #68 (14 PRs: #37 #38 #41 #42 #46 #56 #57 #58 #63 #64 #65 #66 #67 #68), jondkinney on #61 (8 PRs:
   #50 #51 #52 #53 #55 #59 #60 #61), jefehoser on #48 (#40 #48), zachwilke on #43, joshuaswarren on #49.
   One comment per person, each listing what their PRs did, so nobody got 14 notifications.
-- Still waiting on people: #129 (mikev1963, four questions asked 8 Oct, no reply), and an X handle from Dima
-  Grigorchuk (#151). Parked on purpose: #125, #112, #78.
+- Still waiting on people: #129 (mikev1963, four questions asked 8 Oct, checked in again 8 Nov), and an X
+  handle from Dima Grigorchuk (#151). Parked on purpose: #125, #112, #78.
 
 ## 2026-W44 (Mon 26 Oct to Sun 1 Nov): ROLLED INTO W45, no separate post
 
