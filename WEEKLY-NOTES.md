@@ -29,8 +29,47 @@ reconstructed on Sunday from memory.
 
 ### What people said this week (quote with attribution in the post)
 
-- Nothing new from outside since Ian's two notes on #132 on 28 Oct (quoted under W44). Comment sweep
-  of issues and PRs done Wed 4 Nov.
+- **Ian Swope (https://x.com/ianfs) on #132, Wed 4 Nov**, answering the invitation to take Pin: "Fred, I'll
+  take Pin. Next I'll see what a pinned tile exposes through Accessibility." His PR (#150) arrived the same day.
+- **Ian Swope on #151, Thu 5 Nov**, reviewing Dima's fix before Fred had: "This is the mirror of the #97 guard,
+  and the loop it describes is real", then traced the window side, groups and prefer_imessage against it.
+- **Danny Cecil (https://x.com/jefehoser) on #48, Thu 5 Nov**, answering Fred's late thank-you for his two PRs:
+  "I'm happy I could contribute to Blip, it's a terrific app and makes Omarchy much more useful for me."
+- Comment sweeps of issues and PRs: Wed 4 Nov and Sun 8 Nov. Nothing else new from outside.
+
+### Sun 8 Nov: #151, #153 and #150 merged; #152 held
+
+- **#151 a green DM is not turned back to iMessage.** Dima Grigorchuk (github.com/dimagrigorchuk; X: none
+  found 8 Nov, asked on the PR). A contact who moves from iPhone to Android leaves the old iMessage chat row in
+  the same cluster. One send that went out as iMessage and failed (error 22) became the cluster's newest
+  row, so the chat list called the DM iMessage and every later send failed the same way, with no way back.
+  The list may now move a green DM onto iMessage only when the newest row is inbound. Ian Swope reviewed it
+  first. Verified by Larry: 10 lines of code, `last_from_me` is a field `imsg chats` really emits, and the
+  new test fails when the fix line is removed. NOT verified: a live send to an Android contact.
+- **#153 the bar glyph is sized like stock bar icons.** Jason Meller (github.com/terracatta,
+  https://x.com/jmeller, from his GitHub profile; X name matches). The speech bubble sat visibly smaller than
+  every other icon because Nerd Font glyphs carry padding inside the em box; stock widgets scale the glyph's
+  ink instead. Larry found in a Test Drive VM on Omarchy 4.0.2 that the PR as written took Blip OFF the bar
+  there: that release's OpticalGlyph has no paintedSize, and a QML file that assigns an unknown property does
+  not compile (log: `Plugin widget nixfred.blip failed ... Cannot assign to non-existent property
+  "paintedSize"`). Folded into the merge: the optical glyph lives in OpticalBarGlyph.qml behind a Loader, with
+  the old text as fallback, so 4.0.2 shows Blip as before and 4.5 gets his sizing; three tests keep the
+  assignment out of BarWidget.qml. Checked on 4.0.2 (fallback) and with a 4.5 OpticalGlyph overlaid (loaded
+  path). The sizing itself rests on his before/after screenshots on Omarchy 4.5.0 and a check on the gus bar.
+- **#150 Pin and Unpin work on macOS 27.** Ian Swope (https://x.com/ianfs). On 27 the Conversation menu has
+  neither item; the sidebar offers both as Accessibility custom actions on the selected conversation (`Pin
+  <name>` on a row, `Unpin` on a pinned tile). He took Pin on #132 on 4 Nov and wrote it, with six live
+  round trips on his 27.0.1 mini, each verified against the pin list (it trails the action by 4.4 to 5.5 s,
+  so pins now wait up to 15 s). A message bubble also offers a bare `Pin` that pins the MESSAGE, so the code
+  acts only on the sidebar entry Messages reports as selected. Verified by Larry: all 20 bridge suites and 794
+  bun tests pass, and undoing the fallback, the longer wait or the selected-only filter each fails his tests.
+  NOT verified: a live Pin on the 27.2 gateway; Larry did not drive Messages on it unasked. This is the last
+  open piece of #132.
+- **#152 Find My shared cities in conversation headers, NOT merged.** mmdisbrow (github.com/mmdisbrow, no
+  name or X on the profile, first PR). Off by default (`shared_city=on`), 1,987 lines, careful about privacy,
+  and its tests pass on gus (36 Python, 12 bun, two QML view checks). It scripts Find My on the Mac, and when a
+  friend's row is Paused or five minutes old it brings Find My to the front for two seconds, with nothing to
+  limit how often: Blip looks once a minute while the conversation is open. Waiting on Fred's call.
 
 ### Tue 3 Nov: #149 merged
 
@@ -58,8 +97,8 @@ reconstructed on Sunday from memory.
   Fred: Fileri on #68 (14 PRs: #37 #38 #41 #42 #46 #56 #57 #58 #63 #64 #65 #66 #67 #68), jondkinney on #61 (8 PRs:
   #50 #51 #52 #53 #55 #59 #60 #61), jefehoser on #48 (#40 #48), zachwilke on #43, joshuaswarren on #49.
   One comment per person, each listing what their PRs did, so nobody got 14 notifications.
-- Still waiting on people: #129 (mikev1963, four questions asked 8 Oct, no reply). Parked on purpose: #125,
-  #112, #78.
+- Still waiting on people: #129 (mikev1963, four questions asked 8 Oct, no reply), and an X handle from Dima
+  Grigorchuk (#151). Parked on purpose: #125, #112, #78.
 
 ## 2026-W44 (Mon 26 Oct to Sun 1 Nov): ROLLED INTO W45, no separate post
 

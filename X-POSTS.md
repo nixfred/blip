@@ -22,7 +22,7 @@ no pomp, no em dashes. Plain text below the marker; X renders no markdown.
 | 6 | DRAFT 2026-10-28 (was due Sun 18 Oct) | 2026-W42 | Mon 12 Oct to Sun 18 Oct: #140 ssh agent fix (John Zetterman), #141 and #142 (ours) |
 | 7 | DRAFT 2026-10-28 (was due Sun 25 Oct) | 2026-W43 | Mon 19 Oct to Sun 25 Oct: #145, #147, #143, #148, and #146 (merged 28 Oct), incl. quotes |
 | W44 | ROLLED INTO W45 (Larry, 2026-11-04): nothing outside merged after Post 7's PRs, only the #132 half fix | 2026-W44 | notes in WEEKLY-NOTES.md |
-| W45 | OPEN, post due Sun 8 Nov (covers W44 + W45) | 2026-W45 | #149 Hide Alerts on macOS 27 (Ian Swope) and the #132 story from his report to the fix; notes in WEEKLY-NOTES.md |
+| W45 | DRAFT 2026-11-08 (due Sun 8 Nov; covers W44 + W45) | 2026-W45 | #132 half fix, #149 (Ian Swope), #150 (Ian Swope), #151 (Dima Grigorchuk), #153 (Jason Meller); text below, notes in WEEKLY-NOTES.md |
 
 ---
 
@@ -206,3 +206,31 @@ github.com/nixfred/blip
 Handle notes for Fred before posting:
 - edmooredop and Colton Fitzgerald: no X account found, named without @.
 - Mark B's X handle is @_FailSafe, not @Fail_Safe (that is a different person).
+
+## Post W45 (DRAFT, 2026-11-08), W44 + W45
+
+----- paste below this line -----
+
+Blip update for 26 Oct to 8 Nov. Blip puts iMessage on the Omarchy desktop, using a Mac you already own as the gateway.
+
+Ian Swope @ianfs, #132, #149, #150
+He tested my PR on macOS 27 and found what I could not see from Linux. macOS 27 stamps some chats with a year-1 date, the Mac's stock Python refused the whole settings blob, and a muted chat could never be listed as muted: 164 of the 3,309 chats on my gateway before the fix, 0 after, with the muted count unchanged. Then he found where 27 really keeps a mute (a preferences list, not chat.db) and wrote and live-tested that fix too (#149). This week his #150 makes Pin and Unpin work on 27 through the sidebar's own actions: six live round trips, each checked against the pin list. I checked it by undoing each part, and each one fails his tests. Not tested: a live Pin on my own 27.2 gateway.
+
+Dima Grigorchuk (github dimagrigorchuk), #151
+When a contact moves from iPhone to Android, one send that goes out as iMessage and fails becomes the newest row, the chat list then calls the chat iMessage, and every later send fails the same way. Now the list can only move a green chat to iMessage when their message is the newest. Ian reviewed it first. Tested here: the new test fails when the fix is removed. Not tested: a live send to an Android contact.
+
+Jason Meller @jmeller, #153
+The speech bubble in the bar sat smaller than every other icon, because font glyphs carry padding that the stock icons scale around. His change draws it the way stock Omarchy icons are drawn. Trying it in an Omarchy 4.0.2 VM showed it would have taken Blip off the bar on that release, where the icon helper has no size setting, so the merge keeps the old glyph as a fallback: 4.0.2 shows Blip as before, 4.5 gets his sizing.
+
+What people said
+Ian Swope on #132: "I want you to know how much I actually use what you've built: Blip is open on my desk every single day, it's how I do iMessage now, and BurnBar sits in my bar right next to it, also literally daily."
+Danny Cecil @jefehoser on #48: "I'm happy I could contribute to Blip, it's a terrific app and makes Omarchy much more useful for me."
+
+github.com/nixfred/blip
+
+----- end -----
+
+Handle notes for Fred before posting:
+- Dima Grigorchuk: no X account found (GitHub profile empty, @dimagrigorchuk does not exist on X); named without @. I asked him on #151.
+- Jason Meller: @jmeller is on his GitHub profile (twitter_username and social accounts) and the X name matches.
+- Not announced: #152 (Find My city in conversation headers) is open and not merged.

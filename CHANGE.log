@@ -51,6 +51,25 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-11-08  #150 Pin and Unpin work on macOS 27 (the Pin half of #132): when the Conversation menu has neither item, imsg-read
+                 uses the sidebar's own Accessibility actions on the SELECTED conversation (`Pin <name>` on a row, a bare
+                 `Unpin` on a pinned tile), through the AX API from JXA (about 0.4 s, System Events took 3 to 27 s); pins wait
+                 up to 15 s for the pin list, which trails the action by 4.4 to 5.5 s. Ian Swope, github.com/ianswope, X
+                 https://x.com/ianfs: found the sidebar actions with an Accessibility probe (28 Oct), took Pin on #132 (4 Nov),
+                 then wrote it and ran six live pin/unpin round trips on his macOS 27.0.1 mini. Checked by Larry 8 Nov: all 20
+                 bridge suites and 794 bun tests pass, and each of three mutations fails his tests. NOT repeated on the
+                 macOS 27.2 gateway.
+2026-11-08  #153 The bar glyph is sized like stock Omarchy bar icons (OpticalGlyph scales the glyph's ink to Style.bar.iconSize,
+                 so the speech bubble no longer sits smaller than its neighbours). Jason Meller, github.com/terracatta, X
+                 https://x.com/jmeller (GitHub profile twitter_username AND social_accounts; X name matches, 3.4k followers,
+                 checked 2026-11-08). Larry & Fred, github.com/nixfred, X https://x.com/nixfred, found in a Test Drive VM that
+                 the PR as written takes Blip OFF the bar on Omarchy 4.0.2 (OpticalGlyph has no paintedSize there) and folded
+                 in a Loader fallback (OpticalBarGlyph.qml) plus three tests.
+2026-11-08  #151 A green DM is not turned back to iMessage by the chat list: when a contact moves from iPhone to Android, one failed
+                 iMessage send became the newest row, the list called the DM iMessage, and every later send failed the same
+                 way. The list may now move a green DM onto iMessage only when the newest row is inbound (the mirror of the
+                 #97 guard). Dima Grigorchuk, github.com/dimagrigorchuk, X: none found (checked 2026-11-08; asked on the PR).
+                 Reviewed and approved on the PR by Ian Swope, https://x.com/ianfs.
 2026-11-03  #149 Hide Alerts works on macOS 27 (the Hide Alerts half of #132): Messages on 27 keeps a mute in
                  com.apple.MobileSMS.CKDNDList, not in chat.properties, so `imsg chats` now reads that list, `imsg-read`
                  verifies against it through `defaults export` (cfprefsd), and --unmute falls back to 27's single Hide Alerts
