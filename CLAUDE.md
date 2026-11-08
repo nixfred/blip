@@ -371,6 +371,11 @@ what it is handed. Keep it that way.
   offers a bare `Pin` too, and that one pins the MESSAGE. It reads the tree
   through the AX API from JXA; System Events took 3 to 27 s for the same walk.
   The pin list trails the action by ~5 s, so pins settle for up to 15 s.
+  The pid comes from `messages_pid()` (pgrep), never LaunchServices: over ssh on
+  27.2 `NSRunningApplication` and `NSWorkspace` cannot see GUI apps, and JXA
+  returns every `count` as a STRING (compare `Number(count)`, never `=== 0`).
+  OPEN on 27.2: Messages renders only ~15 sidebar rows and `open imessage:` did
+  not bring a far-down chat's row into view, so nothing is `AXSelected` for it.
 - **`chat:null` exists.** Use `chatKey()`; never `String(m.chat)`. A row with
   neither chat nor handle is a leftover of a deleted conversation (iCloud keeps
   the row, the chat and the join are gone); `fetchMessages` drops it

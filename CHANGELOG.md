@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Pin and Unpin on macOS 27.2: the helper now finds Messages, and one limit is still open (#150
+  follow-up, #132 reopened).** Running #150 on a real macOS 27.2 gateway (build 26B5091g) failed with
+  `objectAtIndex: index 0 beyond bounds for empty array`. Over ssh on that build `NSRunningApplication` and
+  `NSWorkspace` list only background apps (25 of them, no Finder, no Messages), so the by-bundle-id lookup
+  came back empty; and JXA hands `count` back as a string, so the `count === 0` guard never fired.
+  `imsg-read` now takes Messages' pid from `pgrep -x -U <uid> Messages` (exactly one process, or it refuses)
+  and hands it to the JXA, which reads Accessibility by pid (that works over ssh), and every `count` goes
+  through `Number()`. Two tests and three mutations pin it. **Still open:** on that gateway Messages renders
+  only 15 sidebar rows, and `open imessage:` did not bring the row of a chat outside them into view (the
+  test chat was 54th of 397), so nothing is `AXSelected` and Pin stops with "0 conversations are selected
+  in the sidebar". No Pin has yet succeeded on a 27.2 gateway; a chat whose row is already rendered has not
+  been tried. The pin list was identical before and after both attempts. Deploy `bridge/mac/imsg-read`.
+
 - **Pin and Unpin work on macOS 27 (#132, #150, thanks @ianswope).** Messages on 27 dropped Pin and Unpin from the Conversation
   menu, so `imsg-read --pin`/`--unpin` found nothing to click. The sidebar still offers both, as
   Accessibility custom actions on the selected conversation: a row carries `Pin <short name>`, a pinned

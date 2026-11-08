@@ -65,9 +65,15 @@ reconstructed on Sunday from memory.
   so pins now wait up to 15 s). A message bubble also offers a bare `Pin` that pins the MESSAGE, so the code
   acts only on the sidebar entry Messages reports as selected. Verified by Larry: all 20 bridge suites and 794
   bun tests pass, and undoing the fallback, the longer wait or the selected-only filter each fails his tests.
-  NOT verified: a live Pin on the 27.2 gateway; Larry did not drive Messages on it unasked. This is the last
-  open piece of #132, which Larry closed 8 Nov with a summary and an invitation to reopen. The new imsg-read
-  is on the gateway Mac (sha256 equals main; parses and starts under its stock Python 3.9.6).
+  THEN THE LIVE TEST ON FRED'S 27.2 GATEWAY (8 Nov, same day, self-thread only, Fred's go) FAILED, twice,
+  and found two separate things. (1) Over ssh on that build NSRunningApplication and NSWorkspace cannot see
+  GUI apps (25 background apps, no Finder, no Messages) and JXA returns `count` as a string, so the helper
+  threw `objectAtIndex: index 0 beyond bounds` instead of finding Messages. Fixed the same day by taking the
+  pid from pgrep (two tests, three mutations). (2) Still open: Messages renders only 15 sidebar rows and
+  `open imessage:` did not bring the test chat's row (54th of 397) into view, so nothing is selected and Pin
+  stops with "0 conversations are selected". The pin list was identical before and after. No Pin has
+  succeeded on a 27.2 gateway yet. #132 was closed earlier that day on Ian's 27.0.1 evidence and is
+  REOPENED. Lesson for the post: a fix is not done until it ran on the machine it is for.
 - **#152 Find My shared cities in conversation headers, NOT merged.** mmdisbrow (github.com/mmdisbrow, no
   name or X on the profile, first PR). Off by default (`shared_city=on`), 1,987 lines, careful about privacy,
   and its tests pass on gus (36 Python, 12 bun, two QML view checks). It scripts Find My on the Mac, and when a

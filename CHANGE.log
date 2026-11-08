@@ -57,8 +57,9 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
                  up to 15 s for the pin list, which trails the action by 4.4 to 5.5 s. Ian Swope, github.com/ianswope, X
                  https://x.com/ianfs: found the sidebar actions with an Accessibility probe (28 Oct), took Pin on #132 (4 Nov),
                  then wrote it and ran six live pin/unpin round trips on his macOS 27.0.1 mini. Checked by Larry 8 Nov: all 20
-                 bridge suites and 794 bun tests pass, and each of three mutations fails his tests. NOT repeated on the
-                 macOS 27.2 gateway.
+                 bridge suites and 794 bun tests pass, and each of three mutations fails his tests. Larry's live run on the
+                 macOS 27.2 gateway (8 Nov) FAILED twice: the helper could not find Messages over ssh (fixed that day), and
+                 a chat outside the 15 rendered sidebar rows has no selected row (open). #132 reopened.
 2026-11-08  #153 The bar glyph is sized like stock Omarchy bar icons (OpticalGlyph scales the glyph's ink to Style.bar.iconSize,
                  so the speech bubble no longer sits smaller than its neighbours). Jason Meller, github.com/terracatta, X
                  https://x.com/jmeller (GitHub profile twitter_username AND social_accounts; X name matches, 3.4k followers,

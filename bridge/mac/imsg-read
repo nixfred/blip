@@ -491,7 +491,7 @@ CHECK_FIRST = ("--mute", "--unmute")
 # conversation: a row says "Pin <short name>", a pinned tile says "Unpin".
 SIDEBAR = {"--pin": "Pin", "--unpin": "Unpin"}
 
-# Run with `osascript -l JavaScript`, argv[0] = "Pin" or "Unpin". Talks to the
+# Run with `osascript -l JavaScript`, argv[0] = "Pin" or "Unpin", argv[1] = Messages' pid. Talks to the
 # Accessibility API directly: walking the same tree through System Events cost
 # 3 to 27 s (every element is an Apple Event round trip), this costs ~0.4 s.
 # Only the direct children of the sidebar group ("Conversations") are
@@ -501,7 +501,6 @@ SIDEBAR = {"--pin": "Pin", "--unpin": "Unpin"}
 # none / error followed by a reason.
 SIDEBAR_JS = r"""
 ObjC.import('ApplicationServices');
-ObjC.import('AppKit');
 function attr(el, name) {
   const ref = Ref();
   if ($.AXUIElementCopyAttributeValue(el, $(name), ref) !== 0) return null;
@@ -511,21 +510,26 @@ function kids(el) {
   const ref = Ref();
   if ($.AXUIElementCopyAttributeValue(el, $('AXChildren'), ref) !== 0) return [];
   const arr = ObjC.castRefToObject(ref[0]), out = [];
-  for (let i = 0; i < arr.count; i++) out.push(arr.objectAtIndex(i));
+  for (let i = 0; i < Number(arr.count); i++) out.push(arr.objectAtIndex(i));
   return out;
 }
 function actions(el) {
   const ref = Ref(), out = [];
   if ($.AXUIElementCopyActionNames(el, ref) !== 0) return out;
   const arr = ObjC.castRefToObject(ref[0]);
-  for (let i = 0; i < arr.count; i++) out.push(ObjC.unwrap(arr.objectAtIndex(i)));
+  for (let i = 0; i < Number(arr.count); i++) out.push(ObjC.unwrap(arr.objectAtIndex(i)));
   return out;
 }
 function run(argv) {
   const want = argv[0];
-  const apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.MobileSMS');
-  if (apps.count === 0) return 'none Messages is not running';
-  const app = $.AXUIElementCreateApplication(apps.objectAtIndex(0).processIdentifier);
+  // argv[1] is Messages' pid, from the process table (messages_pid in Python).
+  // LaunchServices cannot be asked: from an ssh session on macOS 27.2,
+  // NSRunningApplication and NSWorkspace list only background apps, never Finder
+  // or Messages, while Accessibility by pid works. And JXA hands `count` back as
+  // a STRING, so a `=== 0` guard never fires: compare Number(count).
+  const pid = Number(argv[1]);
+  if (!(pid > 0)) return 'none Messages is not running';
+  const app = $.AXUIElementCreateApplication(pid);
   const stack = kids(app).filter(k => attr(k, 'AXRole') === 'AXWindow');
   if (!stack.length) return 'none Messages has no accessible window';
   let list = null, budget = 5000;
@@ -553,12 +557,29 @@ function run(argv) {
 """
 
 
+def messages_pid() -> Optional[int]:
+    """Messages' pid from the process table, or None unless there is exactly
+    one. LaunchServices cannot answer this: over ssh on macOS 27.2,
+    NSRunningApplication and NSWorkspace list only background apps (no Finder,
+    no Messages) although `pgrep` and Accessibility by pid both see it."""
+    try:
+        r = subprocess.run(["/usr/bin/pgrep", "-x", "-U", str(os.getuid()), "Messages"],
+                           capture_output=True, timeout=5)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    pids = r.stdout.decode("ascii", "replace").split()
+    return int(pids[0]) if len(pids) == 1 and pids[0].isdigit() else None
+
+
 def sidebar_action(item: str) -> tuple[bool, str]:
     """Pin or Unpin the selected conversation through its sidebar entry.
     Returns (did_it_or_already_so, error). The last thing tried, so a
     sidebar that offers nothing is an error that says why."""
+    pid = messages_pid()
+    if pid is None:
+        return False, f"{item} needs Messages running as exactly one process, and it is not"
     try:
-        r = subprocess.run(["osascript", "-l", "JavaScript", "-e", SIDEBAR_JS, item],
+        r = subprocess.run(["osascript", "-l", "JavaScript", "-e", SIDEBAR_JS, item, str(pid)],
                            capture_output=True, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
         return False, "osascript timed out"

@@ -539,16 +539,52 @@ class ConversationActions(unittest.TestCase):
 class SidebarAction(unittest.TestCase):
     """sidebar_action() reads one word from the JXA helper; osascript is mocked."""
 
-    def run_js(self, stdout=b"", code=0, stderr=b""):
+    def run_js(self, stdout=b"", code=0, stderr=b"", pid=4242):
         done = subprocess.CompletedProcess([], code, stdout, stderr)
-        with patch.object(read.subprocess, "run", return_value=done) as run:
+        with patch.object(read, "messages_pid", return_value=pid), \
+             patch.object(read.subprocess, "run", return_value=done) as run:
             got = read.sidebar_action("Pin")
-        return got, run.call_args[0][0]
+        return got, (run.call_args[0][0] if run.call_args else None)
 
-    def test_item_rides_argv_after_the_script(self):
+    def test_item_and_the_messages_pid_ride_argv_after_the_script(self):
         _, argv = self.run_js(b"done\n")
         self.assertEqual(argv[:3], ["osascript", "-l", "JavaScript"])
-        self.assertEqual(argv[-1], "Pin")
+        self.assertEqual(argv[-2:], ["Pin", "4242"])
+
+    def test_no_single_messages_process_means_osascript_is_never_run(self):
+        """Found on a real macOS 27.2 gateway (2026-11-08): the helper threw
+        `objectAtIndex: index 0 beyond bounds for empty array` instead of saying
+        Messages could not be found."""
+        (ok, err), argv = self.run_js(b"done\n", pid=None)
+        self.assertFalse(ok)
+        self.assertIn("exactly one process", err)
+        self.assertIsNone(argv)
+
+    def test_messages_pid_wants_exactly_one_process_of_this_user(self):
+        def pid_for(out, **kw):
+            done = subprocess.CompletedProcess([], 0 if out else 1, out, b"")
+            with patch.object(read.subprocess, "run", return_value=done, **kw) as run:
+                return read.messages_pid(), run.call_args[0][0]
+        got, argv = pid_for(b"66696\n")
+        self.assertEqual(got, 66696)
+        self.assertEqual(argv, ["/usr/bin/pgrep", "-x", "-U", str(read.os.getuid()), "Messages"])
+        self.assertIsNone(pid_for(b"")[0])
+        self.assertIsNone(pid_for(b"11 22\n")[0])
+        self.assertIsNone(pid_for(b"not-a-pid\n")[0])
+        with patch.object(read.subprocess, "run", side_effect=subprocess.TimeoutExpired("pgrep", 5)):
+            self.assertIsNone(read.messages_pid())
+
+    def test_the_js_never_asks_launchservices_and_compares_counts_as_numbers(self):
+        """From an ssh session on macOS 27.2 NSRunningApplication and NSWorkspace
+        list only background apps (no Finder, no Messages), and JXA hands every
+        `count` back as a STRING, so `count === 0` can never be true."""
+        # Code only: the comment that explains this names the banned APIs.
+        js = "\n".join(line.split("//")[0] for line in read.SIDEBAR_JS.splitlines())
+        for banned in ("NSRunningApplication", "NSWorkspace", "runningApplications"):
+            self.assertNotIn(banned, js)
+        self.assertIn("Number(argv[1])", js)
+        self.assertNotIn("< arr.count", js)
+        self.assertNotRegex(js, r"\.count\s*===")
 
     def test_done_and_already_are_success(self):
         self.assertEqual(self.run_js(b"done\n")[0], (True, ""))
