@@ -115,6 +115,60 @@ class ReadTests(unittest.TestCase):
              patch.object(read, "osa", return_value=(1, broken)):
             self.assertEqual(read.accessibility(), broken)
 
+    RACE = ('System Events got an error: Can\'t get menu bar 1 of process "Messages". '
+            'Invalid index. (-1719)')
+
+    def test_a_launched_messages_is_waited_for_not_trusted(self):
+        # The launch race (2026-11-09): `open -g -j` puts the process on the
+        # list long before System Events can see its menu bar, and the old
+        # success condition — process exists — let the very next probe answer
+        # -1719. Every first tapback after Messages left lost that race.
+        seq = iter([(1, self.RACE),    # the gate: menus not registered yet
+                    (0, "false"),      # messages_running: not even a process
+                    (1, self.RACE),    # loop: process up, menus still absent
+                    (0, "Messages")])  # loop: driveable — success
+        with patch.object(read, "osa", side_effect=lambda *a: next(seq)), \
+             patch.object(read, "screen_locked", return_value=False), \
+             patch.object(read.subprocess, "run", return_value=CompletedProcess([], 0)) as run:
+            self.assertEqual(read.ensure_messages(), "")
+        self.assertIn(["open", "-g", "-j", "-a", "Messages"],
+                      [c[0][0] for c in run.call_args_list])
+
+    def test_menus_that_never_arrive_are_not_a_success(self):
+        def osa(script):
+            return (1, self.RACE) if "menu bar 1" in script else (0, "true")
+        with patch.object(read, "osa", side_effect=osa), \
+             patch.object(read, "screen_locked", return_value=False), \
+             patch.object(read.subprocess, "run", return_value=CompletedProcess([], 0)):
+            why = read.ensure_messages()
+        self.assertIn("cannot reach its menus", why)
+        self.assertIn("-1719", why)   # the tool's own error travels with it
+
+    def test_lock_and_denial_are_not_this_gate_and_never_wait(self):
+        # Waiting only helps the kind waiting can fix: a lock screen hides
+        # everything until a password, a denial repeats itself. Neither starts
+        # Messages, neither sleeps, and the reason stays with the gate that
+        # always named it — so exit 77 keeps its meaning and 69 stays
+        # "Messages would not start", exactly as before this fix.
+        with patch.object(read, "osa", return_value=(1, self.RACE)), \
+             patch.object(read, "screen_locked", return_value=True), \
+             patch.object(read.subprocess, "run") as run:
+            self.assertEqual(read.ensure_messages(), "")
+            self.assertIn("screen is locked", read.accessibility())
+        self.assertEqual(run.call_args_list, [])
+        with patch.object(read, "osa", return_value=(1, "osascript is not allowed assistive access")), \
+             patch.object(read.subprocess, "run") as run:
+            self.assertEqual(read.ensure_messages(), "")
+            self.assertIn("Accessibility is not granted", read.accessibility())
+        self.assertEqual(run.call_args_list, [])
+
+    def test_already_drivable_messages_answers_one_probe(self):
+        with patch.object(read, "osa", return_value=(0, "Messages")) as probe, \
+             patch.object(read.subprocess, "run") as run:
+            self.assertEqual(read.ensure_messages(), "")
+        self.assertEqual(probe.call_count, 1)
+        self.assertEqual(run.call_args_list, [])
+
     def test_screen_lock_is_read_from_the_console_session(self):
         locked = plistlib.dumps({"IOConsoleUsers": [
             {"kCGSSessionUserNameKey": "me", "kCGSSessionOnConsoleKey": True, "CGSSessionScreenIsLocked": True}]})
