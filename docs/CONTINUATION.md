@@ -37,9 +37,6 @@ in a restricted shell are not a successful validation run.
 Run `scripts/deploy-local` to install a committed HEAD into the live plugin. It
 restarts the shell, so preserve unsent drafts first.
 
-The `nixfred` GitHub account no longer resolves, so nothing here may download
-from it: someone else could register that name. Remaining mentions are credits.
-
 Do not test sends or reactions against other people. Native Mac behavior
 must be distinguished from Linux rendering and synthetic protocol tests.
 
