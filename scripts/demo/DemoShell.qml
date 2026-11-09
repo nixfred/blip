@@ -27,6 +27,8 @@ ShellRoot {
     property bool healthy: true
     property string lastError: ""
     property var draftCache: ({})
+    property var avatarCache: ({})
+    signal tapbackExited(string chat, bool ok)
     // The version, from the same manifest.json the shipped widget reads.
     property string version: ""
     // Clock and date patterns, as BarWidget would supply them (README defaults);
@@ -40,6 +42,7 @@ ShellRoot {
     function markThreadUnread(chat) { }
     function conversationAct(kind, chat) { }
     function showApp() { }
+    function takeTapbackFailure(chat) { return "" }
   }
 
   FileView {

@@ -127,6 +127,11 @@ Linux side. If the Mac is asleep, the widget dims and says so.
 <td width="50%" valign="top">
 
 **Conversation**
+- **Shared city beneath the friend's name** with `shared_city=on`: reads a
+  city from existing Find My sharing and labels older observations with their age.
+  Works in the panel and app. Requires the Mac's
+  People tab and existing Accessibility permission; no location history.
+  See [setup and supported layouts](docs/SHARED-CITY.md).
 - real bubbles — yours blue on the right, theirs grey on the left
 - grouped into runs with one timestamp per run, day dividers, squared "tail" corner
 - sender names above each run in a group

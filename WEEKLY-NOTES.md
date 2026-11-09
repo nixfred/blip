@@ -37,7 +37,7 @@ reconstructed on Sunday from memory.
   "I'm happy I could contribute to Blip, it's a terrific app and makes Omarchy much more useful for me."
 - Comment sweeps of issues and PRs: Wed 4 Nov and Sun 8 Nov. Nothing else new from outside.
 
-### Sun 8 Nov: #151, #153 and #150 merged; #152 held
+### Sun 8 Nov: #151, #153, #150 and #152 merged
 
 - **#151 a green DM is not turned back to iMessage.** Dima Grigorchuk (github.com/dimagrigorchuk; X: none
   found 8 Nov, asked on the PR). A contact who moves from iPhone to Android leaves the old iMessage chat row in
@@ -74,11 +74,15 @@ reconstructed on Sunday from memory.
   stops with "0 conversations are selected". The pin list was identical before and after. No Pin has
   succeeded on a 27.2 gateway yet. #132 was closed earlier that day on Ian's 27.0.1 evidence and is
   REOPENED. Lesson for the post: a fix is not done until it ran on the machine it is for.
-- **#152 Find My shared cities in conversation headers, NOT merged.** mmdisbrow (github.com/mmdisbrow, no
-  name or X on the profile, first PR). Off by default (`shared_city=on`), 1,987 lines, careful about privacy,
-  and its tests pass on gus (36 Python, 12 bun, two QML view checks). It scripts Find My on the Mac, and when a
-  friend's row is Paused or five minutes old it brings Find My to the front for two seconds, with nothing to
-  limit how often: Blip looks once a minute while the conversation is open. Waiting on Fred's call.
+- **#152 a friend's Find My shared city under their name, MERGED late Sun 8 Nov.** Matt (github.com/mmdisbrow,
+  X https://x.com/MattDbrow, which he gave on the PR; first PR). Off by default (`shared_city=on`). The Mac reads
+  Find My's People list through the Accessibility API and sends back only a coarse city and two timestamps;
+  older locations carry their age, over 24 hours are hidden. Larry's one ask on the PR: a stale row brings Find My
+  to the front for two seconds and Blip looks once a minute, so a friend with their phone off would have pulled
+  it forward every minute. He delivered within hours: once per handle per 15 minutes, kept in a private hashed
+  file, failed attempts counted, and Paused rows no longer bounce at all. Verified by Larry: read the whole diff,
+  806 bun tests, 41 Mac-side tests and both QtTest view checks pass, the generated City.mjs equals a fresh build.
+  NOT verified by Larry: the real Find My window (the author reports macOS 27.2).
 
 ### Tue 3 Nov: #149 merged
 

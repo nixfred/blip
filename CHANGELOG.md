@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **A friend's shared city under their name (#152, thanks @mmdisbrow).** With `shared_city=on` in
+  `bridge.conf` (off by default), an open direct conversation shows the city the friend shares with you
+  through Find My, in place of their phone or email, in both the panel and the app. A location older than
+  five minutes carries its age (`Portland, OR · 1 hr ago`), one older than 24 hours is hidden, and a person
+  Find My matches but cannot place shows `Location unavailable`. On the Mac, `contacts` gains a bounded
+  `shared-city` query (new sibling file `findmy_city.py`) that reads Find My's People list through the public
+  Accessibility API, with the grant `imsg-read` already uses. It never prompts, switches tabs, selects a
+  person, decrypts a cache or reads a message. Only the handle, a coarse city and two timestamps cross back to
+  Linux, and the city lives in memory for at most five minutes. Identity is exact: the full phone digits or
+  email, or the exact saved personal Contacts name with every same-name card holding that handle; anything
+  ambiguous shows nothing. **Changed after review:** a stale row brings Find My to the front for two seconds,
+  and Blip looks once a minute, so the first version would have done that every minute for a friend whose
+  phone was off. The author's second round limits it to once per handle per 15 minutes (a private 0600
+  `~/.blip/findmy-refresh.json` on the Mac holding SHA-256 handle hashes and attempt times; failed attempts
+  count; a clock rolled back keeps the cooldown; corrupt or oversized state fails closed), and a Paused row
+  never activates Find My at all. Checked before merging: the whole diff was read; 806 bun tests, the 41
+  Mac-side tests and both QtTest view checks pass on the merged tree; `City.mjs` equals a fresh build of
+  `city-policy.ts`; `.github/workflows/ci.yml` only gains the new test. NOT checked by Larry: the Find My
+  window itself (the author reports macOS 27.2). Deploy: re-run `blip-setup` or `install.sh` on the Mac so
+  `contacts` and `findmy_city.py` land, then add `shared_city=on`; `qs ipc call nixfred.blip citystatus`
+  reports per-surface state with no names, cities or handles.
+
 - **Pin and Unpin on macOS 27.2: the helper now finds Messages, and one limit is still open (#150
   follow-up, #132 reopened).** Running #150 on a real macOS 27.2 gateway (build 26B5091g) failed with
   `objectAtIndex: index 0 beyond bounds for empty array`. Over ssh on that build `NSRunningApplication` and

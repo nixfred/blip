@@ -309,6 +309,19 @@ what it is handed. Keep it that way.
   the process and shared saved state, so closing either view cannot cancel a
   write. Invalid JSON is shown as an error, never silently replaced. No read
   marks, unread counts, bridge calls, or new automation IPC are involved.
+- **Shared city is opt-in, in memory, and rate-limited on the Mac (#152).** `shared_city=on` in
+  bridge.conf (read by `parseSharedCity`, never sourced) makes `SharedCity.qml` run `city.ts` for the visible
+  DIRECT conversation once a minute. `city.ts` calls `contacts --json shared-city` through `shimPath()` with
+  `{handle}` on bounded stdin and returns nothing it cannot validate; `visibleCity` re-checks identity, the
+  five-minute lease and the 24-hour observation limit on every UI tick, and a late reply for another chat or
+  epoch is dropped. City, names and AX text never reach disk on either machine. The one thing the Mac
+  persists is `~/.blip/findmy-refresh.json`: SHA-256 handle hashes with last-attempt times (0600, 256 entries,
+  fails closed). It exists because refreshing a stale row brings Find My to the front for two seconds:
+  **at most once per handle per 15 minutes, failed attempts included, and a Paused row never triggers it.**
+  Nothing can refresh a Paused observation and Blip looks every minute, so without the limit a friend with
+  their phone off would pull Find My forward once a minute for as long as the chat stayed open (found in
+  review of #152; the author added the limit). Do not add another focus-changing path to `findmy_city.py`
+  without the same cooldown, and keep `CityRecord` free of coordinates, names and raw AX descriptions.
 - **Configuration is `bridge.conf` keys, not a settings system.** Blip has one
   config file (`~/.config/blip/bridge.conf`, parsed not sourced) carrying
   `host`, `remote_bin`, `automation`, `ui_font_size`, `ui_font_theme`,

@@ -1238,6 +1238,12 @@ BarWidget {
         + (root.tapbacks ? " tapbacks=on" : "")
         + (root.lastError !== "" ? " error=" + root.lastError : "")
     }
+    function citystatus(): string {
+      return JSON.stringify({
+        panel: panelLoader.item ? panelLoader.item.cityStatus() : null,
+        app: windowLoader.item ? windowLoader.item.cityStatus() : null
+      })
+    }
     function threads(): string { return root.automationOn ? JSON.stringify(root.threads) : root.automationOff }
     function refresh(): void { root.refresh(root.anySurfaceOpen(), false) }
     function read(): string { if (!root.automationOn) return root.automationOff; root.markAllRead(); return "read" }

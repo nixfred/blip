@@ -22,7 +22,7 @@ no pomp, no em dashes. Plain text below the marker; X renders no markdown.
 | 6 | DRAFT 2026-10-28 (was due Sun 18 Oct) | 2026-W42 | Mon 12 Oct to Sun 18 Oct: #140 ssh agent fix (John Zetterman), #141 and #142 (ours) |
 | 7 | DRAFT 2026-10-28 (was due Sun 25 Oct) | 2026-W43 | Mon 19 Oct to Sun 25 Oct: #145, #147, #143, #148, and #146 (merged 28 Oct), incl. quotes |
 | W44 | ROLLED INTO W45 (Larry, 2026-11-04): nothing outside merged after Post 7's PRs, only the #132 half fix | 2026-W44 | notes in WEEKLY-NOTES.md |
-| W45 | DRAFT 2026-11-08 (due Sun 8 Nov; covers W44 + W45) | 2026-W45 | #132 half fix, #149 (Ian Swope), #150 (Ian Swope), #151 (Dima Grigorchuk), #153 (Jason Meller); text below, notes in WEEKLY-NOTES.md |
+| W45 | DRAFT 2026-11-08 (due Sun 8 Nov; covers W44 + W45) | 2026-W45 | #132 half fix, #149 (Ian Swope), #150 (Ian Swope), #151 (Dima Grigorchuk), #152 (Matt), #153 (Jason Meller); text below, notes in WEEKLY-NOTES.md |
 
 ---
 
@@ -222,6 +222,9 @@ When a contact moves from iPhone to Android, one send that goes out as iMessage 
 Jason Meller @jmeller, #153
 The speech bubble in the bar sat smaller than every other icon, because font glyphs carry padding that the stock icons scale around. His change draws it the way stock Omarchy icons are drawn. Trying it in an Omarchy 4.0.2 VM showed it would have taken Blip off the bar on that release, where the icon helper has no size setting, so the merge keeps the old glyph as a fallback: 4.0.2 shows Blip as before, 4.5 gets his sizing.
 
+Matt @MattDbrow, #152, his first PR
+Blip can now show the city a friend shares with you through Find My, under their name (off unless you turn it on). The Mac reads Find My's list and sends back only a coarse city and when it was seen; older locations say how old they are. I asked for one change before merging: refreshing a stale row pulls Find My to the front for two seconds, and Blip looks every minute, so a friend with their phone off would have done that every minute. He sent the fix within hours: once per person per 15 minutes, and a paused friend never triggers it. I read it all and the tests pass here. I have not watched it against the real Find My window yet.
+
 What people said
 Ian Swope on #132: "I want you to know how much I actually use what you've built: Blip is open on my desk every single day, it's how I do iMessage now, and BurnBar sits in my bar right next to it, also literally daily."
 Danny Cecil @jefehoser on #48: "I'm happy I could contribute to Blip, it's a terrific app and makes Omarchy much more useful for me."
@@ -233,4 +236,4 @@ github.com/nixfred/blip
 Handle notes for Fred before posting:
 - Dima Grigorchuk: no X account found (GitHub profile empty, @dimagrigorchuk does not exist on X); named without @. I asked him on #151.
 - Jason Meller: @jmeller is on his GitHub profile (twitter_username and social accounts) and the X name matches.
-- Not announced: #152 (Find My city in conversation headers) is open and not merged.
+- Matt: @MattDbrow is the handle he gave on #152 and `x user` resolves it (name Matthew Disbrow, new account, 0 followers). The #152 paragraph says I have not watched it against the real Find My window; if that changes before you post, update the last sentence.

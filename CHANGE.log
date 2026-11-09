@@ -51,6 +51,15 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-11-08  #152 A friend's Find My shared city shows under their name in the panel and the app (`shared_city=on`, off by
+                 default): `contacts shared-city` on the Mac reads Find My's People list through the Accessibility API and
+                 returns only a coarse city and two timestamps; older locations carry their age, over 24 h are hidden, a
+                 matched person with no location shows "Location unavailable". Matt (GitHub mmdisbrow; X name Matthew
+                 Disbrow), X https://x.com/MattDbrow (he gave it himself on the PR, 8 Nov; `x user` resolves it and the
+                 name matches). First PR. Larry asked for a throttle on 8 Nov (a stale row brings Find My forward for 2 s,
+                 once a minute); he delivered it within hours: once per handle per 15 min in a private hashed 0600 file,
+                 failed attempts counted, and Paused rows never bounce. Checked by Larry 8 Nov: whole diff read, 806 bun
+                 tests, 41 Mac tests and both QtTest view checks pass. Not checked: the real Find My window.
 2026-11-08  #150 Pin and Unpin work on macOS 27 (the Pin half of #132): when the Conversation menu has neither item, imsg-read
                  uses the sidebar's own Accessibility actions on the SELECTED conversation (`Pin <name>` on a row, a bare
                  `Unpin` on a pinned tile), through the AX API from JXA (about 0.4 s, System Events took 3 to 27 s); pins wait
