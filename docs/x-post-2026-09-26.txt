@@ -1,0 +1,49 @@
+Blip 2.6.2 is out. Blip puts iMessage on the Omarchy desktop, using a Mac you already own as the gateway.
+
+Since my last post on 11 Sep: 35 pull requests merged, from 13 people. This is what they did.
+
+@ianfs (Ian Swope), 14 PRs
+The panel froze half-faded on open: 441 to 627 ms of blocked GUI thread, because the list rendered all 300 conversations. It now builds only the rows near the screen. One never-opened unread was making every poll dig 4,798 rows across 6 ssh calls; catch-up now goes to the one chat that needs it. Two monitors gave three toasts per message; now one. No toast for the conversation you have open, or for a message you already read on your phone. A carrier short code like 611 is a DM you can reply STOP to. A copied security code no longer lingers in /proc. Every label renders as plain text. Plus setup, uninstall and doc fixes.
+
+@zachwilke_1 (Zach Wilke), 4 PRs
+Time crosses the bridge as UTC, so read marks survive time zones and the DST hour. GIFs move. A message can carry several files.
+
+@jefehoser (Danny Cecil), 3 PRs
+The app window stays on its workspace after idle. Super+M no longer closes an unrelated window titled Blip. Right-click a message to quote it.
+
+@damonjanis (Damon Janis), 2 PRs
+The unread badge and the thread list can no longer disagree. A read push counts as done only when the Mac confirms it.
+
+@gjouret (Guido Jouret), 2 PRs
+One wheel notch scrolled about 540 px. It now scrolls what your compositor says, plus an opt-in glide.
+
+@jondkinney (Jon Kinney), 2 PRs
+Reading a group in Blip can clear it on your iPhone too, and hands focus back on the Mac. Sending a link no longer pops the share sheet.
+
+@bbishdotdev (Brenden Bishop)
+Security codes are offered beside the field you are typing in.
+
+@badenpiland (Baden)
+prefer_imessage=on keeps a 1:1 blue after one stray RCS message.
+
+@StudioXRadio (Kb2uka)
+Save an unknown sender as a contact, from Linux, through the Mac.
+
+@followbl (Brad Larson)
+Turning your monitor off with the Blip window open crashed Hyprland. Fixed.
+
+joshhattan (github), 2 PRs
+A window you move stays moved, and the popout opens on the monitor you clicked. Code autofill works in Zen and Firefox.
+
+cw228 (github)
+bin_dir= lets the Linux shims live outside ~/bin.
+
+David Reinecke (github dreinecke)
+A source-id seam, so a second message source can plug in later without touching the rest.
+
+From me and Larry: a pinned group whose id changes stays in Favorites, and scroll_gain= for mice that send four notches per click.
+
+Mac side: re-run blip-setup after updating.
+
+https://github.com/nixfred/blip/releases/tag/v2.6.2
+https://github.com/nixfred/blip

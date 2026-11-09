@@ -1,0 +1,308 @@
+BLIP CHANGE.log
+===============
+
+Running log of every change, newest first, with the person who made it.
+This file feeds X-POSTS.md. Every post about Blip is written from here.
+
+RULES FOR THIS FILE (Fred, 2026-09-16, standing)
+  * Every entry names the person: real name from the commit author, GitHub
+    login, and their X account as a link, https://x.com/<handle>.
+  * A handle is written only when it is verified: the person published it
+    (GitHub twitter_username, GitHub social accounts, or their own site), OR
+    the X account's name matches AND its posts tie it to Omarchy/Blip/Fred.
+    Checked with `gh api users/<login>`, `gh api users/<login>/social_accounts`,
+    their site, then `x user @<handle>` and `x timeline @<handle>`.
+  * No verified handle: write "X: none found (checked YYYY-MM-DD)" so the
+    lookup is visibly done, never silently skipped, AND ASK FRED EARLY (Fred,
+    standing, 2026-09-18: "Always pair the X account, ask me early if you cant
+    figure out who they are"). Ask when the gap appears, at merge time, not on
+    the day the post is due. He often knows the person or can ask them.
+  * Add the entry in the SAME change that merges the work.
+
+PEOPLE (verified handles)
+  Jon Kinney        github.com/jondkinney   X https://x.com/jondkinney   (GitHub profile)
+  Zach Wilke        github.com/zachwilke    X https://x.com/zachwilke_1  (his site pinefall.dev)
+  Brenden Bishop    github.com/bbishdotdev  X https://x.com/bbishdotdev  (his site bbish.dev; X name matches)
+  Marshall Huss     github.com/mwhuss       X https://x.com/mwhuss       (X name matches; posts about his Omarchy plugin, replies to @NixFred)
+  Jethro Jones      github.com/jethrojones   X https://x.com/jethrojones  (X name matches; app-building and schools, fits his known work) (confirmed by Fred 2026-09-18)
+  Damon Janis      github.com/damonjanis   X https://x.com/damonjanis    (confirmed by Damon on #120, 2026-10-07)
+  Baden             github.com/badenpiland  X https://x.com/badenpiland  (GitHub profile twitter_username AND social_accounts; X name "Baden"; CORRECTED 2026-09-25: the earlier "github.com/bpiland → @bhp35" line named a GitHub user and an X account that do not exist)
+  Danny Cecil       github.com/jefehoser    X https://x.com/jefehoser    (same unique login on X; posts about Omarchy) (confirmed by Fred 2026-09-16)
+  Ian Swope         github.com/ianswope     X https://x.com/ianfs        (GitHub profile twitter_username AND social_accounts, found 2026-09-25; @ianfs replies to @NixFred about Omarchy. The dormant @IanSwope is NOT him)
+  cjoh              github.com/cjoh         X: none found (checked 2026-09-16)
+  Brad Larson       github.com/followbl     X https://x.com/followbl     (confirmed by Brad himself on #113, 2026-09-26)
+  Guido Jouret      github.com/gjouret      X https://x.com/gjouret      (GitHub profile twitter_username AND social_accounts; X name matches, 1.4k followers, checked 2026-09-25)
+  Kb2uka            github.com/Kb2uka       X https://x.com/StudioXRadio (he said so on #91, 2026-09-18: "@StudioXRadio, tag away")
+  Chad Stovern      github.com/chadhs       X https://x.com/chadstovern  (he said so on #124, 2026-09-30)
+  Greyforge Labs    github.com/GreyforgeLabs X https://x.com/GreyforgeLabs (GitHub profile twitter_username AND social_accounts; X name matches, checked 2026-10-02)
+  Brandon Smith     github.com/bndnsmth     X https://x.com/bndnsmth     (he said so on #134, 2026-10-07)
+  Jared Moody       github.com/jaredmoody   X https://x.com/jaredmoody   (GitHub profile twitter_username AND social_accounts; X handle exists, checked 2026-10-21)
+  Barry Jones       github.com/brightball   X https://x.com/brightball   (linked from his site brightball.com; X name "Barry Jones", 1.3k followers, checked 2026-10-21)
+  John Zetterman    github.com/jzetterman   X https://x.com/jzetterman   (he said so on #140, 2026-10-16; X name matches)
+  edmooredop        github.com/edmooredop   X: none found (checked 2026-10-21; asked Fred)
+  Mark B            github.com/Fail-Safe    X https://x.com/_FailSafe (he said so himself on #148, 2026-10-25; checked 2026-10-28: GitHub profile twitter_username AND social accounts now publish it, `x user @_FailSafe` shows name "Mark B", 78 followers. The earlier @Fail_Safe is "Bob Boberson", NOT him)
+  Colton Fitzgerald github.com/coltonfitzgerald X: none found (checked 2026-10-28: GitHub profile and social accounts empty, coltonfitzgerald.me did not load, @coltonfitzgerald does not resolve on X; asked him on #146 and Fred)
+  Fred Nix          github.com/nixfred      X https://x.com/nixfred
+
+Earlier contributors and their handles: CONTRIBUTORS-X-POST.md.
+
+------------------------------------------------------------------------
+LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
+marker for Post 2 is in the Post 2 draft in X-POSTS.md.
+------------------------------------------------------------------------
+
+2026-11-08  #152 A friend's Find My shared city shows under their name in the panel and the app (`shared_city=on`, off by
+                 default): `contacts shared-city` on the Mac reads Find My's People list through the Accessibility API and
+                 returns only a coarse city and two timestamps; older locations carry their age, over 24 h are hidden, a
+                 matched person with no location shows "Location unavailable". Matt (GitHub mmdisbrow; X name Matthew
+                 Disbrow), X https://x.com/MattDbrow (he gave it himself on the PR, 8 Nov; `x user` resolves it and the
+                 name matches). First PR. Larry asked for a throttle on 8 Nov (a stale row brings Find My forward for 2 s,
+                 once a minute); he delivered it within hours: once per handle per 15 min in a private hashed 0600 file,
+                 failed attempts counted, and Paused rows never bounce. Checked by Larry 8 Nov: whole diff read, 806 bun
+                 tests, 41 Mac tests and both QtTest view checks pass. Not checked: the real Find My window.
+2026-11-08  #150 Pin and Unpin work on macOS 27 (the Pin half of #132): when the Conversation menu has neither item, imsg-read
+                 uses the sidebar's own Accessibility actions on the SELECTED conversation (`Pin <name>` on a row, a bare
+                 `Unpin` on a pinned tile), through the AX API from JXA (about 0.4 s, System Events took 3 to 27 s); pins wait
+                 up to 15 s for the pin list, which trails the action by 4.4 to 5.5 s. Ian Swope, github.com/ianswope, X
+                 https://x.com/ianfs: found the sidebar actions with an Accessibility probe (28 Oct), took Pin on #132 (4 Nov),
+                 then wrote it and ran six live pin/unpin round trips on his macOS 27.0.1 mini. Checked by Larry 8 Nov: all 20
+                 bridge suites and 794 bun tests pass, and each of three mutations fails his tests. Larry's live run on the
+                 macOS 27.2 gateway (8 Nov) FAILED twice: the helper could not find Messages over ssh (fixed that day), and
+                 a chat outside the 15 rendered sidebar rows has no selected row (open). #132 reopened.
+2026-11-08  #153 The bar glyph is sized like stock Omarchy bar icons (OpticalGlyph scales the glyph's ink to Style.bar.iconSize,
+                 so the speech bubble no longer sits smaller than its neighbours). Jason Meller, github.com/terracatta, X
+                 https://x.com/jmeller (GitHub profile twitter_username AND social_accounts; X name matches, 3.4k followers,
+                 checked 2026-11-08). Larry & Fred, github.com/nixfred, X https://x.com/nixfred, found in a Test Drive VM that
+                 the PR as written takes Blip OFF the bar on Omarchy 4.0.2 (OpticalGlyph has no paintedSize there) and folded
+                 in a Loader fallback (OpticalBarGlyph.qml) plus three tests.
+2026-11-08  #151 A green DM is not turned back to iMessage by the chat list: when a contact moves from iPhone to Android, one failed
+                 iMessage send became the newest row, the list called the DM iMessage, and every later send failed the same
+                 way. The list may now move a green DM onto iMessage only when the newest row is inbound (the mirror of the
+                 #97 guard). Dima Grigorchuk, github.com/dimagrigorchuk, X: none found (checked 2026-11-08; asked on the PR).
+                 Reviewed and approved on the PR by Ian Swope, https://x.com/ianfs.
+2026-11-03  #149 Hide Alerts works on macOS 27 (the Hide Alerts half of #132): Messages on 27 keeps a mute in
+                 com.apple.MobileSMS.CKDNDList, not in chat.properties, so `imsg chats` now reads that list, `imsg-read`
+                 verifies against it through `defaults export` (cfprefsd), and --unmute falls back to 27's single Hide Alerts
+                 toggle after reading the state first (already in place is success, unknown clicks nothing). Pin on 27 is
+                 still open on #132. Ian Swope, github.com/ianswope, X https://x.com/ianfs: found where 27 stores the mute
+                 with an Accessibility round trip on his macOS 27.0.1 mini (28 Oct), then wrote and live-tested the fix.
+                 Merged by Fred 3 Nov. Checked by Larry 4 Nov after the merge: 790 bun tests and the bridge suites pass,
+                 and the gateway Mac's imsg, imsg-read and read_state.py are byte-identical to main.
+2026-10-28  #132 (half fixed, issue stays open) Hide Alerts is readable again on chats macOS 27 stamps with a year-1 date: out-of-range
+                 dates in a chat.properties binary plist are clamped in place before plistlib reads it, so alerts_flag() no
+                 longer answers "unknown" (164 of 3,309 chat rows on a real macOS 27.2 gateway before, 0 after, muted count
+                 unchanged). Reported and diagnosed by Ian Swope, github.com/ianswope, X https://x.com/ianfs. Fixed by
+                 Larry & Fred, github.com/nixfred, X https://x.com/nixfred. Still open: Pin missing from the Conversation
+                 menu on macOS 27, and Hide Alerts, which a live round trip on macOS 27.2 showed is clicked but does
+                 not mute (no flag written, menu still reads Hide Alerts); self-thread only, state restored.
+2026-10-28  #146 Right-click a photo in a conversation: Open, Copy image, Save image... (media and PDF chips get Open and Save...).
+                 Save fetches the full original, offers the cached bytes' extension (HEIC as .jpg), writes 0600 and never
+                 replaces a file (name (2).ext). Colton Fitzgerald, github.com/coltonfitzgerald, X: none found (checked
+                 2026-10-28; asked on the PR). Finished in the merge by Larry & Fred, github.com/nixfred, X https://x.com/nixfred:
+                 changelog conflict, bidi characters as escapes, one new test, a VM screenshot.
+2026-10-24  #148 Allow or stop Blip toast notifications from a conversation's menu (right-click a row or pinned avatar, or the thread header's
+                 ... button); edits the existing allowlist.json atomically, direct chats only. Mark B, github.com/Fail-Safe,
+                 X https://x.com/_FailSafe (he gave it on the PR 2026-10-25; @Fail_Safe on X is a different person)
+2026-10-21  #143 Security-code toasts fire for alphanumeric sender IDs (msverify, Google, HSBC): the code gate no longer reads a
+                 sender whose chat is its own handle as a group; sending is unchanged. Reported by edmooredop, github.com/edmooredop,
+                 X: none found (checked 2026-10-21). Fixed by Larry & Fred, github.com/nixfred, X https://x.com/nixfred
+2026-10-21  #145 blip-setup finishes on a Mac whose login shell is fish (the SSH_CONNECTION read no longer uses bash-only syntax);
+                 fixes #144. Reporter and fixer: Jared Moody, github.com/jaredmoody, X https://x.com/jaredmoody
+2026-10-21  #147 Test: a unified SMS chat row cannot turn an iMessage DM green (locks the #97 guard for the SMS-stored row).
+                 Barry Jones, github.com/brightball, X https://x.com/brightball
+2026-10-15  #142 Mark all read works while Blip says ALL CAUGHT UP, so it can still clear the iPhone (the button and the a key were gated
+                 on Blip's own unread count). Larry & Fred, github.com/nixfred, X https://x.com/nixfred
+2026-10-15  #140 A host's ssh agent can no longer defeat the confined key (IdentityAgent=none on every dedicated-key ssh call);
+                 blip-setup catches a bun the bar cannot see. John Zetterman, github.com/jzetterman, X https://x.com/jzetterman
+2026-10-12  #141 Seven fixes from a whole-project review: a muted chat stays out of the badge when its rows leave the window,
+                 old codes and already-read links are not offered after a long sleep, a repeated "ok" is not resolved by the earlier
+                 one, file names with a tab or newline reach the Mac intact, blip-setup stops cleanly with no terminal, and a toast
+                 click on a phone-number chat opens it. Larry & Fred, github.com/nixfred, X https://x.com/nixfred
+2026-10-07  #139 A tapback failure is shown even if Blip closed while it ran (the run lives in the bar widget); on macOS 27 an
+                 older message is refused before Messages comes forward. Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-10-07  #138 Tapbacks work on a macOS 27 gateway: consent asked of macOS without a prompt (no TCC.db there), the
+                 Tapback Picker on the newest message, label-checked before any press. Ian Swope, github.com/ianswope,
+                 X https://x.com/ianfs
+2026-10-07  #137 notified always answers 'opened', so its reply no longer reveals whether a chat is unread.
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-10-07  #136 Clicking a message notification opens its conversation, with automation=off too (new scoped IPC 'notified').
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-10-07  #135 The documented deploy line copies icons/, so the conversation menu has its icons. Ian Swope,
+                 github.com/ianswope, X https://x.com/ianfs
+2026-10-06  #134 The sidebar keeps the open conversation selected in split view, independent of hover and the keyboard cursor.
+                 Brandon Smith, github.com/bndnsmth, X https://x.com/bndnsmth
+2026-10-06  #133 A read push survives a locked Mac (per-chat intents never dropped) and imsg-read says the screen is locked;
+                 read-sync tests isolated from a running blip-bridged. Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-10-04  #131 imsg-send waits 150 s for the Automation prompt (was 15 s). Cherry-picked; Windows tray declined for this repo.
+                 David Benedic, github.com/daveyb, X: none published (asked on the PR)
+2026-10-04  #83 blip-bridged keeps the Mac channel warm: 18 ms vs 166 ms per query on gus, self-heals in 30 s.
+                 Zach Wilke, github.com/zachwilke, X https://x.com/zachwilke_1
+2026-10-04  #122 Pin and Hide Alerts in the conversation menu, verified on the Mac. Damon Janis, github.com/damonjanis,
+                 X https://x.com/damonjanis
+2026-10-04  #127 imsg-react never presses in the pass that scrolled (wrong-message tapback fix). Erik Fillipsveen,
+                 github.com/Fileri, X: none found
+2026-10-04  #128 A monitor that sleeps off DisplayPort no longer crashes Hyprland a second way. With every output gone,
+                 Hyprland reports its workspaces with no monitor, and moving the Blip window home onto one of them
+                 segfaulted Hyprland 0.56 (null monitor in moveWindowToWorkspace, reproduced in a nested Hyprland).
+                 The return move now runs only while a real output exists and the target workspace sits on one; when
+                 the monitor comes back the window goes home as before. 716 tests, door two-way. Brad Larson,
+                 github.com/followbl, X https://x.com/followbl (his second: #113 guarded the map, this guards the move)
+2026-10-02  #126 Search keeps sender-aware self echoes: your "yes" and another group member's "yes" in the same second are two
+                 hits again, and a note to yourself is attributed to you whichever copy the Mac returns first. Search now
+                 reuses dedupeSelfEcho. Our follow-up feeds outgoing rows first, so a self-thread message iCloud re-synced
+                 as 3 or 4 incoming copies is one hit (query "test" on Fred's Mac: 340 hits before, 286 with the PR, 196
+                 with the follow-up; every other conversation unchanged). Greyforge Labs, github.com/GreyforgeLabs,
+                 X https://x.com/GreyforgeLabs (first Blip PR)
+2026-10-02  #116 #117 Outbound tapbacks from Linux, behind tapbacks=on (closes #69): pick one of six in the message menu,
+                 the Mac performs it on the exact bubble through Accessibility and chat.db confirms it. Groups refused, no
+                 new consent prompt. Our 1fbc737 fixed a later-day same-time twin taking the reaction. Erik Fillipsveen,
+                 github.com/Fileri, X: none found
+2026-10-02  #121 Mark as Unread / Mark as Read in the conversation menu (right-click, or U). DMs go to the Mac through
+                 Messages' own menu item and count only when chat.db agrees; groups stay local. Deployed gus, vic, fnix bridge.
+                 Damon Janis, github.com/damonjanis, X https://x.com/damonjanis
+2026-10-02  #120 Read state syncs through a durable, verified queue: every read is saved before any Mac call, retried with
+                 backoff, and retired only when chat.db confirms it; replaces #103. Merged 10-01 (Fred's OK), deployed 10-02
+                 with the new Mac bridge (read_state.py). Watcher-alive poll restored to 60 s; snapshot cost and blocking
+                 Mac calls tracked in #125. Damon Janis, github.com/damonjanis, X https://x.com/damonjanis
+2026-09-30  #124 blip-setup no longer drops every 2, 7 and x from bridge.conf values (tr has no \xHH escape, so host=you@192.168.x
+                 came back as 19.168.x and was written back broken). Chad Stovern, github.com/chadhs, X https://x.com/chadstovern
+                 (he said so on the PR)
+2026-09-30  #123 Up/Down/Home/End in the compose field keep the selected history bubble (closes #118). Erik Fillipsveen,
+                 github.com/Fileri, X: none found
+2026-09-30  #119 CLAUDE.md contact-review bullet reads as one sentence again. Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-30  (direct)  CI green again: imsg_test.py's fixture lacked the uti column a131ae5 reads; main was red 26-30 Sep.
+                 Fred Nix / Larry, X https://x.com/nixfred
+2026-09-29  (direct)  Code autofill no longer crashes when the accessibility bus is unreachable. libatspi aborts the helper
+                 (SIGABRT, 10 cores on gus in one day) if it cannot connect, so otp-desktop.py now probes the bus first,
+                 with backoff for 30 s, and exits 75 instead. OtpAutofill.qml respawns a dead helper (5 s doubling to
+                 60 s), so autofill comes back without a shell restart. Fred Nix / Larry, X https://x.com/nixfred
+2026-09-27  (direct)  Install tested end to end on a fresh exe.dev Omarchy VM against the real Mac. blip-setup no longer
+                 exits 1 at the very end of a scripted run (the smoke test's ssh ate the queued answers), no longer needs
+                 `hostname`, prints only the packages you are missing and flags ffmpeg/mpv for voice messages. README step 1
+                 gains --yes. Fred Nix / Larry, X https://x.com/nixfred
+2026-09-26  (direct)  A re-keyed group's pin stays in Favorites: the Mac's pinning plist kept LMT under iCloud group ids
+                 that match no chat row any more, so Blip dropped it while the phone still showed it pinned. imsg now
+                 resolves pin ids through chat.db's chat_lookup (iMessageGroupID), the table Messages itself uses.
+                 gus and vic both show all 9 pins in the phone's order. Fred Nix / Larry, X https://x.com/nixfred
+2026-09-25  #115 Opt-in glide for mouse-wheel notches: smooth_scroll=on in bridge.conf animates a notch 180 ms OutCubic,
+                 retargeted (a notch mid-glide moves the target, never restarts the easing), cancelled by any other contentY
+                 write; touchpads never animate. The PR shipped it ON by default behind a shell.json setting and rewrote the
+                 "never animate wheel scroll" invariant; Fred chose opt-in, default OFF, bridge.conf key: the invariant came from
+                 his MX Master, whose one click is four notches, and Guido tested on a plain wheel plus an offscreen harness
+                 only. Default flips on Fred's hand, not on a harness. Merged with the change, 632 tests, deployed key-absent.
+                 Guido Jouret, github.com/gjouret, X https://x.com/gjouret
+2026-09-25  (direct)  scroll_gain= and touchpad_scroll_gain= in bridge.conf (0.05-10, default 1, re-read on save, shown by
+                 `status`). One physical click of an MX Master 4 is FOUR notches (raw evdev: bursts of 4,4,4,3 in 0.13 s), so
+                 even at Guido's 1:1 one click was 480 px in a 609 px window; gus and vic run 0.25 (~120 px per click).
+                 FOUND WHILE VERIFYING: the #113 deploy on 23 Sep left nixfred.blip.bak-113-<ts> inside
+                 ~/.config/omarchy/plugins/ on both hosts; PluginRegistry scans plugins/* in glob order and the last manifest
+                 id wins, so the pre-#113 backup was what actually ran on gus AND vic until today, through three deploys
+                 that reported healthy=true. #113 and #114 are live as of 25 Sep. Backups now go to
+                 ~/.local/state/omarchy/plugin-backups/. Fred judged 0.25 by hand the same evening: keeper.
+                 Fred Nix / Larry, X https://x.com/nixfred
+2026-09-25  #114 One wheel notch scrolls one notch. The conversation and the thread list multiplied every wheel event by 4.5
+                 (a standard notch, angleDelta 120, moved about 540 px) and touchpad deltas by 3, on top of the scroll factor
+                 Hyprland had already applied, so Blip alone scrolled 4.5x faster than every other app. Both handlers now
+                 apply the delta 1:1 through two BlipView properties (wheelMultiplier, touchpadMultiplier, default 1.0). The
+                 4.5 dated from the 1.3.4 fix and was never measured against another app. Fred chose 1:1 and judges by hand;
+                 a bridge.conf key is the next step if it is too slow. On gus the MX Master 4 goes 540 -> 120 px per notch and
+                 the Elan touchpad (scroll_factor 0.4) 1.2 -> 0.4 px per px. Not verified by hand: touchpad feel (he has none).
+                 Guido Jouret, github.com/gjouret, X https://x.com/gjouret
+2026-09-23  #113 Turning the only monitor off with the Blip window open no longer crashes Hyprland. Qt swaps the lost output
+                 for a nameless 0x0 placeholder screen, Omarchy builds a bar on it, and Blip's widget there crowned itself
+                 leader and mapped the app window with no output, a null dereference in Hyprland 0.56.2's floating layout.
+                 The leader rule now lives in screen-leader.ts and nobody leads while no real screen exists. Verified in
+                 Test Drive with an instrumented build: the placeholder is ["",0,0] and got leader=false; the segfault itself
+                 was not reproducible there because Hyprland stands up a FALLBACK output in the same event.
+                 Brad Larson, github.com/followbl, X https://x.com/followbl
+2026-09-22  #111 CLAUDE.md's deploy recipe copies otp-desktop.py and names all five shims, including contact-save. Following the old one
+                 had left vic's autofill helper at 2.5.0 and contact-save missing on gus and vic; both fixed with the merge.
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-20  (direct)  Follower bars forward to the shell that is ACTUALLY running (Quickshell.shellDir), not the hardcoded
+                 /usr/share/omarchy/shell. Under `omarchy dev link` every forward exited 255 "No running instances" while the
+                 shell's summon still reported ok, so a second monitor's icon and hotkey did nothing, silently. Found verifying #109.
+                 Fred Nix / Larry, X https://x.com/nixfred
+2026-09-19  #109 Manual window moves stick, and the popout opens on the screen whose icon you clicked: the window's 0x-prefixed
+                 address never matched Hyprland's bare-hex event, so every deliberate move was undone as a stray remap; and a
+                 follower bar's click now carries its screen (toggleon/openon) so the panel re-anchors there, including SUPER+CTRL+<n>.
+                 joshhattan, github.com/joshhattan, X: none found (checked 2026-09-19, asked on the PR)
+2026-09-19  #110 The security code fills in Zen and Firefox: Gecko reports success from set_text_contents and writes nothing, so the
+                 helper re-reads the field and types the code through the same Hyprland key path Chromium already uses.
+                 joshhattan, github.com/joshhattan, X: none found (checked 2026-09-19, asked on the PR)
+2026-09-19  1b148f8  The app window opens where you are: only a deliberate move claims a home workspace, and a home that no longer
+                 exists is ignored instead of recreated (Super+M flew the window away under plonk).
+                 Fred Nix / Larry, X https://x.com/nixfred
+2026-09-18  #108 A read push counts the whole conversation cluster, not one chat row (fixes #107): an unread on an alias silently never pushed.
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-18  #91  Save a NEW contact to the Mac from a conversation: create-only, confirmed, duplicate-refusing, verified by read-back.
+                 Kb2uka, github.com/Kb2uka, X https://x.com/StudioXRadio
+2026-09-18  #106 A group read in Blip clears it on the Mac too, through Messages' imessage:open?groupid= deep link.
+                 Jon Kinney, github.com/jondkinney, X https://x.com/jondkinney
+2026-09-18  #105 Per-conversation spawns route through a source-id seam; stock Blip still resolves to the one Mac bridge (closes #70).
+                 David Reinecke, github.com/dreinecke, X: none found (checked 2026-09-18)
+2026-09-18  #104 One Linux-shim line in the shape diagram, listing all four shims.
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-18  4134bbf  Exact-card details and vCard export honour bin_dir; the guard test that missed it is widened.
+                 Found by Kb2uka, github.com/Kb2uka, X https://x.com/StudioXRadio. Fixed by Fred Nix / Larry, X https://x.com/nixfred
+2026-09-17  #96  prefer_imessage=on keeps a mixed 1:1 on iMessage instead of going green after one RCS inbound. Opt-in, off by default.
+                 Baden, github.com/badenpiland, X https://x.com/badenpiland
+2026-09-17  #101 A read dot no longer returns while the badge says zero: the poll no-op check follows the model, not a stale cache.
+                 Damon Janis, github.com/damonjanis, X https://x.com/damonjanis
+2026-09-17  #102 A read push is reported done only when the Mac's unread count reaches zero; partial or unverifiable is now a failure.
+                 Damon Janis, github.com/damonjanis, X https://x.com/damonjanis
+2026-09-17  #98  One never-opened unread no longer slows every poll: per-chat catch-up, measured 1.8 s to 0.63 s here.
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-17  #99  CLAUDE.md records rank-then-size for contact sources, matching b5cafc2.
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-16  (direct)  Blip's Mac-side fixes upstreamed as claude-on-mac v2.0.0; contact names rank the owner's book first, then the
+                 largest source within a rank (reconciles claude-on-mac #5). tcc-check says 2 minutes, not 60s.
+                 Fred Nix / Larry, X https://x.com/nixfred
+2026-09-16  (direct)  A waiting Send Later message shows "Scheduled for <time>", not sent; never the newest
+                 message, never moves a read mark. Found checking fnix after its macOS 27 upgrade.
+                 Fred Nix / Larry, X https://x.com/nixfred
+2026-09-16  #92  Offer a security code beside the focused field (opt-in, otp_autofill=on).
+                 AT-SPI insert on click, digit boxes included; code never on argv, clipboard or disk.
+                 Brenden Bishop, github.com/bbishdotdev, X https://x.com/bbishdotdev
+2026-09-16  #94  Right-click a message: Quote and reply, Copy message; a link: Open, Copy, Share.
+                 Danny Cecil, github.com/jefehoser, X https://x.com/jefehoser
+2026-09-16  #93  Super+M only ever touches the real Blip window (exact title, not a prefix).
+                 Danny Cecil, github.com/jefehoser, X https://x.com/jefehoser
+2026-09-16  #95  A message already read on another device never toasts on wake (fixes #89).
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+                 Reported by Marshall Huss, github.com/mwhuss, X https://x.com/mwhuss
+2026-09-15  #80  Timestamps cross the bridge as UTC; local time is display only (fixes #86).
+                 Zach Wilke, github.com/zachwilke, X https://x.com/zachwilke_1
+                 Reported by cjoh, github.com/cjoh, X: none found
+2026-09-15  #82  A message carries every dropped or pasted file, caption on the first, capped at ten.
+                 Zach Wilke, github.com/zachwilke, X https://x.com/zachwilke_1
+2026-09-15  #81  Animated GIFs arrive as their own bytes and animate.
+                 Zach Wilke, github.com/zachwilke, X https://x.com/zachwilke_1
+2026-09-15  #87  The app window stays on its workspace after idle.
+                 Danny Cecil, github.com/jefehoser, X https://x.com/jefehoser
+2026-09-15  #88  Conversation list builds only rows near the viewport; panel fade no longer freezes (441-627 ms stalls measured).
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-15  #85  Docked to extra monitors, follower bars stop firing one toast per screen.
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-15  #76  No toast for the conversation you already have open.
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-15  #75  A 3-4 digit carrier short code (611, 2536) is a DM you can reply STOP to, not a group.
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-15  #84  Docs: outbound tapbacks are half possible on macOS 26, not impossible.
+                 Zach Wilke, github.com/zachwilke, X https://x.com/zachwilke_1
+2026-09-15  #77  README allowlist and mutelist examples now parse as strict JSON.
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-15  481e555  blip-setup copies only regular files to the Mac, so __pycache__ cannot abort it.
+                 Fred Nix / Larry, X https://x.com/nixfred
+2026-09-13  2.5.0 released.
+2026-09-13  4bad82d  Contact photos stop reloading on every window open (one batch, host cache; ~45 s to instant).
+                 Fred Nix / Larry, X https://x.com/nixfred
+2026-09-13  #54  Sending a link no longer opens the share sheet.
+                 Jon Kinney, github.com/jondkinney, X https://x.com/jondkinney
+2026-09-13  #71  blip-setup passes ssh -n, so its Enter prompts no longer hit EOF.
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-13  #74  README says how to remove Blip and what it leaves behind.
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-13  #72  Every Text sink declares PlainText, so none can fall back to rich text.
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs
+2026-09-13  #73  A copied security code reaches wl-copy on stdin, not the environment (/proc leak).
+                 Ian Swope, github.com/ianswope, X https://x.com/ianfs

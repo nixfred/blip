@@ -1,0 +1,47 @@
+# Door floor for scripts/slopbrake/door_classify.py (Slopbrake rule G2), tuned for blip.
+# A change matching any rule is a one-way door: Fred reads the diff before merge.
+# Globs are gitignore-style; content_patterns are regexes matched against added lines.
+
+one_way:
+  # the Mac bridge: reads chat.db, sends real iMessages, runs on fnix
+  - "bridge/**"
+  - "scripts/sync-bridge.sh"
+  - "scripts/blip-setup"
+  # outbound: anything that sends a message or a file under Fred's name
+  - "send-file.ts"
+  - "SendState.mjs"
+  - "send-state.ts"
+  # one-time codes read from messages and typed into other apps
+  - "otp-*.ts"
+  - "otp-desktop.py"
+  - "Otp*.qml"
+  # writes to the Mac's Contacts
+  - "contact-save.ts"
+  - "ContactSave.qml"
+  # plugin identity and release surface
+  - "manifest.json"
+  - ".github/workflows/**"
+  # the decider itself
+  - ".claude/door-rules.yml"
+  - "scripts/slopbrake/**"
+
+content_patterns:
+  - "osascript"
+  - "imsg-send"
+  - "DELETE FROM"
+  - "UPDATE message"
+  - "rm -rf "
+  - "shutil\\.rmtree\\("
+  - "os\\.(remove|unlink|rmdir)\\("
+  - "fs\\.(rm|rmSync|unlink|unlinkSync|rmdir|rmdirSync)\\("
+  - "ssh "
+
+content_ignore:
+  - "**/*.test.ts"
+  - "**/test_*.py"
+  - "**/*_test.py"
+  - "docs/**"
+  - "**/*.md"
+  - "CHANGE.log"
+
+default: two_way

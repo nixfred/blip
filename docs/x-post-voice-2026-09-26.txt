@@ -1,0 +1,9 @@
+Blip now plays iPhone voice messages on Omarchy.
+
+Click the audio chip in a conversation and it plays. Click again to stop. Closing the panel or switching conversations stops it too. No player window pops up.
+
+Why it was broken: every voice message is stored on the Mac with no file type, only an Apple type code, so Blip refused to open it. The bridge now reads that code, and Blip converts the audio to Ogg Opus so any Linux player can handle it.
+
+Update, then re-run blip-setup so the Mac side picks it up.
+
+https://github.com/nixfred/blip
