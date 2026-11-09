@@ -61,6 +61,21 @@ test("a failure is one line: the tool's own reason, or why the Mac did not answe
   expect(TAPBACK_NOT_STARTED.indexOf("tapback: ")).toBe(0);
 });
 
+test("a 69 from imsg-react itself says its reason, not 'Mac unreachable'", () => {
+  // the locked-gateway report (2026-11-09): the Mac answered ssh; the tool
+  // exited 69 saying the screen was locked, and the status line claimed the
+  // Mac was unreachable while sends through the same bridge worked.
+  expect(tapbackFailure(69, '{ok:false}\nimsg-react: the Mac\'s screen is locked, so System Events can reach no window; unlock it\n'))
+    .toBe("tapback: the Mac's screen is locked, so System Events can reach no window; unlock it");
+  expect(tapbackFailure(69, "imsg-react: Messages has no accessible window; log in and open Messages on the Mac\n"))
+    .toBe("tapback: Messages has no accessible window; log in and open Messages on the Mac");
+  // 69 WITH the shim's own translation marker stays a transport failure —
+  // the marker line itself starts "imsg-react:", so the reason rule must not
+  // read it as the tool's, and must not echo the host either.
+  expect(tapbackFailure(69, "ssh: connect to host timed out\nimsg-react: you@your-mac unreachable — the iMessage bridge is offline.\n"))
+    .toBe("tapback: Mac unreachable");
+});
+
 test("tapbacks= is off unless it says on/yes/true/1", () => {
   expect(tapbacksOn("")).toBe(false);
   expect(tapbacksOn("host=mac\n")).toBe(false);
