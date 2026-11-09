@@ -5,6 +5,7 @@ import importlib.machinery
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import sqlite3
@@ -387,7 +388,7 @@ with city.refresh_lock(sys.argv[1]):
                 if kind == "symlink":
                     path.symlink_to(target)
                 elif kind == "hardlink":
-                    path.hardlink_to(target)
+                    os.link(target, path)  # Path.hardlink_to needs Python 3.10; the Mac runs 3.9
                 else:
                     path.write_text({"corrupt": "{", "oversized": "x" * (city.MAX_REFRESH_STATE_BYTES + 1),
                                      "invalid-stamp": '{"' + "a" * 64 + '":NaN}'}.get(kind, "{}"))
