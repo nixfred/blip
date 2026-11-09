@@ -497,10 +497,16 @@ SIDEBAR = {"--pin": "Pin", "--unpin": "Unpin"}
 # Only the direct children of the sidebar group ("Conversations") are
 # candidates, and only the one Messages reports as selected: a message bubble
 # offers a bare "Pin" of its own, which pins the MESSAGE, and must never match.
+# When no built row is selected (a far-down chat), it pages the list from the
+# top until the selected row exists, and returns the list to the top after.
 # Prints one word: done, already (the tile/row shows the asked-for state), or
 # none / error followed by a reason.
 SIDEBAR_JS = r"""
 ObjC.import('ApplicationServices');
+// ~10 rows a page, so 150 pages cover ~1500 conversations. A page that moves
+// returns as soon as the rows change (~0.35 s on the 27.0.1 mini); one that
+// does not waits 0.6 s and ends the walk.
+const MAX_PAGES = 150;
 function attr(el, name) {
   const ref = Ref();
   if ($.AXUIElementCopyAttributeValue(el, $(name), ref) !== 0) return null;
@@ -539,7 +545,37 @@ function run(argv) {
     for (const k of kids(el)) stack.push(k);
   }
   if (!list) return 'none the conversation list was not found';
-  const picked = kids(list).filter(k => attr(k, 'AXSelected') === true);
+  let picked = selected(list), moved = false;
+  if (picked.length === 0) {
+    // Messages builds only the rows near the viewport (~15), and `open
+    // imessage:` selects a far-down chat without scrolling its row into view
+    // (27.0.1 and 27.2, #132). Page from the top until the selected row is
+    // built, then put the list back at the top whatever happens.
+    moved = true;
+    picked = reveal(list);
+  }
+  const result = perform(picked, want);
+  if (moved) toTop(list);
+  return result;
+}
+function selected(list) { return kids(list).filter(k => attr(k, 'AXSelected') === true); }
+// One page in `dir`; false when the built rows did not change, which is the
+// end of the list in that direction. Rows build a beat after the action.
+function page(list, dir) {
+  const sig = () => kids(list).map(k => String(attr(k, 'AXDescription'))).join('\n');
+  const before = sig();
+  if ($.AXUIElementPerformAction(list, $(dir)) !== 0) return false;
+  for (let i = 0; i < 12; i++) { delay(0.05); if (sig() !== before) return true; }
+  return false;
+}
+function toTop(list) { for (let i = 0; i < MAX_PAGES && page(list, 'AXScrollUpByPage'); i++); }
+function reveal(list) {
+  toTop(list);
+  let picked = selected(list);
+  for (let i = 0; picked.length === 0 && i < MAX_PAGES && page(list, 'AXScrollDownByPage'); i++) picked = selected(list);
+  return picked;
+}
+function perform(picked, want) {
   if (picked.length !== 1) return 'none ' + picked.length + ' conversations are selected in the sidebar';
   const el = picked[0];
   const tile = String(attr(el, 'AXDescription') || '').endsWith(', Pinned');
