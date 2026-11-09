@@ -5007,6 +5007,15 @@ FocusScope {
         root.markRead(String(t.chat), String(t.last_ts || ""), root.isDmChat(t) ? "read" : "")
       }
     }
+    // Upstream's "mark all read" link, kept as a menu item: clears local
+    // marks and, unless push_read=off, marks the Mac's conversations read.
+    ConversationMenuItem {
+      objectName: "blipMarkAllRead"
+      text: "Mark All as Read"
+      icon.source: root.menuIcon("read")
+      enabled: root.canMarkAllRead
+      onTriggered: root.markAllRead()
+    }
     ConversationMenuItem {
       text: root.contactContext && root.contactContext.muted ? "Show Alerts" : "Hide Alerts"
       icon.source: root.menuIcon("moon")

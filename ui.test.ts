@@ -1241,6 +1241,15 @@ describe("mark all read is not gated on Blip's own unread count", () => {
     expect(view).not.toContain("id: markAllBtn");
   });
 
+  test("Mark All as Read lives in the conversation menu, behind the same gate", () => {
+    const start = view.indexOf('objectName: "blipMarkAllRead"');
+    expect(start).toBeGreaterThan(view.indexOf("id: contactMenu"));
+    const item = view.slice(start, view.indexOf("}", view.indexOf("onTriggered:", start)));
+    expect(item).toContain('text: "Mark All as Read"');
+    expect(item).toContain("enabled: root.canMarkAllRead");
+    expect(item).toContain("onTriggered: root.markAllRead()");
+  });
+
   test("nothing in the view still short-circuits mark-all on a zero count", () => {
     expect(view).not.toMatch(/markAllRead\(\) \{[^}]*root\.unread === 0/);
     expect(view).not.toMatch(/id: markAllBtn\s*visible: root\.unread > 0/);
