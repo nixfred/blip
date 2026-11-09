@@ -1386,6 +1386,16 @@ describe("complete conversation list (mergeChats)", () => {
     expect(mergeChats([green], [chats[0]!], {}, {})[0]!.service).toBe("iMessage");
   });
 
+  // Live shape: a contact who moved from iPhone to Android, every recent
+  // inbound SMS, one send that went out as iMessage and failed (error 22).
+  // That failed row is the cluster's newest, so `imsg chats` called the DM
+  // iMessage and every later send failed the same way.
+  test("a green DM is not turned blue by the list when the newest row is our own", () => {
+    const green = { ...windowThread, service: "SMS" };
+    const ours = { ...chats[0]!, service: "iMessage", last_from_me: true };
+    expect(mergeChats([green], [ours], {}, {})[0]!.service).toBe("SMS");
+  });
+
   test("a group still takes the list service, since it sends by chat id", () => {
     const id = "ce5a593a78af408282d61461ade89135";
     const group = { ...windowThread, chat: id, service: "iMessage" };

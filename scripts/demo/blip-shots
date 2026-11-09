@@ -17,7 +17,7 @@ set -euo pipefail
 REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 SANDBOX=${BLIP_DEMO_HOME:-/tmp/blip-demo-home}
 SHELLDIR=${BLIP_DEMO_SHELL:-/tmp/blip-demo-shell}
-OUT=${BLIP_DEMO_OUT:-"$REPO/docs/img"}
+OUT="${BLIP_DEMO_OUT:-$REPO/docs/img}"
 KEEP=0
 [[ ${1:-} == "--keep" ]] && KEEP=1
 
@@ -63,12 +63,14 @@ printf '#!/usr/bin/env bash\nexec bun %q "$@"\n' "$REPO/scripts/demo/fake-imsg" 
 chmod +x "$SANDBOX/bin/imsg"
 # The shims Blip would call for sending: a screenshot never sends, so these
 # exist only so nothing in the view reports the bridge as missing.
-for t in imsg-send contacts; do printf '#!/usr/bin/env bash\nexit 0\n' > "$SANDBOX/bin/$t"; chmod +x "$SANDBOX/bin/$t"; done
+for t in imsg-send; do printf '#!/usr/bin/env bash\nexit 0\n' > "$SANDBOX/bin/$t"; chmod +x "$SANDBOX/bin/$t"; done
+cp "$SANDBOX/bin/imsg" "$SANDBOX/bin/contacts"
 cat > "$SANDBOX/.config/blip/bridge.conf" <<'CONF'
 host=demo
 remote_bin='$HOME/.blip/bin'
 automation=on
 link_previews=on
+shared_city=on
 CONF
 
 echo "· shell copy $SHELLDIR"

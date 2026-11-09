@@ -309,6 +309,19 @@ what it is handed. Keep it that way.
   the process and shared saved state, so closing either view cannot cancel a
   write. Invalid JSON is shown as an error, never silently replaced. No read
   marks, unread counts, bridge calls, or new automation IPC are involved.
+- **Shared city is opt-in, in memory, and rate-limited on the Mac (#152).** `shared_city=on` in
+  bridge.conf (read by `parseSharedCity`, never sourced) makes `SharedCity.qml` run `city.ts` for the visible
+  DIRECT conversation once a minute. `city.ts` calls `contacts --json shared-city` through `shimPath()` with
+  `{handle}` on bounded stdin and returns nothing it cannot validate; `visibleCity` re-checks identity, the
+  five-minute lease and the 24-hour observation limit on every UI tick, and a late reply for another chat or
+  epoch is dropped. City, names and AX text never reach disk on either machine. The one thing the Mac
+  persists is `~/.blip/findmy-refresh.json`: SHA-256 handle hashes with last-attempt times (0600, 256 entries,
+  fails closed). It exists because refreshing a stale row brings Find My to the front for two seconds:
+  **at most once per handle per 15 minutes, failed attempts included, and a Paused row never triggers it.**
+  Nothing can refresh a Paused observation and Blip looks every minute, so without the limit a friend with
+  their phone off would pull Find My forward once a minute for as long as the chat stayed open (found in
+  review of #152; the author added the limit). Do not add another focus-changing path to `findmy_city.py`
+  without the same cooldown, and keep `CityRecord` free of coordinates, names and raw AX descriptions.
 - **Configuration is `bridge.conf` keys, not a settings system.** Blip has one
   config file (`~/.config/blip/bridge.conf`, parsed not sourced) carrying
   `host`, `remote_bin`, `automation`, `ui_font_size`, `ui_font_theme`,
@@ -362,6 +375,20 @@ what it is handed. Keep it that way.
   seconds late. 27 has no Show Alerts: one Hide Alerts item TOGGLES, so
   `--mute`/`--unmute` read the state first and click nothing when it is
   unknown — a toggle clicked in the wrong state does the opposite.
+- **On macOS 27, Pin and Unpin are sidebar actions, not menu items.** The
+  Conversation menu has neither; the selected conversation's entry in the
+  sidebar (the `Conversations` group) carries `Pin <short name>` on a row and
+  a bare `Unpin` on a pinned tile (`"<name>, Pinned"`), as AX custom
+  actions that work with Messages in the background. `sidebar_action()` acts
+  only on the direct child Messages reports `AXSelected`: a message bubble
+  offers a bare `Pin` too, and that one pins the MESSAGE. It reads the tree
+  through the AX API from JXA; System Events took 3 to 27 s for the same walk.
+  The pin list trails the action by ~5 s, so pins settle for up to 15 s.
+  The pid comes from `messages_pid()` (pgrep), never LaunchServices: over ssh on
+  27.2 `NSRunningApplication` and `NSWorkspace` cannot see GUI apps, and JXA
+  returns every `count` as a STRING (compare `Number(count)`, never `=== 0`).
+  OPEN on 27.2: Messages renders only ~15 sidebar rows and `open imessage:` did
+  not bring a far-down chat's row into view, so nothing is `AXSelected` for it.
 - **`chat:null` exists.** Use `chatKey()`; never `String(m.chat)`. A row with
   neither chat nor handle is a leftover of a deleted conversation (iCloud keeps
   the row, the chat and the join are gone); `fetchMessages` drops it

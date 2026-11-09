@@ -591,6 +591,20 @@ FocusScope {
   function isGroupId(c) { c = String(c || ""); return c !== "" && !/^\+?[0-9]{3,15}$/.test(c) && c.indexOf("@") < 0 }
   readonly property bool activeIsGroup: inThread && isGroupId(active.chat)
 
+  SharedCity {
+    id: sharedCity
+    chat: root.inThread ? String(root.active.chat) : ""
+    active: root.surfaceOpen && root.inThread && !root.activeIsGroup
+  }
+
+  function cityStatus() {
+    return { surfaceOpen: surfaceOpen, inThread: inThread, group: activeIsGroup,
+      headerVisible: headerMeta.visible,
+      headerUsesCity: sharedCity.city !== "" && headerMeta.text === sharedCity.city,
+      headerShowsLocationState: sharedCity.stateLabel !== "" && headerMeta.text === sharedCity.stateLabel,
+      lookup: sharedCity.diagnostic() }
+  }
+
   /**
    * DMs send --to the chat id (a phone/email). Groups send --chat-id with the
    * full AppleScript GUID ("any;+;<id>") that `imsg groups` supplies; a group
@@ -3362,7 +3376,7 @@ FocusScope {
         spacing: Style.space(8)
         Item {
           Layout.fillWidth: true
-          Layout.preferredHeight: root.inThread ? Style.space(82) : Style.space(50)
+          Layout.preferredHeight: root.inThread ? (headerMeta.visible ? Style.space(98) : Style.space(82)) : Style.space(50)
           ComposerButton {
             id: newMessageButton
             visible: root.splitView && root.online && !root.newMode
@@ -3427,6 +3441,20 @@ FocusScope {
                 font.pixelSize: root.fontBodySmall
                 font.weight: Font.DemiBold
               }
+            }
+            // Upstream #152: a friend's shared Find My city (opt-in), under the name.
+            Text {
+              id: headerMeta
+              anchors.horizontalCenter: parent.horizontalCenter
+              width: parent.width
+              visible: root.inThread && !root.activeIsGroup && text !== ""
+              text: sharedCity.city || sharedCity.stateLabel
+              textFormat: Text.PlainText
+              horizontalAlignment: Text.AlignHCenter
+              elide: Text.ElideRight
+              color: Qt.alpha(root.foreground, 0.72)
+              font.family: root.fontFamily
+              font.pixelSize: root.fontCaption
             }
           }
           ComposerButton {

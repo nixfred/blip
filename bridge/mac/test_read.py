@@ -7,6 +7,7 @@ import io
 import plistlib
 from pathlib import Path
 import struct
+import subprocess
 import unittest
 import os
 import sqlite3
@@ -288,7 +289,8 @@ class ConversationActions(unittest.TestCase):
     OPPOSITE = object()   # ... or the state the action is meant to change
 
     def run_action(self, flag, probe=WANT, unread=(0,), select_error="", clicks=((True, ""),),
-                   front=("Previous app", "Messages"), handle=DM, start=OPPOSITE):
+                   front=("Previous app", "Messages"), handle=DM, start=OPPOSITE,
+                   sidebar=(True, "")):
         """Run main() for one action. Returns (exit code, stdout, stderr, calls).
         `start` is what Hide/Show Alerts' pre-check reads (read.CHECK_FIRST)."""
         item, probe_name, want, _ = self.FLAGS[flag]
@@ -309,6 +311,10 @@ class ConversationActions(unittest.TestCase):
         def click(name):
             calls.append(f"click:{name}")
             return clicks.pop(0) if clicks else (True, "")
+
+        def side(name):
+            calls.append(f"sidebar:{name}")
+            return sidebar
 
         def count(handle=None):
             calls.append("unread")
@@ -334,6 +340,7 @@ class ConversationActions(unittest.TestCase):
              patch.object(read, "osa", return_value=(0, "")), \
              patch.object(read, "select_chat", side_effect=select), \
              patch.object(read, "click", side_effect=click), \
+             patch.object(read, "sidebar_action", side_effect=side), \
              patch.object(read, "unread_on_mac", side_effect=count), \
              patch.object(read, "restore_front", side_effect=restore), \
              patch.object(read, probe_name, side_effect=check), \
@@ -476,9 +483,131 @@ class ConversationActions(unittest.TestCase):
         self.assertIn("'Hide Alerts' was not available", err)
         self.assertEqual([c for c in calls if c.startswith("click:")], ["click:Hide Alerts"] * 2)
 
+    def test_macos_27_pins_through_the_sidebar(self):
+        """27's Conversation menu has no Pin or Unpin; the selected sidebar
+        entry offers them as Accessibility actions (#132)."""
+        for flag, item in (("--pin", "Pin"), ("--unpin", "Unpin")):
+            with self.subTest(flag=flag):
+                code, out, _, calls = self.run_action(flag, clicks=((False, ""), (False, "")))
+                self.assertEqual(code, 0)
+                self.assertEqual(out.strip(), self.FLAGS[flag][3])
+                self.assertEqual([c for c in calls if c.startswith(("click:", "sidebar:"))],
+                                 [f"click:{item}", f"click:{item}", f"sidebar:{item}"])
+                self.assertLess(calls.index(f"select:{self.DM}"), calls.index(f"sidebar:{item}"))
+                self.assertLess(calls.index(f"sidebar:{item}"), calls.index("verify"))
+                self.assertEqual(calls[-1], "restore:Previous app")
+
+    def test_pins_wait_longer_for_the_pin_list(self):
+        """27's pin list trailed the sidebar action by 4.4 to 5.5 s."""
+        seen = {}
+        real = read.settle_flag
+
+        def settle(fn, want, **kw):
+            seen.update(kw)
+            return real(fn, want, **kw)
+        with patch.object(read, "settle_flag", side_effect=settle):
+            self.run_action("--pin")
+        self.assertGreaterEqual(seen["tries"] * seen["pause"], 10)
+        seen.clear()
+        with patch.object(read, "settle_flag", side_effect=settle):
+            self.run_action("--mute")
+        self.assertEqual(seen, {})
+
+    def test_the_sidebar_is_never_used_when_the_menu_works(self):
+        _, _, _, calls = self.run_action("--pin")
+        self.assertNotIn("sidebar:Pin", calls)
+
+    def test_mute_never_falls_back_to_the_sidebar(self):
+        _, _, _, calls = self.run_action("--mute", clicks=((False, ""), (False, "")))
+        self.assertFalse([c for c in calls if c.startswith("sidebar:")])
+
+    def test_a_sidebar_that_offers_nothing_fails_and_says_why(self):
+        code, out, err, calls = self.run_action(
+            "--unpin", clicks=((False, ""), (False, "")),
+            sidebar=(False, "Unpin is not in the Conversation menu or the sidebar (no Unpin)"))
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("not in the Conversation menu or the sidebar", err)
+        self.assertNotIn("verify", calls)
+        self.assertEqual(calls[-1], "restore:Previous app")
+
     def test_pins_are_not_checked_first(self):
         _, _, _, calls = self.run_action("--pin")
         self.assertNotIn("precheck", calls)
+
+
+class SidebarAction(unittest.TestCase):
+    """sidebar_action() reads one word from the JXA helper; osascript is mocked."""
+
+    def run_js(self, stdout=b"", code=0, stderr=b"", pid=4242):
+        done = subprocess.CompletedProcess([], code, stdout, stderr)
+        with patch.object(read, "messages_pid", return_value=pid), \
+             patch.object(read.subprocess, "run", return_value=done) as run:
+            got = read.sidebar_action("Pin")
+        return got, (run.call_args[0][0] if run.call_args else None)
+
+    def test_item_and_the_messages_pid_ride_argv_after_the_script(self):
+        _, argv = self.run_js(b"done\n")
+        self.assertEqual(argv[:3], ["osascript", "-l", "JavaScript"])
+        self.assertEqual(argv[-2:], ["Pin", "4242"])
+
+    def test_no_single_messages_process_means_osascript_is_never_run(self):
+        """Found on a real macOS 27.2 gateway (2026-11-08): the helper threw
+        `objectAtIndex: index 0 beyond bounds for empty array` instead of saying
+        Messages could not be found."""
+        (ok, err), argv = self.run_js(b"done\n", pid=None)
+        self.assertFalse(ok)
+        self.assertIn("exactly one process", err)
+        self.assertIsNone(argv)
+
+    def test_messages_pid_wants_exactly_one_process_of_this_user(self):
+        def pid_for(out, **kw):
+            done = subprocess.CompletedProcess([], 0 if out else 1, out, b"")
+            with patch.object(read.subprocess, "run", return_value=done, **kw) as run:
+                return read.messages_pid(), run.call_args[0][0]
+        got, argv = pid_for(b"66696\n")
+        self.assertEqual(got, 66696)
+        self.assertEqual(argv, ["/usr/bin/pgrep", "-x", "-U", str(read.os.getuid()), "Messages"])
+        self.assertIsNone(pid_for(b"")[0])
+        self.assertIsNone(pid_for(b"11 22\n")[0])
+        self.assertIsNone(pid_for(b"not-a-pid\n")[0])
+        with patch.object(read.subprocess, "run", side_effect=subprocess.TimeoutExpired("pgrep", 5)):
+            self.assertIsNone(read.messages_pid())
+
+    def test_the_js_never_asks_launchservices_and_compares_counts_as_numbers(self):
+        """From an ssh session on macOS 27.2 NSRunningApplication and NSWorkspace
+        list only background apps (no Finder, no Messages), and JXA hands every
+        `count` back as a STRING, so `count === 0` can never be true."""
+        # Code only: the comment that explains this names the banned APIs.
+        js = "\n".join(line.split("//")[0] for line in read.SIDEBAR_JS.splitlines())
+        for banned in ("NSRunningApplication", "NSWorkspace", "runningApplications"):
+            self.assertNotIn(banned, js)
+        self.assertIn("Number(argv[1])", js)
+        self.assertNotIn("< arr.count", js)
+        self.assertNotRegex(js, r"\.count\s*===")
+
+    def test_done_and_already_are_success(self):
+        self.assertEqual(self.run_js(b"done\n")[0], (True, ""))
+        self.assertEqual(self.run_js(b"already\n")[0], (True, ""))
+
+    def test_none_is_an_error_with_the_reason(self):
+        (ok, err), _ = self.run_js(b"none 0 conversations are selected in the sidebar\n")
+        self.assertFalse(ok)
+        self.assertIn("0 conversations are selected", err)
+
+    def test_ax_error_and_osascript_failure(self):
+        self.assertEqual(self.run_js(b"error AXError -25205\n")[0], (False, "AXError -25205"))
+        ok, err = self.run_js(code=1, stderr=b"execution error: boom")[0]
+        self.assertFalse(ok)
+        self.assertIn("boom", err)
+
+    def test_only_the_sidebar_list_and_the_selected_entry_qualify(self):
+        """A message bubble offers a bare "Pin" that pins the MESSAGE."""
+        js = read.SIDEBAR_JS
+        self.assertIn("'Conversations'", js)
+        self.assertIn("'AXSelected') === true", js)
+        self.assertIn("startsWith('Name:Pin ')", js)
+        self.assertIn("endsWith(', Pinned')", js)
 
 
 class ActionProbes(unittest.TestCase):

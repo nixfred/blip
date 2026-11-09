@@ -161,6 +161,16 @@ function chatsRows(): Row[] {
 }
 
 function main(): void {
+  if (sub === "shared-city") {
+    const request = JSON.parse(readFileSync(0, "utf8"));
+    const contact = person(request.handle);
+    const city = process.env.BLIP_DEMO_CITY_UNAVAILABLE === "1" ? null : contact?.city || null;
+    console.log(JSON.stringify({ ok: true, handle: request.handle, city,
+      reason: city ? "available" : contact ? "location-unavailable" : "no-match",
+      ...(city ? { observedAt: new Date(Date.now() - (contact.city_age_minutes || 0) * 60000).toISOString(),
+        expiresAt: new Date(Date.now() + 300000).toISOString() } : {}) }));
+    return;
+  }
   if (sub === "chats") { console.log(JSON.stringify(chatsRows(), null, 2)); return; }
 
   if (sub === "groups") {

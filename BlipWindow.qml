@@ -51,6 +51,7 @@ FloatingWindow {
   function openThread(t) { view.openThread(t) }
   function shareLink(url) { return view.shareLink(url) }
   function pushReload() { view.pushReload() }
+  function cityStatus() { return view.cityStatus() }
   function navText(event) {
     if (event.key === Qt.Key_Slash) return "/"
     if (event.key === Qt.Key_N) return "n"

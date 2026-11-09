@@ -2174,10 +2174,19 @@ export function mergeChats(
     // one green send becomes the list row's service, which makes the next send
     // green, and the conversation never comes back on its own. Refuse that one
     // direction; the list still names the service everywhere else. (#97, Ian)
+    // The opposite direction loops just the same: one failed iMessage (error
+    // 22) to an SMS-only number becomes the cluster's newest row, the list
+    // calls the DM blue, and every later send fails as iMessage too.
+    // So the list may only move a green DM onto iMessage when its newest row
+    // is INBOUND: they reached us on iMessage. Our own send proves nothing.
     const listService = info.service || thread.service;
     const greenDowngrade = !group
       && normalizeSendService(thread.service) === "iMessage"
       && normalizeSendService(listService) !== "iMessage";
+    const blueUpgrade = !group
+      && normalizeSendService(thread.service) !== "iMessage"
+      && normalizeSendService(listService) === "iMessage"
+      && info.last_from_me === true;
     return {
       ...thread,
       aliases,
@@ -2189,7 +2198,7 @@ export function mergeChats(
               ? groupName(thread.chat, groupInfo, knownParticipantNames)
               : namedGroup(thread.name, thread.chat, aliases) || thread.chat))
         : (info.last_name || info.name || thread.name || thread.chat),
-      service: greenDowngrade ? thread.service : listService,
+      service: greenDowngrade || blueUpgrade ? thread.service : listService,
       last_text: info.last === thread.last_ts ? info.last_text : messagePreview(thread.last_text),
       pinned,
       pin_order,

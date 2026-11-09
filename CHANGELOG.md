@@ -50,6 +50,80 @@ It is not an official upstream release; see [provenance](docs/CONTINUATION.md).
 
 ## Unreleased
 
+- **A friend's shared city under their name (#152, thanks @mmdisbrow).** With `shared_city=on` in
+  `bridge.conf` (off by default), an open direct conversation shows the city the friend shares with you
+  through Find My, in place of their phone or email, in both the panel and the app. A location older than
+  five minutes carries its age (`Portland, OR · 1 hr ago`), one older than 24 hours is hidden, and a person
+  Find My matches but cannot place shows `Location unavailable`. On the Mac, `contacts` gains a bounded
+  `shared-city` query (new sibling file `findmy_city.py`) that reads Find My's People list through the public
+  Accessibility API, with the grant `imsg-read` already uses. It never prompts, switches tabs, selects a
+  person, decrypts a cache or reads a message. Only the handle, a coarse city and two timestamps cross back to
+  Linux, and the city lives in memory for at most five minutes. Identity is exact: the full phone digits or
+  email, or the exact saved personal Contacts name with every same-name card holding that handle; anything
+  ambiguous shows nothing. **Changed after review:** a stale row brings Find My to the front for two seconds,
+  and Blip looks once a minute, so the first version would have done that every minute for a friend whose
+  phone was off. The author's second round limits it to once per handle per 15 minutes (a private 0600
+  `~/.blip/findmy-refresh.json` on the Mac holding SHA-256 handle hashes and attempt times; failed attempts
+  count; a clock rolled back keeps the cooldown; corrupt or oversized state fails closed), and a Paused row
+  never activates Find My at all. Checked before merging: the whole diff was read; 806 bun tests, the 41
+  Mac-side tests and both QtTest view checks pass on the merged tree; `City.mjs` equals a fresh build of
+  `city-policy.ts`; `.github/workflows/ci.yml` only gains the new test. NOT checked by Larry: the Find My
+  window itself (the author reports macOS 27.2). Deploy: re-run `blip-setup` or `install.sh` on the Mac so
+  `contacts` and `findmy_city.py` land, then add `shared_city=on`; `qs ipc call nixfred.blip citystatus`
+  reports per-surface state with no names, cities or handles.
+
+- **Pin and Unpin on macOS 27.2: the helper now finds Messages, and one limit is still open (#150
+  follow-up, #132 reopened).** Running #150 on a real macOS 27.2 gateway (build 26B5091g) failed with
+  `objectAtIndex: index 0 beyond bounds for empty array`. Over ssh on that build `NSRunningApplication` and
+  `NSWorkspace` list only background apps (25 of them, no Finder, no Messages), so the by-bundle-id lookup
+  came back empty; and JXA hands `count` back as a string, so the `count === 0` guard never fired.
+  `imsg-read` now takes Messages' pid from `pgrep -x -U <uid> Messages` (exactly one process, or it refuses)
+  and hands it to the JXA, which reads Accessibility by pid (that works over ssh), and every `count` goes
+  through `Number()`. Two tests and three mutations pin it. **Still open:** on that gateway Messages renders
+  only 15 sidebar rows, and `open imessage:` did not bring the row of a chat outside them into view (the
+  test chat was 54th of 397), so nothing is `AXSelected` and Pin stops with "0 conversations are selected
+  in the sidebar". No Pin has yet succeeded on a 27.2 gateway; a chat whose row is already rendered has not
+  been tried. The pin list was identical before and after both attempts. Deploy `bridge/mac/imsg-read`.
+
+- **Pin and Unpin work on macOS 27 (#132, #150, thanks @ianswope).** Messages on 27 dropped Pin and Unpin from the Conversation
+  menu, so `imsg-read --pin`/`--unpin` found nothing to click. The sidebar still offers both, as
+  Accessibility custom actions on the selected conversation: a row carries `Pin <short name>`, a pinned
+  tile carries a bare `Unpin`, and both work with Messages in the background. After the menu, `imsg-read`
+  now falls back to those actions. It asks only the sidebar list's own entries, and only the one Messages
+  reports as selected, because a message bubble also offers a bare `Pin` (which pins the message). It
+  goes through the Accessibility API from JXA rather than System Events: walking the same tree
+  through System Events took 3 to 27 s, this takes about 0.4 s. The pin list trailed the action by 4.4 to 5.5 s, so a pin waits up
+  to 15 s for it. Verified on a macOS 27.0.1 gateway: six pin/unpin round trips all verified, then the
+  shipped script pinned and unpinned with exit 0, front app unchanged, pins left as they were.
+  Checked again before merging: the JXA is a fixed script whose only argument is `Pin` or `Unpin` from a
+  fixed table, so no message text or handle reaches it; all 20 bridge suites and 794 bun tests pass; and
+  undoing the fallback, the longer pin wait, or the selected-only filter makes Ian's tests fail. The live
+  round trip is Ian's, on 27.0.1; it has not been repeated on a 27.2 gateway.
+  Deploy `bridge/mac/imsg-read` to the Mac (re-run `blip-setup` or `install.sh`).
+
+- **The bar glyph is drawn like the stock bar icons (#153, thanks @jmeller).** The speech bubble sat
+  visibly smaller than every other icon in the bar: Blip drew its glyph as plain body-size text, and Nerd
+  Font glyphs carry padding inside the em box, while stock widgets hand their icons to `OpticalGlyph`,
+  which scales the glyph's ink to `Style.bar.iconSize`. Blip now does the same. The iMessage blue when
+  unread, the outline, filled and slashed states and the unread count are unchanged. **Changed in the
+  merge:** on Omarchy 4.0.2 `OpticalGlyph` has no `paintedSize`, and a QML file that assigns an unknown
+  property does not compile, so the PR as written took the whole widget off the bar there (Test Drive
+  on 4.0.2: `Plugin widget nixfred.blip failed: Cannot assign to non-existent property "paintedSize"`).
+  The optical glyph now lives in `OpticalBarGlyph.qml` behind a Loader, with the old plain text as the
+  fallback. On 4.0.2 Blip is back on the bar with the old glyph and one warning in the shell log; with a
+  4.5 `OpticalGlyph` the Loader is Ready and the bindings flow. Three new tests keep the assignment out
+  of `BarWidget.qml`.
+
+- **A green DM stays green when your own failed send is the newest row (#151, thanks @dimagrigorchuk).**
+  When a contact moves from iPhone to Android, the Mac keeps the old iMessage chat row in the same
+  conversation cluster. One send that went out as iMessage and failed (error 22) became the cluster's
+  newest row, so `imsg chats` called the DM iMessage, `mergeChats` let that override the window's SMS
+  answer, and every later send went out as iMessage and failed the same way. The list may now move a
+  green DM onto iMessage only when its newest row is inbound, because our own send proves nothing. It
+  is the mirror of the #97 guard. @ianswope reviewed it and checked the paths on both sides. Verified:
+  791 bun tests pass, the new test fails when the fix line is removed, and `last_from_me` is a field
+  `imsg chats` really emits. Not run: a live send to an Android contact.
+
 - **Hide Alerts works on macOS 27 (#132, #149, thanks @ianswope).** Messages on 27 no longer records a mute in
   `chat.properties`: it keeps it in `com.apple.MobileSMS.CKDNDList` (`CKDNDListKey`, handle → expiry,
   `distantFuture` for "until I turn it back on"). Blip read only the old flag, so a 27 mute was

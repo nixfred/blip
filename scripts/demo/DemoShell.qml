@@ -37,7 +37,6 @@ ShellRoot {
     property var toastAllowlist: []
     property bool toastAllowlistLoaded: true
     property bool toastAllowlistReady: true
-    function takeTapbackFailure(chat) { return "" }
     function reloadToastAllowlist() { }
     function runTapback(chat, argv, body) { return false }
     // The version, from the same manifest.json the shipped widget reads.
@@ -53,6 +52,7 @@ ShellRoot {
     function markThreadUnread(chat) { }
     function conversationAct(kind, chat) { }
     function showApp() { }
+    function takeTapbackFailure(chat) { return "" }
   }
 
   FileView {
