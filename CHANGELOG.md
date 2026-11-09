@@ -1,32 +1,13 @@
 # Changelog
 
-## 2.7.0-private.3 — Reactions on any message, floating notices
-
-- Send Tapbacks and custom emoji reactions to any eligible message on macOS 27,
-  not only the newest, in about 10 seconds instead of 30. Requires the updated
-  `imsg-react` on the Mac.
-- Show status and errors as small floating notices at the top right, in plain
-  words, that dismiss themselves or on a click.
-
-## 2.7.0-private.2 — Swipe to reveal message times
-
-- Replace the hover tooltip with a Messages-style sideways swipe on a trackpad
-  or Magic Mouse. Every message now has a time, not only the last of a run. The
-  keyboard cursor shows its own message's time.
-- Add `scripts/deploy-local`. Remove the upstream's social-post drafts, weekly
-  notes and review tooling, which do not apply to this private continuation.
-
-## 2.7.0-private.1 — Messages-style continuation
-
-This private build retains the recovered upstream history and MIT credits.
-It is not an official upstream release; see [provenance](docs/CONTINUATION.md).
+## 2.7.0 — Messages-style interface
 
 - Remove the app's redundant status/version banner and outer padding. Add a
   centered circular contact photo/name, rounded composer controls, clearer sans
   typography, and a more compact conversation layout. Polish favorites spacing,
   avatar sizes, and glass-style buttons with consistent line icons.
 - Name the window Messages, move New Message into its conversation header,
-  remove the mark-all button, and align the composer controls. The roomier,
+  move Mark All as Read into the conversation menu, and align the composer controls. The roomier,
   translucent conversation menu closes when clicked outside. Emoji and native
   sticker reactions share round badges with a two-dot thought-bubble tail.
 - Choose a local PNG/JPEG background for a conversation or as a default. Imports
@@ -47,6 +28,20 @@ It is not an official upstream release; see [provenance](docs/CONTINUATION.md).
 - Show audio messages inline with measured waveforms, playback progress,
   play/pause, duration, and seeking. Switching conversations stops playback;
   starting a second message pauses the first. See [audio formats](docs/AUDIO.md).
+- Replace the hover tooltip with a Messages-style sideways swipe on a trackpad
+  or Magic Mouse. Every message now has a time, not only the last of a run. The
+  keyboard cursor shows its own message's time.
+- Add `scripts/deploy-local`.
+- Send Tapbacks and custom emoji reactions to any eligible message on macOS 27,
+  not only the newest, in about 10 seconds instead of 30. Requires the updated
+  `imsg-react` on the Mac.
+- Show status and errors as small floating notices at the top right, in plain
+  words, that dismiss themselves or on a click.
+- Shared Find My cities (#152) show as a caption under the contact's name.
+- Show "Delivered" under your newest message until it is read, without the
+  transcript jumping as the status changes.
+- Send native replies to text and single pictures through the Mac
+  (`replies=on`); see [replies](docs/replies.md).
 
 ## Unreleased
 

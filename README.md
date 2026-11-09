@@ -1,4 +1,4 @@
-> **Private continuation:** This repository preserves the recovered Blip 2.6.2 history and develops a Messages-style interface. It is not an official upstream release. See [provenance and development notes](docs/CONTINUATION.md). See [appearance and backgrounds](docs/APPEARANCE.md), [stickers](docs/STICKERS.md), [audio messages](docs/AUDIO.md), and [reactions](docs/reactions.md) for the new features and their limits. The remaining upstream documentation is retained.
+> **Messages-style interface:** see [appearance and backgrounds](docs/APPEARANCE.md), [stickers](docs/STICKERS.md), [audio messages](docs/AUDIO.md), and [reactions](docs/reactions.md) for the new features and their limits.
 
 <p align="center">
   <img src="docs/blip-hero@2x.png" alt="Blip: iMessage. On Linux. For real." width="920">
@@ -13,11 +13,11 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-2.7.0--private.3-0a84ff?style=flat-square">
+  <img alt="version" src="https://img.shields.io/badge/version-2.7.0-0a84ff?style=flat-square">
   <img alt="Omarchy" src="https://img.shields.io/badge/Omarchy-plugin-5fd7ff?style=flat-square">
   <img alt="QuickShell" src="https://img.shields.io/badge/QuickShell-QML-0a84ff?style=flat-square">
   <img alt="bun" src="https://img.shields.io/badge/bun-TypeScript-f9f1e1?style=flat-square">
-  <img alt="tests" src="https://img.shields.io/badge/tests-871%20passing-2ea043?style=flat-square">
+  <img alt="tests" src="https://img.shields.io/badge/tests-899%20passing-2ea043?style=flat-square">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square">
 </p>
 
@@ -336,7 +336,7 @@ reports the live value as `scroll_gain=`.
 `~/.config/omarchy/plugins/nixfred.blip` and adds the bar widget)
 
 ```sh
-omarchy plugin add git@github.com:marcus/blip.git --enable --yes
+omarchy plugin add https://github.com/nixfred/blip.git --enable --yes
 ```
 
 It installs the current `main`, not a tagged release, so a fresh install
@@ -345,9 +345,7 @@ trust" prompt; drop it to be asked. Run it from a terminal inside your
 Omarchy session: enabling talks to the running shell, so over a bare ssh
 session it clones the plugin and then stops with `OMARCHY_PATH is not set`.
 
-(This private continuation requires GitHub access to this repository.)
-
-(Manual alternative: `git clone git@github.com:marcus/blip.git
+(Manual alternative: `git clone https://github.com/nixfred/blip
 ~/.config/omarchy/plugins/nixfred.blip`, then step 4.)
 
 **2. Run the wizard** (idempotent — re-run any time; it prints the
