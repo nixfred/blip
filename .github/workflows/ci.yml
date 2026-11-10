@@ -29,6 +29,7 @@ jobs:
           sudo apt-get install -y -q ffmpeg qml6-module-qtmultimedia qml6-module-qtquick-controls qml6-module-qtquick-templates
           python3 scripts/test-audio-ui.py
           python3 scripts/test-audio-session-ui.py
+          python3 scripts/test-audio-loader.py
       - name: OTP desktop adapter (no desktop needed)
         run: |
           python3 -m py_compile otp-desktop.py
