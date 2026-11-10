@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **A tapback that has to start Messages lands on the first try (#157, thanks @lama7).** `imsg-read`'s
+  `ensure_messages()` treated "the Messages process exists" as ready, but a background launch (`open -g -j`)
+  puts the process on the list seconds before System Events can see its menu bar, so the very next probe
+  answered `Can't get menu bar 1 of process "Messages" (-1719)` and the tapback failed with exit 77; it worked
+  a minute later. Success now means System Events can drive Messages: the gate polls the same menu-bar probe
+  (20 x 0.5 s) after starting it. A denial or a locked screen answers the same at every probe, so the gate
+  neither launches Messages nor sleeps behind them (a locked attempt fails in about 2 s with the lock reason).
+  `accessibility_why()` returns the kind alongside the reason; `accessibility()` is a wrapper, so exit codes
+  are unchanged (77 denied or locked, 69 Messages would not start). Four new tests. Verified on the
+  gateway Mac by the author: Messages quit, then a tapback cold-launched it and landed in 5.8 s. Deploy:
+  `bridge/mac/imsg-read` to the Mac.
+
 - **Pin works on a conversation far down the list (#132).** On macOS 27 Messages builds only the ~15
   sidebar rows near the viewport, and opening a conversation through `open imessage:` does not scroll its row
   into view, so for a chat 54th of 397 no row was selected and Pin stopped with "0 conversations are selected

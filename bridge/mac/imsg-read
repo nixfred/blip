@@ -247,18 +247,38 @@ def messages_running() -> bool:
 
 def ensure_messages() -> str:
     """Start Messages if needed, WITHOUT bringing it forward (-g) or opening a
-    window (-j). Returns "" on success, else a reason."""
-    if messages_running():
-        return ""
-    try:
-        subprocess.run(["open", "-g", "-j", "-a", "Messages"], capture_output=True, timeout=TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return "could not start Messages"
+    window (-j). Returns "" on success, else a reason.
+
+    Success means System Events can DRIVE Messages, not that the process
+    exists. A background-launched Messages (-g -j: hidden, no window)
+    registers its menu bar seconds after its process does; probing inside
+    that gap answers "Can't get menu bar 1 … (-1719)". So this gate ends on
+    the same probe every later step uses, and a tapback that starts Messages
+    no longer races its own launch (2026-11-09: the tapback's `open -g -j`
+    and the failing System Events call sit 0.7 s apart in the unified log,
+    twice; every such failure cleared on the next try). Waiting only makes
+    sense where waiting can help: "the app or its UI is not up yet" is the
+    kind a second look fixes; a denial or a lock screen answers the same way
+    at every probe. So this gate neither starts Messages nor waits behind
+    those: it stays silent and lets accessibility() name them, as it always
+    did, which keeps every exit code as it was — 77 for a permission denied
+    or a locked screen, 69 for a Messages that would not start.
+    """
+    kind, why = accessibility_why()
+    if kind != "waiting":
+        return ""          # driveable (kind ""), or a denial/lock the next gate names, as always
+    if not messages_running():
+        try:
+            subprocess.run(["open", "-g", "-j", "-a", "Messages"], capture_output=True, timeout=TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return "could not start Messages"
     for _ in range(20):
-        if messages_running():
-            return ""
         subprocess.run(["sleep", "0.5"], capture_output=True)
-    return "Messages did not start"
+        if accessibility_why()[0] != "waiting":
+            return ""      # the menus are up, or the reason is no longer one waiting can fix
+    if not messages_running():
+        return "Messages did not start"
+    return ("Messages is up but System Events cannot reach its menus yet: " + why)
 
 
 SCREEN_LOCKED = ("the Mac's screen is locked, so System Events can reach no window; unlock it, or set "
@@ -284,18 +304,28 @@ def screen_locked() -> bool:
     return any(isinstance(u, dict) and bool(u.get("CGSSessionScreenIsLocked")) for u in users or [])
 
 
-def accessibility() -> str:
-    """"" when System Events can drive Messages, else why not."""
+def accessibility_why() -> tuple:
+    """Returns ("", "") when System Events can drive Messages, else (kind, why).
+
+    The kind matters: waiting can fix "waiting" — no process, or a process
+    whose UI (menu bar) has not registered with System Events yet — but a
+    denial repeats itself, and a lock screen hides everything until someone
+    types a password. ensure_messages waits only on the first."""
     code, out = osa(f'tell application "System Events" to tell process "Messages" to name of {MENU}')
     if code == 0:
-        return ""
+        return "", ""
     if "not allowed assistive" in out or "1002" in out or "osascript is not allowed" in out:
-        return ("Accessibility is not granted. System Settings ▸ Privacy & Security ▸ "
-                "Accessibility → add /usr/libexec/sshd-keygen-wrapper (the same entry "
-                "that has Full Disk Access).")
+        return "denied", ("Accessibility is not granted. System Settings ▸ Privacy & Security ▸ "
+                          "Accessibility → add /usr/libexec/sshd-keygen-wrapper (the same entry "
+                          "that has Full Disk Access).")
     if screen_locked():
-        return SCREEN_LOCKED
-    return out or "System Events could not reach Messages"
+        return "locked", SCREEN_LOCKED
+    return "waiting", out or "System Events could not reach Messages"
+
+
+def accessibility() -> str:
+    """"" when System Events can drive Messages, else why not."""
+    return accessibility_why()[1]
 
 
 def click(item: str) -> tuple[bool, str]:
