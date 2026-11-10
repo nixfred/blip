@@ -64,7 +64,10 @@ what it is handed. Keep it that way.
   `push_read=thread` is enabled (DMs and groups, through Messages, never SQL writes).
   Complete read-state snapshots reconcile the Mac independently of the preview
   window; local marks apply to local-only reads. The self-thread never counts.
-  Tapback rows never count toward the badge, but an incoming reaction DOES
+  The exception to "both sides": under `push_read=thread` the Mac's CONFIRMED state
+  replaces the historical local marks for DMs and groups, so Apple-side alone decides
+  (a pending intent still overrides it); see "Read sync is an acknowledged, durable
+  action queue" below. Tapback rows never count toward the badge, but an incoming reaction DOES
   participate in the read-state snapshot: Messages can mark a reaction unread
   without changing the prior text row.
   chat.db carries GHOST is_read=0 rows years old — never trust is_read alone.
