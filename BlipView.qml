@@ -3918,7 +3918,7 @@ FocusScope {
                   Item { Layout.fillWidth: true; visible: !bubbleRow.mine }
                 }
 
-                // "Read 4:42 PM" — only ever under the newest read from-me bubble
+                // Delivered becomes Read under the newest sent message.
                 RowLayout {
                   Layout.fillWidth: true
                   visible: String(modelData.receipt || "") !== ""

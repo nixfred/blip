@@ -88,6 +88,7 @@ export interface ImsgMessage {
   scheduled?: boolean | null;
   // ---- imsg --rich extras (claude-on-mac ≥ 1.5.0); absent on plain fetches
   read_at?: string | null;
+  delivered?: boolean | null;
   tapbacks?: Tapback[] | null;
   attachments?: AttachmentMeta[] | null;
   reply_to?: { text: string; from_me: boolean } | null;
@@ -490,6 +491,11 @@ export function mergeTapbacks(a?: Tapback[] | null, b?: Tapback[] | null): Tapba
   });
 }
 
+function sentReceipt(a: Partial<ImsgMessage> | undefined, b: ImsgMessage) {
+  const read_at = a?.read_at ?? b.read_at;
+  return { ...(a?.delivered || b.delivered ? { delivered: true } : {}), ...(read_at ? { read_at } : {}) };
+}
+
 export function dedupeSelfEcho(msgs: ImsgMessage[], knownSelfChats: string[] = []): ImsgMessage[] {
   const contextKey = (m: ImsgMessage) => `${chatKey(m)}\u0000${m.handle || ""}\u0000${m.ts}`;
   const contentKey = (m: ImsgMessage) => `${contextKey(m)}\u0000${m.text}`;
@@ -502,10 +508,12 @@ export function dedupeSelfEcho(msgs: ImsgMessage[], knownSelfChats: string[] = [
   // message — whichever the reacting device considers the message. Whatever
   // is dropped below hands its tapbacks to the row that stays, so a reaction
   // on your own note is seen no matter which twin carried it.
+  const emptySentReceipt = new Map<string, Partial<ImsgMessage>>();
   const emptySentTapbacks = new Map<string, Tapback[] | undefined>();
   for (const m of msgs) {
     if (selfChats.has(chatKey(m)) && m.from_me && m.text === "") {
       const k = contextKey(m);
+      emptySentReceipt.set(k, sentReceipt(emptySentReceipt.get(k), m));
       emptySentTapbacks.set(k, mergeTapbacks(emptySentTapbacks.get(k), m.tapbacks));
     }
   }
@@ -536,14 +544,14 @@ export function dedupeSelfEcho(msgs: ImsgMessage[], knownSelfChats: string[] = [
       const idx = selfText.get(key);
       if (idx !== undefined && out[idx]!.from_me !== m.from_me) {
         const kept = out[idx]!;
-        out[idx] = { ...kept, from_me: kept.from_me || m.from_me, tapbacks: mergeTapbacks(kept.tapbacks, m.tapbacks) };
+        out[idx] = { ...kept, ...sentReceipt(kept, m), from_me: kept.from_me || m.from_me, tapbacks: mergeTapbacks(kept.tapbacks, m.tapbacks) };
         continue;
       }
       selfText.set(key, out.length);
     }
 
     if (emptySent.has(context) && !m.from_me) {
-      out.push({ ...m, from_me: true, tapbacks: mergeTapbacks(m.tapbacks, emptySentTapbacks.get(context)) });
+      out.push({ ...m, ...emptySentReceipt.get(context), from_me: true, tapbacks: mergeTapbacks(m.tapbacks, emptySentTapbacks.get(context)) });
       continue;
     }
     out.push(m);

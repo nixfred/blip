@@ -277,10 +277,10 @@ export function minutesBetween(a: string, b: string): number {
 export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_FORMATS): Bubble[] {
   const out: Bubble[] = [];
 
-  // iMessage shows "Read" under only the newest read message you sent.
+  // Only the newest sent message owns the delivery/read receipt.
   let receiptIdx = -1;
   for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i]!.from_me && msgs[i]!.read_at) { receiptIdx = i; break; }
+    if (msgs[i]!.from_me && !msgs[i]!.retracted && !msgs[i]!.scheduled) { receiptIdx = i; break; }
   }
 
   for (let i = 0; i < msgs.length; i++) {
@@ -321,7 +321,7 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
       groupStart,
       groupEnd,
       time: groupEnd ? clockLabel(m.ts, formats.time) : "",
-      receipt: i === receiptIdx ? receiptLabel(m.read_at!, today, formats) : "",
+      receipt: i === receiptIdx && !(m.error ?? 0) ? (m.read_at ? receiptLabel(m.read_at, today, formats) : m.delivered ? "Delivered" : "") : "",
       tapbacks: m.tapbacks ?? [],
       // Belt to imsg 1.5.1's suspenders: link-preview payloads are not files.
       attachments: (m.attachments ?? []).filter(
