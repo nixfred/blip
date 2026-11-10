@@ -1097,6 +1097,14 @@ FocusScope {
     id: audioPlayback
     active: root.playingAudio !== ""
     source: "AudioPlayback.qml"
+    onStatusChanged: {
+      if (status === Loader.Error && root.playingAudio !== "") {
+        var id = root.playingAudio
+        var metadata = (root.attMetrics[id] || {}).audio
+        if (metadata && metadata.externalDemuxer) root.playExternalAudio(metadata.externalDemuxer, String(root.attFiles[id] || ""))
+        else { root.stopAudio(); root.note = "Audio preview unavailable — right-click to save" }
+      }
+    }
     onLoaded: {
       item.source = Qt.binding(function() { return ((root.attMetrics[root.playingAudio] || {}).audio || {}).playbackUrl || "" })
       item.playing = Qt.binding(function() { return root.audioPlaying })

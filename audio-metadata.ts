@@ -53,7 +53,7 @@ export function analyzeAudio(path: string, runner = spawnSync): AudioMetadata {
           const data = Buffer.alloc(cs.size);
           if (readSync(cached, data, 0, data.length, 0) === data.length && data.toString("ascii", 0, 4) === "RIFF" && data.toString("ascii", 8, 16) === "WAVEfmt ") {
             const now = new Date(); utimesSync(playbackPath, now, now);
-            return {durationMs: Math.round((data.length - PCM_OFFSET) * 1000 / (2 * AUDIO_SAMPLE_RATE)), waveform: waveformFromPcm16(data.subarray(PCM_OFFSET)), unavailable:false, playable:true, playbackUrl:pathToFileURL(playbackPath).href};
+            return {externalDemuxer: audioDemuxer(chunk.subarray(0, Math.min(16, st.size))), durationMs: Math.round((data.length - PCM_OFFSET) * 1000 / (2 * AUDIO_SAMPLE_RATE)), waveform: waveformFromPcm16(data.subarray(PCM_OFFSET)), unavailable:false, playable:true, playbackUrl:pathToFileURL(playbackPath).href};
           }
         }
       } finally { closeSync(cached); }
@@ -98,7 +98,7 @@ export function analyzeAudio(path: string, runner = spawnSync): AudioMetadata {
       writeFileSync(tmp, Buffer.concat([wav, result.stdout]), {mode:0o600, flag:"wx"});
       renameSync(tmp, playbackPath);
     } finally { try { unlinkSync(tmp); } catch {} }
-    return { durationMs, waveform, unavailable: false, playable: true, playbackUrl:pathToFileURL(playbackPath).href };
+    return { durationMs, waveform, unavailable: false, playable: true, externalDemuxer: format, playbackUrl:pathToFileURL(playbackPath).href };
   } catch { return fallback; }
   finally { if (fd !== undefined) closeSync(fd); }
 }
