@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Synthetic sticker rows only. Never opens the user's Messages database."""
+import math
+import io
+import plistlib
+import sqlite3
+import tempfile
+import unittest
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+
+def load_imsg():
+    loader = SourceFileLoader("blip_reply_enrich_test", str(Path(__file__).with_name("imsg")))
+    module = module_from_spec(spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    return module
+
+
+T0 = 800_000_000_000_000_000
+
+
+class ReplyEnrichment(unittest.TestCase):
+    def setUp(self):
+        self.imsg = load_imsg()
+        self.con = sqlite3.connect(":memory:")
+        self.con.row_factory = sqlite3.Row
+        self.con.executescript("""
+            CREATE TABLE message (
+              ROWID INTEGER PRIMARY KEY, guid TEXT, date INTEGER, is_from_me INTEGER DEFAULT 0,
+              handle_id INTEGER DEFAULT 1, text TEXT, attributedBody BLOB, item_type INTEGER DEFAULT 0,
+              associated_message_type INTEGER DEFAULT 0, associated_message_guid TEXT,
+              associated_message_emoji TEXT, date_read INTEGER DEFAULT 0,
+              balloon_bundle_id TEXT, payload_data BLOB, thread_originator_guid TEXT, thread_originator_part TEXT,
+              expressive_send_style_id TEXT, is_audio_message INTEGER DEFAULT 0);
+            CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
+            CREATE TABLE attachment (ROWID INTEGER PRIMARY KEY, transfer_name TEXT, mime_type TEXT,
+              uti TEXT, total_bytes INTEGER, is_sticker INTEGER DEFAULT 0, sticker_user_info BLOB,
+              attribution_info BLOB, emoji_image_short_description TEXT);
+            CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
+            CREATE TABLE chat_recoverable_message_join (message_id INTEGER);
+            INSERT INTO handle VALUES (1, '+15551234567');
+        """)
+
+    def tearDown(self):
+        self.con.close()
+
+    def message(self, guid, kind=0, target=None, date=T0, emoji=None, mine=False):
+        cur = self.con.execute("""INSERT INTO message
+            (guid, date, associated_message_type, associated_message_guid, associated_message_emoji, is_from_me)
+            VALUES (?, ?, ?, ?, ?, ?)""", (guid, date, kind, target, emoji, mine))
+        return cur.lastrowid
+
+    def attachment(self, mid, aid, sticker=True, name="sticker.png", mime="image/png", info=None):
+        self.con.execute("INSERT INTO attachment VALUES (?, ?, ?, NULL, 128, ?, ?, NULL, NULL)",
+                         (aid, name, mime, sticker, plistlib.dumps(info) if info is not None else None))
+        self.con.execute("INSERT INTO message_attachment_join VALUES (?, ?)", (mid, aid))
+
+    def enrich(self, ids):
+        marks = ",".join("?" for _ in ids)
+        rows = list(self.con.execute(f"""SELECT m.*, associated_message_type AS assoc_type,
+          associated_message_guid AS assoc_guid, thread_originator_guid AS orig_guid,
+          expressive_send_style_id AS style_id, thread_originator_part AS orig_part FROM {self.imsg.MESSAGE_SRC} m
+          WHERE ROWID IN ({marks}) ORDER BY date, ROWID""", ids))
+        return self.imsg.enrich(self.con, rows, False)
+
+    def test_reply_attachment_selects_originator_part(self):
+        p = self.message("P")
+        self.attachment(p, 1, sticker=False, name="one.png")
+        self.attachment(p, 2, sticker=False, name="two.png")
+        r = self.message("R")
+        self.con.execute("UPDATE message SET thread_originator_guid='P', thread_originator_part='1:0' WHERE ROWID=?", (r,))
+        extra = self.enrich([r])[1]
+        self.assertEqual(extra[r]["reply_to"]["attachment"]["id"], "2")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -63,6 +63,14 @@ back before success. The helper never writes Contacts databases directly and
 does not edit, merge, or delete existing cards. Contacts write permission is
 separate from Full Disk Access and may prompt on first save.
 
+## Optional native replies
+
+`imsg-reply` sends a message through the same Accessibility route as tapbacks, so it
+can reach the same people `imsg-send` can. The shim refuses it unless `replies=on` is
+in `bridge.conf`, which is an opt-in, not a boundary against someone who already holds
+the key. It acts only with `--yes`. The text stays on stdin, is set directly on the
+reply field and never touches the clipboard. Its log holds outcome codes only.
+
 ## Optional tapbacks
 
 The confined key can invoke `imsg-react`, the first bridge tool that *acts*

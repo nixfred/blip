@@ -11,7 +11,7 @@
 
 /** The Mac-side tools a conversation is read, sent, marked read and
  *  tapbacked through. */
-export type BridgeTool = "imsg" | "imsg-send" | "imsg-read" | "imsg-react";
+export type BridgeTool = "imsg" | "imsg-send" | "imsg-read" | "imsg-react" | "imsg-reply";
 
 export interface Source {
   /** Stable lowercase name, e.g. "imessage". */

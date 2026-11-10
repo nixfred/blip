@@ -1,5 +1,7 @@
 import QtQuick
 import "ReadSync.mjs" as ReadSync
+import "SendState.mjs" as SendState
+import "SourceId.mjs" as SourceId
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -61,6 +63,9 @@ BarWidget {
    *  drives Messages through Accessibility, by action names Apple can rename.
    *  The shim refuses the tool without the same key. */
   property bool tapbacks: false
+  /** `replies=on` in bridge.conf: Reply in the message menu sends a native reply
+   *  through the Mac's imsg-reply. OFF by default, like tapbacks. */
+  property bool replies: false
 
   // The imsg-react run lives HERE, not in the view that asked for it: the
   // popout's surface and the app window are destroyed on close, and a run
@@ -116,6 +121,48 @@ BarWidget {
       if (code === 0) root.tapbackExited(root.tapbackChat, true)
       else root.tapbackFailed(root.tapbackChat, TapbackActions.tapbackFailure(code, reactProc.lastErr))
     }
+  }
+
+  property var replyQueue: []
+  property var replyPending: []
+  property var replyJob: null
+  signal replyExited(var job, int code, string reason)
+  function queueReply(job, pending) {
+    root.replyPending = root.replyPending.concat([Object.assign({}, pending, {inFlight: true})])
+    root.replyQueue = root.replyQueue.concat([job])
+    root.pumpReply()
+  }
+  function reconcileReplies(chat, pending) {
+    var ids = pending.map(function(p) { return p.localId })
+    root.replyPending = root.replyPending.filter(function(p) { return p.inFlight === true || p.chat !== chat || ids.indexOf(p.localId) >= 0 })
+  }
+  function pumpReply() {
+    if (replyProc.running || root.replyQueue.length === 0) return
+    root.replyJob = root.replyQueue[0]
+    root.replyQueue = root.replyQueue.slice(1)
+    replyProc.lastErr = ""
+    replyProc.command = SourceId.bridgeArgv(root.replyJob.chat, "imsg-reply", root.binDir).concat(["--guid", root.replyJob.reply.guid, "--yes", "--text-stdin"])
+    replyProc.stdinEnabled = true
+    replyProc.running = true
+    replyProc.write(root.replyJob.text)
+    replyProc.stdinEnabled = false
+  }
+  function finishReply(code) {
+    var job = root.replyJob
+    if (!job) return
+    root.replyJob = null
+    root.replyPending = root.replyPending.map(function(p) { return p.localId === job.localId ? Object.assign({}, p, {inFlight: false}) : p })
+    var reason = code === 0 ? "" : SendState.replyFailure(code, replyProc.lastErr)
+    if (code !== 0) root.replyPending = SendState.markSendFailed(root.replyPending, job.localId, reason)
+    root.replyExited(job, code, reason)
+    Qt.callLater(root.pumpReply)
+  }
+  Process {
+    id: replyProc
+    property string lastErr: ""
+    onRunningChanged: if (!running) Qt.callLater(function() { if (!replyProc.running && root.replyJob) root.finishReply(70) })
+    stderr: StdioCollector { onStreamFinished: replyProc.lastErr = text }
+    onExited: function(code, status) { root.finishReply(code) }
   }
 
   // Local desktop-toast preferences outlive either view, just like tapbacks.
@@ -1226,9 +1273,10 @@ BarWidget {
       root.touchpadScrollGain = root.parseGain(t, /^\s*touchpad_scroll_gain\s*=\s*['"]?(\d*\.?\d+)/mi)
       root.smoothScroll = /^\s*smooth_scroll\s*=\s*['"]?(on|true|1|yes)\b/mi.test(t)
       root.tapbacks = TapbackActions.tapbacksOn(t)
+      root.replies = TapbackActions.repliesOn(t)
       root.bridgeConfLoaded = true
     }
-    onLoadFailed: { root.otpAutofill = false; root.automationOn = false; root.uiFontTheme = false; root.uiFontSize = 0; root.scrollGain = 1.0; root.touchpadScrollGain = 1.0; root.smoothScroll = false; root.tapbacks = false; root.binDir = root.home + "/bin"; root.bridgeConfLoaded = true }
+    onLoadFailed: { root.replies = false; root.otpAutofill = false; root.automationOn = false; root.uiFontTheme = false; root.uiFontSize = 0; root.scrollGain = 1.0; root.touchpadScrollGain = 1.0; root.smoothScroll = false; root.tapbacks = false; root.binDir = root.home + "/bin"; root.bridgeConfLoaded = true }
   }
   IpcHandler {
     target: root.moduleName
@@ -1245,6 +1293,7 @@ BarWidget {
         + " scroll_gain=" + root.scrollGain + (root.touchpadScrollGain !== 1 ? "/" + root.touchpadScrollGain : "")
         + (root.smoothScroll ? " smooth_scroll=on" : "")
         + (root.tapbacks ? " tapbacks=on" : "")
+        + (root.replies ? " replies=on" : "")
         + (root.lastError !== "" ? " error=" + root.lastError : "")
     }
     function citystatus(): string {

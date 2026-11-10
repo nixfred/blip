@@ -111,3 +111,12 @@ test("a failed attempt of OTHER words is untouched by a delivered retry of diffe
     [failedSend("1", "hello", "2026-11-10 12:40:00"), keep], "2026-11-10", DEFAULT_FORMATS, Date.parse("2026-11-10T12:50:00"));
   expect(out.pending).toEqual([keep]);
 });
+
+import { replyFailure } from "./send-state";
+test("uncertain reply transport outcomes always instruct checking Messages", () => {
+  for (const code of [-1,2,9,15,69,70,76,127,137,255]) expect(replyFailure(code,"nothing sent")).toBe("Check Messages before sending again");
+  expect(replyFailure(75,"Mac draft exists")).toBe("Mac draft exists");
+});
+
+import { replyCanRestore } from "./send-state";
+test("uncertain replies never hand back text", () => { for (const code of [-1,0,2,9,15,69,70,76,127,137,255]) expect(replyCanRestore(code)).toBe(false); for (const code of [1,64,65,75,77]) expect(replyCanRestore(code)).toBe(true); });

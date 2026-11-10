@@ -21,6 +21,56 @@ export function quotedDraft(message: QuotableMessage, draft: string): string {
   return "> " + excerpt + "\n\n" + draft;
 }
 
+export interface ReplyAttachment {
+  id?: string | number;
+  name?: string;
+  mime?: string | null;
+  sticker?: unknown;
+}
+export interface ReplyableMessage extends QuotableMessage {
+  guid?: string;
+  from_me?: boolean;
+  name?: string;
+  attachments?: ReplyAttachment[] | null;
+  audio?: boolean;
+  pending?: boolean;
+  failed?: boolean;
+  scheduled?: boolean;
+}
+
+/** True when the Mac's imsg-reply would act on the bubble: plain text, or exactly
+ *  one picture with no caption, in a 1:1. What is refused has not been proven;
+ *  docs/replies.md says what would have to be measured first. */
+export function canReply(message: ReplyableMessage | null | undefined, group: boolean): boolean {
+  if (!message || group || !String(message.guid || "")) return false;
+  if (message.retracted || message.audio || message.pending || message.failed || message.scheduled || message.link) return false;
+  const text = String(message.text || "").trim();
+  const files = message.attachments ?? [];
+  if (files.length === 0) return text !== "" && !/:\/\/|\bwww\./i.test(text);
+  const only = files[0]!;
+  return files.length === 1 && text === "" && !only.sticker && String(only.mime || "").toLowerCase().startsWith("image/");
+}
+
+export interface ReplyTarget {
+  guid: string;
+  text: string;
+  mine: boolean;
+  name: string;
+  attachment: ReplyAttachment | null;
+}
+
+/** What the composer's banner and the pending bubble need to know. */
+export function replyTarget(message: ReplyableMessage): ReplyTarget {
+  const attachment = (message.attachments ?? [])[0] ?? null;
+  return {
+    guid: String(message.guid || ""),
+    text: quoteText(message) || (attachment ? "Photo" : ""),
+    mine: message.from_me === true,
+    name: String(message.name || ""),
+    attachment,
+  };
+}
+
 /** Where the selected bubble is after a reload: the row with the same guid,
  *  or -1 when it is gone or has none. A reload renumbers the rows, and a
  *  tapback landing on the selected bubble is itself a reload. */

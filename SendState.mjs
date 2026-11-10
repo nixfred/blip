@@ -7,7 +7,15 @@ function markSendFailed(items, id, reason, fallback) {
 function friendlySendError(raw) {
   return /(^|[^\d])-10810(\D|$)/.test(raw) ? "Messages can't start on the Mac: nobody is logged in there. Log in on the Mac, then send again." : raw;
 }
+function replyFailure(code, detail) {
+  return ![1, 64, 65, 75, 77].includes(code) ? "Check Messages before sending again" : detail.trim().slice(0, 240) || "Reply was not sent";
+}
+function replyCanRestore(code) {
+  return [1, 64, 65, 75, 77].includes(code);
+}
 export {
   friendlySendError,
-  markSendFailed
+  markSendFailed,
+  replyCanRestore,
+  replyFailure
 };

@@ -65,6 +65,11 @@ export function tapbacksOn(conf: string): boolean {
   return confOn(conf, "tapbacks");
 }
 
+/** `replies=` read the same way: the menu's half of the shim's gate on imsg-reply. */
+export function repliesOn(conf: string): boolean {
+  return confOn(conf, "replies");
+}
+
 function confOn(conf: string, key: string): boolean {
   let v = "";
   for (const raw of String(conf || "").split("\n")) {

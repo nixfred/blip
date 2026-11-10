@@ -138,6 +138,8 @@ timestamp when `chat.db` changes; the client then fetches privately.
 
 Edit or unsend, see typing indicators.
 Those need Apple private APIs that Blip deliberately does not use.
+Native replies are opt-in too (`replies=on`): the Mac's `~/.blip/reply.log` holds outcome codes and durations only.
+
 Tapbacks are the opt-in exception (`tapbacks=on`): they are Messages' own
 actions, performed through Accessibility, not a private API.
 

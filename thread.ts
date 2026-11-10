@@ -88,6 +88,8 @@ export interface Bubble {
   /** Inline-reply context: the quoted snippet, "" when not a reply. */
   replyText: string;
   replyMine: boolean;
+  /** The file a reply answers, when the original has no text to quote. */
+  replyAttachment: AttachmentMeta | null;
   edited: boolean;
   /** Rich-link preview card, null when the message has none. */
   link: LinkCard | null;
@@ -116,7 +118,18 @@ export interface Bubble {
 /** A send in flight: what was typed, where, and when Enter was pressed
  *  (the wire format, UTC — it is compared against real message stamps).
  *  Lives in BarWidget memory only. */
-export interface PendingSend { chat: string; text: string; ts: string; localId?: string; failed?: boolean; failureReason?: string }
+export interface PendingSend {
+  chat: string;
+  text: string;
+  ts: string;
+  localId?: string;
+  failed?: boolean;
+  failureReason?: string;
+  inFlight?: boolean;
+  replyText?: string;
+  replyMine?: boolean;
+  replyAttachment?: AttachmentMeta | null;
+}
 
 export interface ThreadOutput {
   ok: boolean;
@@ -335,8 +348,7 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
       ).map(normalizeStickerAttachment),
       stickers: m.retracted ? [] : stickerState.stickers,
       stickersOverflow: m.retracted ? 0 : stickerState.overflow,
-      replyText: m.reply_to?.text ?? "",
-      replyMine: m.reply_to?.from_me ?? false,
+      ...replyContext(m),
       edited: m.edited === true,
       link: normalizeLink(m.link),
       retracted: m.retracted === true,
@@ -432,6 +444,9 @@ export function pendingBubble(prev: Bubble | undefined, send: PendingSend, today
     stickersOverflow: 0,
     replyText: "",
     replyMine: false,
+    replyText: send.replyText ?? "",
+    replyMine: send.replyMine ?? false,
+    replyAttachment: send.replyAttachment ?? null,
     edited: false,
     link: null,
     retracted: false,
@@ -456,7 +471,7 @@ export function pendingBubble(prev: Bubble | undefined, send: PendingSend, today
  */
 export function withPendingSends(bubbles: Bubble[], pending: PendingSend[], today: string, formats = DEFAULT_FORMATS, now = Date.now()): { bubbles: Bubble[]; pending: PendingSend[] } {
   const live = pending
-    .filter((p) => Number.isFinite(stampMs(p.ts)) && (p.failed === true || now - stampMs(p.ts) <= PENDING_MAX_AGE_MS))
+    .filter((p) => Number.isFinite(stampMs(p.ts)) && (p.failed === true || p.inFlight === true || now - stampMs(p.ts) <= PENDING_MAX_AGE_MS))
     .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
   if (live.length === 0) return { bubbles, pending: [] };
   const taken = new Set<number>();
@@ -653,4 +668,23 @@ if (import.meta.main) {
   } catch (e) {
     console.log(JSON.stringify({ ok: false, online: false, error: String(e), bubbles: [] }));
   }
+}
+
+/** What a reply context says when the original was only a file. */
+export function replyAttachmentLabel(att: AttachmentMeta): string {
+  const mime = String(att.mime || "").toLowerCase();
+  if (mime.startsWith("image/")) return "Photo";
+  if (mime.startsWith("video/")) return "Video";
+  if (mime.startsWith("audio/")) return "Audio message";
+  return String(att.name || "") || "Attachment";
+}
+
+function replyContext(m: ImsgMessage): Pick<Bubble, "replyText" | "replyMine" | "replyAttachment"> {
+  const text = (m.reply_to?.text ?? "").replace(/￼/g, "").trim();
+  const attachment = text === "" ? m.reply_to?.attachment ?? null : null;
+  return {
+    replyText: text || (attachment ? replyAttachmentLabel(attachment) : ""),
+    replyMine: m.reply_to?.from_me ?? false,
+    replyAttachment: attachment,
+  };
 }
