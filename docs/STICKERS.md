@@ -9,7 +9,7 @@ to their original message rather than appearing as duplicate message rows.
 | Received media | Inline display |
 |---|---|
 | PNG, JPEG | Original pixels; PNG transparency preserved |
-| HEIC / HEIF | Full-size PNG converted by the Mac's `sips`; alpha preserved |
+| HEIC / HEIF | PNG bounded to 2048 pixels per edge, converted by the Mac's `sips`; alpha preserved |
 | GIF | Original animated file through Qt's `AnimatedImage` |
 | Animated WebP | Original animated file through Qt's `AnimatedImage` |
 | APNG, including APNG declared `image/png` | Lossless animated WebP preview; original PNG retained for explicit Open, Copy, and Save |
@@ -18,8 +18,7 @@ to their original message rather than appearing as duplicate message rows.
 
 All inline sticker rasters, including static PNG/JPEG and converted HEIC
 stills, must have positive dimensions no larger than 2048 pixels per edge.
-Larger static assets show an unavailable placeholder; this path does not
-silently resize them. The table's original-pixel and full-size descriptions
+Larger raw static assets show an unavailable placeholder; HEIC stills are resized on the Mac before transfer. The table's original-pixel and full-size descriptions
 apply within that limit.
 
 HEICS conversion uses the animated pair in a four-track container. FFprobe
@@ -29,7 +28,7 @@ decodes it. Supported animations have at most 100 frames, eight seconds, a
 sequences get a transparent still when available. Missing tools, malformed
 media, timeouts, or an oversized converted preview keep the usable still;
 the fetch result explicitly reports `animationUnavailable`. HEICS explicit
-Open/Copy/Save currently uses the Mac's full-size transparent still, not a
+Open/Copy/Save currently uses the Mac's bounded transparent still, not a
 native HEICS export. Video Open still opens the original video externally.
 
 Qt's PNG reader displays APNG as a single frame on the tested Qt 6 stack.
@@ -165,3 +164,5 @@ In the upstream UI, native sticker reactions are shown in a compact strip attach
 ![Synthetic sticker examples in the upstream UI](img/stickers.png)
 
 Legacy type-1000 rows retain upstream unread counting and toast behavior. Decoder output is capped to min(100, floor(64 million / frame pixels)) frames even when container frame counts lie. Failed APNG conversions cache the still fallback.
+
+Failed video previews are remembered for one hour to avoid repeated decoder work on thread open; explicit Open remains available.
