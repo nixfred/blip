@@ -80,7 +80,7 @@ FocusScope {
   readonly property color dim: appearance.muted
   /** An editor owns the keyboard — the host's key catcher must stand down. */
   readonly property bool editorActive:
-    messageMenu.visible || contactMenu.visible || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused
+    emojiPopup.visible || messageMenu.visible || contactMenu.visible || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused
   readonly property alias composeEditor: composeField
   readonly property real contentHeightHint: listContent.implicitHeight
   /** The view wants keyboard navigation focus back (list mode). */
@@ -4179,6 +4179,13 @@ FocusScope {
             }
           }
 
+          Button {
+            text: "☺"
+            Layout.alignment: Qt.AlignBottom
+            enabled: root.online && root.inThread
+            Accessible.name: "Choose emoji"
+            onClicked: root.openEmojiPicker()
+          }
           // send button — the blue arrow circle (lit when text OR a file is queued)
           Rectangle {
             Layout.alignment: Qt.AlignBottom
@@ -4270,6 +4277,51 @@ FocusScope {
     hostWidget.takeTapbackFailure(chat)
     root.pendingTapback = TapbackActions.pendingTapback(chat, String(message.guid), kind, current)
     if (!hostWidget.runTapback(chat, argv)) root.pendingTapback = null
+  }
+  function openEmojiPicker() {
+    if (emojiPopup.visible) { emojiPopup.close(); return }
+    emojiPopup.open()
+  }
+  function insertComposerEmoji(emoji) {
+    var start = composeField.selectionStart
+    var end = composeField.selectionEnd
+    var at = start !== end ? start : composeField.cursorPosition
+    if (start !== end) composeField.remove(start, end)
+    composeField.insert(at, emoji)
+    composeField.cursorPosition = at + emoji.length
+    emojiPopup.close()
+    composeField.forceActiveFocus()
+  }
+  Popup {
+    id: emojiPopup
+    parent: root
+    width: Math.min(Style.space(340), root.width - Style.space(16))
+    height: Math.min(emojiPicker.implicitHeight + padding * 2, root.height - Style.space(16))
+    x: Math.max(Style.space(8), root.width - width - Style.space(18))
+    y: Math.max(Style.space(8), root.height - height - composeSlot.height - Style.space(28))
+    padding: Style.space(8)
+    focus: true
+    onClosed: if (root.inThread) composeField.forceActiveFocus()
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    background: Rectangle {
+      color: appearance.background
+      border.color: Qt.alpha(root.foreground, 0.18)
+      border.width: 1
+      radius: Style.space(16)
+    }
+    contentItem: ComposerEmojiPicker {
+      id: emojiPicker
+      font.family: root.fontFamily
+      font.pixelSize: root.fontBodySmall
+      palette.text: root.foreground
+      palette.windowText: root.foreground
+      palette.base: appearance.background
+      palette.window: appearance.background
+      palette.highlight: root.accent
+      onEmojiChosen: function(emoji) {
+        root.insertComposerEmoji(emoji)
+      }
+    }
   }
   MessageMenu {
     id: messageMenu
