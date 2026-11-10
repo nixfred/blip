@@ -25,6 +25,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, chmodSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { mergeStickers, type StickerOverlay } from "./stickers";
 import { parseReadSnapshot, parseReadIntents, queueReadIntent, retryReadIntent, reconcileReadIntents,
   type ReadSnapshot, type ReadIntents } from "./read-sync";
 
@@ -47,10 +48,10 @@ export const POLL_WINDOW = 150;
 export const DEEP_WINDOW = 500;
 
 /** One reaction folded onto its target message (imsg --rich). */
-export interface Tapback { emoji: string; from_me: boolean; by: string | null }
+export interface Tapback { emoji: string; from_me: boolean; by: string | null; kind?: "classic" | "emoji" | "sticker" }
 /** Attachment metadata only — the file itself stays on the Mac until
  *  fetch.ts pulls it by `id` (attachment ROWID as a string: 64-bit safe). */
-export interface AttachmentMeta { id?: string; name: string; mime: string | null; bytes: number | null }
+export interface AttachmentMeta { id?: string; name: string; mime: string | null; bytes: number | null; sticker?: import("./stickers").StickerMetadata }
 
 export interface ImsgMessage {
   /** Stable chat.db message ROWID, supplied by bridges that expose it. */
@@ -91,6 +92,7 @@ export interface ImsgMessage {
   delivered?: boolean | null;
   tapbacks?: Tapback[] | null;
   attachments?: AttachmentMeta[] | null;
+  stickers?: import("./stickers").StickerOverlay[] | null;
   reply_to?: { text: string; from_me: boolean } | null;
   edited?: boolean | null;
   retracted?: boolean | null;
@@ -437,11 +439,12 @@ export function prettyHandle(id: string): string {
 /** Never expose Messages' U+FFFC attachment marker as a dotted OBJ glyph. */
 export function messagePreview(
   text: unknown,
-  attachment?: { name?: unknown; mime?: unknown } | null,
+  attachment?: { name?: unknown; mime?: unknown; sticker?: unknown } | null,
 ): string {
   const cleaned = String(text ?? "").replace(/\uFFFC/g, "").trim();
   if (cleaned) return cleaned;
   if (!attachment) return "";
+  if (attachment.sticker === true || (attachment.sticker && typeof attachment.sticker === "object")) return "Sticker";
   const mime = String(attachment.mime ?? "").toLowerCase();
   const name = String(attachment.name ?? "").toLowerCase();
   if (mime.startsWith("image/") || /\.(?:avif|gif|heic|heif|jpe?g|png|webp)$/.test(name)) return "Photo";
@@ -530,11 +533,15 @@ export function dedupeSelfEcho(msgs: ImsgMessage[], knownSelfChats: string[] = [
   // on your own note is seen no matter which twin carried it.
   const emptySentReceipt = new Map<string, Partial<ImsgMessage>>();
   const emptySentTapbacks = new Map<string, Tapback[] | undefined>();
+  const emptySentStickers = new Map<string, StickerOverlay[] | undefined>();
+  const emptySentActivity = new Map<string, string>();
   for (const m of msgs) {
     if (selfChats.has(chatKey(m)) && m.from_me && m.text === "") {
       const k = contextKey(m);
       emptySentReceipt.set(k, sentReceipt(emptySentReceipt.get(k), m));
       emptySentTapbacks.set(k, mergeTapbacks(emptySentTapbacks.get(k), m.tapbacks));
+      emptySentStickers.set(k, mergeStickers(emptySentStickers.get(k), m.stickers));
+      if (m.activity_ts && m.activity_ts > (emptySentActivity.get(k) ?? "")) emptySentActivity.set(k, m.activity_ts);
     }
   }
   const retractedSent = new Set(
@@ -564,14 +571,20 @@ export function dedupeSelfEcho(msgs: ImsgMessage[], knownSelfChats: string[] = [
       const idx = selfText.get(key);
       if (idx !== undefined && out[idx]!.from_me !== m.from_me) {
         const kept = out[idx]!;
-        out[idx] = { ...kept, ...sentReceipt(kept, m), from_me: kept.from_me || m.from_me, tapbacks: mergeTapbacks(kept.tapbacks, m.tapbacks) };
+        const stickers = mergeStickers(kept.stickers, m.stickers);
+        const activity = [kept.activity_ts ?? "", m.activity_ts ?? ""].sort().at(-1);
+        out[idx] = { ...kept, ...sentReceipt(kept, m), from_me: kept.from_me || m.from_me, tapbacks: mergeTapbacks(kept.tapbacks, m.tapbacks),
+          ...(stickers ? { stickers } : {}), ...(activity ? { activity_ts: activity } : {}) };
         continue;
       }
       selfText.set(key, out.length);
     }
 
     if (emptySent.has(context) && !m.from_me) {
-      out.push({ ...m, ...emptySentReceipt.get(context), from_me: true, tapbacks: mergeTapbacks(m.tapbacks, emptySentTapbacks.get(context)) });
+      const stickers = mergeStickers(m.stickers, emptySentStickers.get(context));
+      const activity = [m.activity_ts ?? "", emptySentActivity.get(context) ?? ""].sort().at(-1);
+      out.push({ ...m, ...emptySentReceipt.get(context), from_me: true, tapbacks: mergeTapbacks(m.tapbacks, emptySentTapbacks.get(context)),
+        ...(stickers ? { stickers } : {}), ...(activity ? { activity_ts: activity } : {}) });
       continue;
     }
     out.push(m);
@@ -1955,7 +1968,7 @@ export interface ChatInfo {
   /** Mirrored from Messages' pinning preferences; absent on old bridges. */
   pinned: boolean;
   pin_order: number | null;
-  last_attachment?: { name: string; mime: string } | null;
+  last_attachment?: { name: string; mime: string; sticker?: boolean } | null;
   pin_name: string | null;
   muted: boolean;
 }
@@ -2013,14 +2026,15 @@ export function fetchChats(runner = spawnSync): ChatInfo[] | null {
           last_text: messagePreview(
             r.last_text,
             r.last_attachment && typeof r.last_attachment === "object"
-              ? { name: r.last_attachment.name, mime: r.last_attachment.mime }
+              ? { name: r.last_attachment.name, mime: r.last_attachment.mime, sticker: r.last_attachment.sticker === true }
               : null,
           ),
           last_from_me: r.last_from_me === true,
           last_handle: String(r.last_handle ?? ""),
           last_name: typeof r.last_name === "string" ? r.last_name : null,
           last_attachment: r.last_attachment && typeof r.last_attachment === "object"
-            ? { name: String(r.last_attachment.name ?? ""), mime: String(r.last_attachment.mime ?? "") }
+            ? { name: String(r.last_attachment.name ?? ""), mime: String(r.last_attachment.mime ?? ""),
+                ...(r.last_attachment.sticker === true ? { sticker: true } : {}) }
             : null,
           pinned: r.pinned === true || boundedPinOrder !== null,
           pin_order: boundedPinOrder,

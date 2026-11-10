@@ -1076,7 +1076,7 @@ test("a thread response taken before a local send or failure cannot replace bubb
 // the picture (or file chip) itself, through the one shared TapbackPill.
 test("tapbacks on picture-only messages get a pill on the picture", () => {
   expect(panel).toContain("component TapbackPill: Rectangle {");
-  expect(panel.split("TapbackPill {").length - 1).toBe(3);   // text bubble, picture, file chip
+  expect(panel.split("TapbackPill {").length - 1).toBe(4);   // text bubble, picture, file chip, standalone sticker
   expect(panel).toContain('readonly property bool pillHere: index === 0 && String(bubbleRow.modelData.text || "") === ""');
   expect(panel).toContain("+ (pillHere ? Style.space(12) : 0)");
 });

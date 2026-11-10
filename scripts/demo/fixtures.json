@@ -106,7 +106,7 @@
       {
         "min": -181,
         "from_me": false,
-        "text": "Loved “7 works. bringing the good thermos”",
+        "text": "Loved \u201c7 works. bringing the good thermos\u201d",
         "tapback": true
       },
       {
@@ -140,6 +140,78 @@
         "from_me": true,
         "text": "on my way, ten minutes out",
         "read_at": true
+      },
+      {
+        "min": -12,
+        "from_me": false,
+        "text": "Perfect. I found a new overlook for our coffee stop.",
+        "stickers": [
+          {
+            "attachment": {
+              "id": "990001",
+              "name": "sunshine.png",
+              "mime": "image/png",
+              "bytes": 12000,
+              "sticker": {
+                "source": "user",
+                "label": "Sunshine sticker",
+                "animated": false
+              }
+            },
+            "guid": "DEMO-STICKER-1",
+            "part": 0,
+            "from_me": true,
+            "by": "You",
+            "placement": {
+              "x": 1.0,
+              "y": 0.0,
+              "scale": 1.0,
+              "rotation": -0.12,
+              "parentWidth": 300
+            }
+          }
+        ]
+      },
+      {
+        "min": -10,
+        "from_me": true,
+        "text": "",
+        "attachments": [
+          {
+            "name": "happy-star.png",
+            "mime": "image/png",
+            "sticker": {
+              "source": "user",
+              "label": "Happy star sticker",
+              "animated": false
+            }
+          }
+        ]
+      },
+      {
+        "min": -8,
+        "from_me": false,
+        "text": "See you there!",
+        "stickers": [
+          {
+            "reaction": true,
+            "attachment": {
+              "id": "990002",
+              "name": "reaction-star.png",
+              "mime": "image/png",
+              "bytes": 12000,
+              "sticker": {
+                "source": "user",
+                "label": "Star reaction",
+                "animated": false
+              }
+            },
+            "guid": "DEMO-REACTION-STICKER",
+            "part": 0,
+            "from_me": true,
+            "by": "You"
+          }
+        ]
       }
     ]
   }

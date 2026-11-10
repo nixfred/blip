@@ -105,14 +105,15 @@ function conversation(): Row[] {
       tapback: m.tapback === true,
       error: 0,
       read_at: m.read_at ? stamp(Number(m.min) + 2) : null,
-      tapbacks: null,
+      tapbacks: m.tapbacks || null,
+      stickers: Array.isArray(m.stickers) ? (m.stickers as any[]).map(sticker => ({...sticker, ts: stamp(Number(m.min) + 1)})) : [],
       attachments: Array.isArray(m.attachments)
-        ? (m.attachments as unknown as Array<{ name: string; mime: string }>).map((a, k) => ({
-          id: String(700000 + i * 10 + k), name: a.name, mime: a.mime, bytes: 1843200,
+        ? (m.attachments as unknown as Array<{ name: string; mime: string; sticker?: unknown }>).map((a, k) => ({
+          id: String(700000 + i * 10 + k), name: a.name, mime: a.mime, bytes: a.mime.startsWith("audio/") ? 1152044 : a.sticker ? 12000 : 1843200, ...(a.sticker ? {sticker:a.sticker} : {}),
         }))
         : null,
       reply_to: m.reply_to ? { text: String(m.reply_to), from_me: false } : null,
-      edited: m.edited === true, retracted: m.retracted === true, effect: null, audio: false, link: null,
+      edited: m.edited === true, retracted: m.retracted === true, effect: null, audio: m.audio === true, link: null,
     };
     return row;
   });
@@ -205,12 +206,19 @@ function main(): void {
   if (sub === "attachment") {
     const dim = val("--max-dim") || "1600";
     const id = argv.find((a) => /^[0-9]+$/.test(a)) ?? "0";
+    const isSticker = id === "990001" || id === "990002" || conversation().some(row => (row.attachments as any[] || []).some(a => a.id === id && a.sticker));
+    if (isSticker) {
+      // Procedural transparent art: no real person's image or downloaded media.
+      const r = spawnSync("magick", ["-size", "192x192", "xc:none", "-fill", "#ffd45c", "-stroke", "#edb742", "-strokewidth", "3", "-draw", "polygon 96,10 118,64 176,68 132,108 146,168 96,138 46,168 60,108 16,68 74,64", "-stroke", "none", "-fill", "#513d32", "-draw", "circle 75,87 79,87 circle 117,87 121,87", "-stroke", "#513d32", "-strokewidth", "5", "-fill", "none", "-draw", "path 'M 76,110 Q 96,130 116,110'", "png:-"], { maxBuffer: 8 << 20 });
+      if (r.status !== 0 || !r.stdout?.length) process.exit(1);
+      process.stdout.write(r.stdout as Buffer); return;
+    }
     const hue = (Number(id) % 12) * 30;
     const r = spawnSync("magick", [
       "-size", `${dim}x${Math.round(Number(dim) * 0.75)}`,
       `gradient:hsl(${hue},60%,42%)-hsl(${(hue + 40) % 360},55%,22%)`,
       "-gravity", "center", "-font", FONT, "-pointsize", String(Math.round(Number(dim) / 12)),
-      "-fill", "white", "-annotate", "+0+0", "demo photo",
+      "-fill", "white", "-annotate", "+0+0", "LAKE TRAIL",
       "-quality", "80", "jpg:-",
     ], { maxBuffer: 32 << 20 });
     if (r.status !== 0 || !r.stdout?.length) process.exit(1);
