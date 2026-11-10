@@ -16,6 +16,7 @@
  * at 500 MB, evicted after each write.
  */
 
+import { analyzeAudio, type AudioMetadata } from "./audio-metadata";
 import { shimPath } from "./shim-path";
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -509,6 +510,7 @@ export function bakeOrientation(bytes: Buffer, runner = spawnSync): Buffer {
 }
 
 export interface FetchResult {
+  audio?: AudioMetadata;
   ok: boolean;
   online: boolean;
   path: string;
@@ -604,7 +606,10 @@ export function fetchAttachment(
         cachedRaw = cachedMediaBytes(candidate, Math.min(maxBytes, FETCH_MAX_BYTES));
         if (cachedRaw) break; // convert an already cached APNG without another bridge read
       }
+      const audio = String(mime).toLowerCase().startsWith("audio/") ? analyzeAudio(candidate, runner) : undefined;
+      if (audio) evict(candidate.slice(candidate.lastIndexOf("/") + 1));
       return {
+        ...(audio ? {audio} : {}),
         ok: true, online: true, path: candidate, url: pathToFileURL(candidate).href, error: "",
         renderMime: cachedMime, ...metrics,
         animationUnavailable: candidate !== animationFile && (sequenceStill || candidate === stillFile || metrics.animationUnavailable),
@@ -698,7 +703,9 @@ export function fetchAttachment(
   renameSync(tmp, file);
   evict(file.slice(file.lastIndexOf("/") + 1));
   const animation = imageAnimation(bytes.subarray(0, IMAGE_HEADER_BYTES));
+  const audio = String(mime).toLowerCase().startsWith("audio/") ? analyzeAudio(file, runner) : undefined;
   return {
+    ...(audio ? {audio} : {}),
     ok: true, online: true, path: file, url: pathToFileURL(file).href, error: "",
     ...imageMetrics(bytes.subarray(0, IMAGE_HEADER_BYTES), renderMime), renderMime,
     animated: animation.animated && animation.format !== "png",
