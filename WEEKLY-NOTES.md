@@ -62,6 +62,10 @@ reconstructed on Sunday from memory.
   unproven, and #132 stays open. The tool reports this as "clicked but the conversation is not pinned" and leaves the
   alert open on the Mac: a message naming the 9-pin limit is a follow-up. Lesson for the post, twice now: a fix is not
   done until the thing it is for has happened on the machine it is for.
+- **Follow-up, Tue 10 Nov (202f600, Larry's own change): the tool names the 9-pin limit.** When Messages refuses a tenth
+  pin, `imsg-read --pin` now reports Messages' own sentence and dismisses that one alert instead of saying "clicked but
+  not pinned" and leaving it open. Live on the 27.2 gateway: the full pin list produced the sentence, nothing changed.
+  A pin actually landing on 27.2 is still the open question on #132.
 - **#156 a Messages-style restyle plus features, Marcus Vorwaller, 17,403 lines, NOT merged.** He asked "interested?"
   first. Fred decided: the restyle and per-conversation backgrounds stay in his fork (Blip is one opinionated look);
   the features are welcome as separate PRs in this order: Delivered, tapbacks on any message on macOS 27, native

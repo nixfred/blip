@@ -52,6 +52,12 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-11-10  202f600 A pin Messages refuses says why: on macOS 27 a tenth pin puts up an alert ("You can pin up to 9 conversations") while the
+                 sidebar action still reports success, so imsg-read ended in "clicked but not pinned" and left the sheet open. After a pin
+                 that did not land it now reads the sheet and reports Messages' own words (exit 75 unchanged); it presses OK only on a
+                 one-button sheet about pinning. Fred Nix / Larry, github.com/nixfred, X https://x.com/nixfred, found while live-testing #154.
+                 13 new tests; three mutations fail the right ones; Mac suites pass on Python 3.9.6. LIVE on Fred's 27.2 gateway 10 Nov:
+                 the full pin list gave exactly that sentence, the alert was dismissed, the pin list was unchanged. Fred approved the diff.
 2026-11-09  #155 A tapback failure names its real reason instead of "tapback: Mac unreachable": exit 69 is two failures (the shim's
                  translation of ssh's 255, and imsg-react's own EX_UNAVAILABLE for a locked screen or a Messages with no window), and
                  tapbackFailure now calls a 69 unreachable only when the shim's marker is on stderr or no imsg-react line ran; 255 stays
