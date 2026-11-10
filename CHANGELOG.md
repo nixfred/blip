@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A failed send clears itself when the same words are delivered later.** A failed attempt used to stay on
+  screen for the life of the shell, so after the gateway Mac was logged back in and the retry went out, a red
+  "Not Delivered" bubble still sat under a message that had been delivered (10 Nov). `withPendingSends()` now
+  drops a failed attempt when a real row from you with the same text, strictly newer than the attempt, is in the
+  thread, for every earlier failed attempt of those words. A copy in the same second, an older copy, a row
+  Apple itself marked failed and a withdrawn row still do not count, and the attempt does not use up the row,
+  so an in-flight send of the same words can still claim it. Four new tests; three mutations each fail one.
+  Deploy: `thread.ts` (the QML view reads it through `bun thread.ts`); nothing on the Mac.
 - **A send that fails because nobody is logged in on the Mac now says so.** On 10 Nov the gateway's WindowServer
   died (macOS 27.2 beta, build 26B5091g) and loginwindow logged the user out, which leaves no GUI session to launch
   anything into. Every send then showed Messages' launch failure as raw osascript text, "execution error: An error

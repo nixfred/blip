@@ -62,3 +62,52 @@ test("every other send error text passes through untouched", () => {
     "code 1081012 and -108100 are not it", "error -108101",
   ]) expect(friendlySendError(raw)).toBe(raw);
 });
+
+// 2026-11-10: a send failed (the gateway Mac had no login session), the user logged the Mac in and sent the
+// same words again, and the retry was delivered. The failed attempt stayed on screen as a red "Not Delivered"
+// ghost under a message that DID go out, until the shell restarted.
+function sentRow(text: string, ts: string, extra: Record<string, unknown> = {}) {
+  return {...pendingBubble(undefined, {chat: "+15551234567", text, ts}, "2026-11-10").bubble, pending: false, failed: false, ...extra};
+}
+const failedSend = (localId: string, text: string, ts: string) =>
+  ({localId, chat: "+15551234567", text, ts, failed: true, failureReason: "Messages can't start on the Mac"});
+
+test("a delivered retry of the same words clears the failed attempt", () => {
+  const out = withPendingSends([sentRow("Applying.....Awesome!", "2026-11-10 12:49:52")],
+    [failedSend("1", "Applying.....Awesome!", "2026-11-10 12:40:00")], "2026-11-10", DEFAULT_FORMATS, Date.parse("2026-11-10T12:50:00"));
+  expect(out.pending).toEqual([]);
+  expect(out.bubbles).toHaveLength(1);
+  expect(out.bubbles[0]?.failed).toBe(false);
+});
+
+test("every failed attempt of the same words clears when one newer copy is delivered", () => {
+  const out = withPendingSends([sentRow("hello", "2026-11-10 12:49:52")],
+    [failedSend("1", "hello", "2026-11-10 12:40:00"), failedSend("2", "hello", "2026-11-10 12:41:00")],
+    "2026-11-10", DEFAULT_FORMATS, Date.parse("2026-11-10T12:50:00"));
+  expect(out.pending).toEqual([]);
+  expect(out.bubbles).toHaveLength(1);
+});
+
+test("a failed attempt stays when nothing newer with the same words was delivered", () => {
+  const failed = failedSend("1", "hello", "2026-11-10 12:40:00");
+  const cases = [
+    [sentRow("something else", "2026-11-10 12:49:52")],            // different words
+    [sentRow("hello", "2026-11-10 12:39:00")],                       // older copy
+    [sentRow("hello", "2026-11-10 12:40:00")],                       // same second: not provably a retry
+    [sentRow("hello", "2026-11-10 12:49:52", {failed: true})],       // newer, but Apple marked it failed too
+    [sentRow("hello", "2026-11-10 12:49:52", {retracted: true})],    // newer, but unsent
+    [],
+  ];
+  for (const rows of cases) {
+    const out = withPendingSends(rows as any, [failed], "2026-11-10", DEFAULT_FORMATS, Date.parse("2026-11-10T12:50:00"));
+    expect(out.pending).toEqual([failed]);
+    expect(out.bubbles.at(-1)).toMatchObject({failed: true, pending: true});
+  }
+});
+
+test("a failed attempt of OTHER words is untouched by a delivered retry of different ones", () => {
+  const keep = failedSend("2", "other words", "2026-11-10 12:41:00");
+  const out = withPendingSends([sentRow("hello", "2026-11-10 12:49:52")],
+    [failedSend("1", "hello", "2026-11-10 12:40:00"), keep], "2026-11-10", DEFAULT_FORMATS, Date.parse("2026-11-10T12:50:00"));
+  expect(out.pending).toEqual([keep]);
+});

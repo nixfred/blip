@@ -452,8 +452,19 @@ export function withPendingSends(bubbles: Bubble[], pending: PendingSend[], toda
   const taken = new Set<number>();
   const open: PendingSend[] = [];
   for (const p of live) {
-    // A rejected attempt is not resolved by an older identical message.
-    if (p.failed === true) { open.push(p); continue; }
+    // A rejected attempt is not resolved by an older identical message. It IS resolved by a NEWER one: the user
+    // sent the same words again and they were delivered (2026-11-10: a retry went out the moment the gateway Mac
+    // was logged in again, and the failed bubble stayed under it as a red ghost until a shell restart). Strictly
+    // newer, so a copy in the same second is never taken for a retry; a row Apple marked failed or the sender
+    // withdrew is no delivery. It does not use up the row (`taken`), so every earlier failed attempt of the same
+    // words clears with it and an in-flight send of those words can still claim it.
+    if (p.failed === true) {
+      const want = p.text.trim();
+      const sent = bubbles.some((b) => b.from_me && !b.retracted && !b.pending && !b.failed
+        && b.text === want && stampMs(b.ts) > stampMs(p.ts));
+      if (!sent) open.push(p);
+      continue;
+    }
     const want = p.text.trim();
     let hit = -1;
     for (let i = bubbles.length - 1; i >= 0; i--) {
