@@ -64,7 +64,9 @@ jobs:
       - name: read pushes address groups and restore focus (no macOS needed)
         run: python3 bridge/mac/test_read.py
       - name: tapbacks are verified by chat.db, pressed once and never mid-scroll (no macOS needed)
-        run: python3 bridge/mac/test_react.py
+        run: |
+          python3 bridge/mac/test_react.py
+          python3 bridge/mac/test_reaction_kind.py
       - name: hide Spam / unknown senders (no macOS needed)
         run: python3 bridge/mac/test_filtered.py
       - name: contact review across sources (no macOS needed)
