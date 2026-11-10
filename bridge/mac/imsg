@@ -1116,6 +1116,8 @@ def enrich(con, rows, with_names: bool):
         e = extras[r["ROWID"]]
         if r["is_from_me"] and r["date_read"]:
             e["read_at"] = fmt_ts(r["date_read"])
+        if r["is_from_me"] and r["is_delivered"] and r["service"] in ("iMessage", "RCS"):
+            e["delivered"] = True
         if has_edit:
             e.update(_edit_flags(r["date_edited"], r["date_retracted"], r["message_summary_info"]))
         if r["orig_guid"] and r["orig_guid"] in osnip:
@@ -1286,7 +1288,7 @@ def base_select(con) -> str:
         _BASE_SELECT_CACHE = f"""
             SELECT m.ROWID, m.date, m.is_from_me, m.text, m.attributedBody,
                    m.service, h.id AS handle, c.chat_identifier, c.room_name,
-                   m.guid, m.date_read, m.is_read, m.error, {edit_cols} {sched_cols}
+                   m.guid, m.date_read, m.is_delivered, m.is_read, m.error, {edit_cols} {sched_cols}
                    m.associated_message_type AS assoc_type,
                    m.thread_originator_guid AS orig_guid,
                    m.expressive_send_style_id AS style_id,

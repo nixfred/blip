@@ -527,7 +527,7 @@ describe("linkify", () => {
 describe("rich decoration", () => {
   const today = "2026-08-31";
 
-  test("receipt lands only on the NEWEST read from-me bubble", () => {
+  test("receipt belongs only to the newest sent message", () => {
     const out = decorate(
       [
         msg({ ts: "2026-08-31T10:00:00Z", from_me: true, read_at: "2026-08-31T10:00:30Z" }),
@@ -537,7 +537,7 @@ describe("rich decoration", () => {
       ],
       today,
     );
-    expect(out.map((b) => b.receipt)).toEqual(["", "", "Read 10:07 AM", ""]);
+    expect(out.map((b) => b.receipt)).toEqual(["", "", "", ""]);
   });
 
   test("receipt from an earlier day carries the day label", () => {
