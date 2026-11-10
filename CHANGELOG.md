@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **A send that fails because nobody is logged in on the Mac now says so.** On 10 Nov the gateway's WindowServer
+  died (macOS 27.2 beta, build 26B5091g) and loginwindow logged the user out, which leaves no GUI session to launch
+  anything into. Every send then showed Messages' launch failure as raw osascript text, "execution error: An error
+  of type -10810 has occurred. (-10810)", and nothing in it named the cause. `friendlySendError()` in
+  `send-state.ts` turns exactly that code into "Messages can't start on the Mac: nobody is logged in there. Log in
+  on the Mac, then send again." for the failed bubble, the status line and a failed file send. Every other error
+  keeps the Mac's own wording; a guess at an unproven code would be worse than the number. Two new tests, both
+  killed by a mutation. Deploy: the plugin files only (`BlipView.qml`, `SendState.mjs`, `send-state.ts`), nothing
+  on the Mac.
 - **A pin Messages refuses says why, and its alert is dismissed.** Messages allows nine pinned conversations.
   On macOS 27 a tenth pin puts up an alert sheet ("You can pin up to 9 conversations. To pin this conversation,
   unpin another one first.") while the sidebar action itself still reports success, so `imsg-read --pin` ended

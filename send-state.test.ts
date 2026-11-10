@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { markSendFailed } from "./send-state";
+import { markSendFailed, friendlySendError } from "./send-state";
 import { pendingBubble, withPendingSends, DEFAULT_FORMATS } from "./thread";
 
 test("failure targets one of two sends in the same second and keeps the original immutable", () => {
@@ -42,4 +42,23 @@ test("a late transport failure is retained even if a fetched row already resolve
   const result = markSendFailed([], "1", "Mac unreachable", send);
   expect(result).toEqual([{...send, failed:true, failureReason:"Mac unreachable"}]);
   expect(markSendFailed(result, "1", "Mac unreachable", send)).toHaveLength(1);
+});
+
+// 2026-11-10: the gateway Mac lost its whole GUI session (WindowServer died, loginwindow logged the
+// user out) and every send showed Messages' launch failure as raw osascript text.
+test("a Messages launch failure (-10810) says nobody is logged in on the Mac", () => {
+  const raw = "osascript error: 59:213: execution error: An error of type -10810 has occurred. (-10810)";
+  const plain = friendlySendError(raw);
+  expect(plain).toBe("Messages can't start on the Mac: nobody is logged in there. Log in on the Mac, then send again.");
+  expect(plain).not.toContain("10810");
+  expect(plain.length).toBeLessThan(240);
+  expect(markSendFailed([{localId: "1"}], "1", plain)[0]).toMatchObject({failureReason: plain});
+});
+
+test("every other send error text passes through untouched", () => {
+  for (const raw of [
+    "osascript error: 59:213: execution error: Messages got an error: Can't get participant. (-1728)",
+    "message too long", "not authorized", "send failed (exit 1)", "",
+    "code 1081012 and -108100 are not it", "error -108101",
+  ]) expect(friendlySendError(raw)).toBe(raw);
 });

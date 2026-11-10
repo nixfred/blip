@@ -1923,13 +1923,14 @@ FocusScope {
       } else {
         // Keep the failed bubble; put the words back in the field (unless a
         // newer draft is there), and the reason is on the status line.
+        var plainErr = SendState.friendlySendError(sendProc.lastErr)
         var reason = code === 69 || code === 255 ? "Mac unreachable"
-          : sendProc.lastErr !== "" ? sendProc.lastErr : "Send failed (exit " + code + ")"
+          : plainErr !== "" ? plainErr : "Send failed (exit " + code + ")"
         root.failPending(completedChat, completedId, reason, completedText, completedStamp)
         if (belongsHere) {
           if (composeField.text === "") composeField.text = completedText
           if (code === 69 || code === 255) root.note = "not sent — Mac unreachable"
-          else root.note = (sendProc.lastErr !== "" ? "send failed: " + sendProc.lastErr : "send failed (exit " + code + ")")
+          else root.note = (plainErr !== "" ? "send failed: " + plainErr : "send failed (exit " + code + ")")
         }
       }
       if (belongsHere) composeField.forceActiveFocus()
@@ -2069,7 +2070,7 @@ FocusScope {
         try {
           var d = JSON.parse(text.trim())
           ok = d.ok === true
-          if (!ok) err = d.online === false ? "not sent — Mac unreachable" : String(d.error || err)
+          if (!ok) err = d.online === false ? "not sent — Mac unreachable" : SendState.friendlySendError(String(d.error || err))
         } catch (e) { /* fall through */ }
         if (ok) {
           // Retire only the part that actually shipped — the user may have
