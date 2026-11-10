@@ -660,6 +660,70 @@ def sidebar_action(item: str) -> tuple[bool, str]:
     return False, why or out
 
 
+# macOS 27 refuses a tenth pin with a sheet on the Messages window ("You can
+# pin up to 9 conversations ..."), and the sidebar action itself still returns
+# success, so the helper above used to end in "clicked but not pinned" with the
+# sheet left open on the Mac (found live on the 27.2 gateway, 2026-11-09).
+# This reads that sheet's text. It presses the button only on a ONE-button sheet
+# whose text is about pinning; an alert of any other kind is somebody's decision,
+# so it is read out and left alone. Prints "none" or "alert <0|1 closed> <text>".
+PIN_ALERT_JS = r"""
+ObjC.import('ApplicationServices');
+function attr(el, name) {
+  const ref = Ref();
+  if ($.AXUIElementCopyAttributeValue(el, $(name), ref) !== 0) return null;
+  try { return ObjC.unwrap(ObjC.castRefToObject(ref[0])); } catch (e) { return null; }
+}
+function kids(el) {
+  const ref = Ref();
+  if ($.AXUIElementCopyAttributeValue(el, $('AXChildren'), ref) !== 0) return [];
+  const arr = ObjC.castRefToObject(ref[0]), out = [];
+  for (let i = 0; i < Number(arr.count); i++) out.push(arr.objectAtIndex(i));
+  return out;
+}
+function run(argv) {
+  const pid = Number(argv[0]);
+  if (!(pid > 0)) return 'none';
+  const app = $.AXUIElementCreateApplication(pid);
+  for (const win of kids(app).filter(k => attr(k, 'AXRole') === 'AXWindow')) {
+    for (const sheet of kids(win).filter(k => attr(k, 'AXRole') === 'AXSheet')) {
+      const text = kids(sheet).filter(k => attr(k, 'AXRole') === 'AXStaticText')
+        .map(k => String(attr(k, 'AXValue') || '')).filter(t => t !== '').join(' ').replace(/\s+/g, ' ').slice(0, 300);
+      const buttons = kids(sheet).filter(k => attr(k, 'AXRole') === 'AXButton');
+      let closed = 0;
+      if (buttons.length === 1 && /pin/i.test(text) && $.AXUIElementPerformAction(buttons[0], $('AXPress')) === 0) closed = 1;
+      return 'alert ' + closed + ' ' + text;
+    }
+  }
+  return 'none';
+}
+"""
+
+
+def pin_refusal() -> str:
+    """What Messages said when it would not pin, from the alert sheet it put up;
+    "" when there is none (or it cannot be read). Only asked after a pin that
+    did not land, so a pin that worked never touches the window again."""
+    pid = messages_pid()
+    if pid is None:
+        return ""
+    try:
+        r = subprocess.run(["osascript", "-l", "JavaScript", "-e", PIN_ALERT_JS, str(pid)],
+                           capture_output=True, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return ""
+    out = (r.stdout or b"").decode("utf-8", "replace").strip()
+    word, _, rest = out.partition(" ")
+    if r.returncode != 0 or word != "alert":
+        return ""
+    closed, _, text = rest.partition(" ")
+    text = "".join(c for c in text if c.isprintable()).strip()[:300]
+    if not text:
+        return ""
+    return (f'Pin was clicked but Messages refused: "{text}" '
+            + ("(the alert was dismissed)" if closed == "1" else "(the alert was left open on the Mac)"))
+
+
 def conversation_action(flag: str, handle: str) -> None:
     """Select a DM, click one Conversation-menu item, verify it in Messages'
     own records, and hand focus back to whatever the user had in front.
@@ -720,6 +784,11 @@ def conversation_action(flag: str, handle: str) -> None:
             sys.stderr.write(f"imsg-read: its unread state on the Mac may not have survived "
                              f"opening it ({lost})\n")
         restore_front(prev)
+    if flag == "--pin" and got is not want:
+        why = pin_refusal()
+        if why:
+            sys.stderr.write(f"imsg-read: {why}\n")
+            sys.exit(75)
     if got is None:
         sys.stderr.write(f"imsg-read: {item} was clicked but Messages' records cannot "
                          f"confirm the conversation is {word}\n")

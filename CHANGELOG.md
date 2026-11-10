@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A pin Messages refuses says why, and its alert is dismissed.** Messages allows nine pinned conversations.
+  On macOS 27 a tenth pin puts up an alert sheet ("You can pin up to 9 conversations. To pin this conversation,
+  unpin another one first.") while the sidebar action itself still reports success, so `imsg-read --pin` ended
+  in "clicked but the conversation is not pinned" and left the sheet open on the Mac (found live on the 27.2
+  gateway, 9 Nov, while testing #154). After a pin that did not land, `imsg-read` now reads the Messages
+  window's sheet and reports Messages' own words as the error (exit 75, unchanged). It presses the button only
+  on a one-button sheet whose text is about pinning; any other alert is read out and left alone. Thirteen new
+  tests, one of them running the real JXA under bun against a fake AX tree. Deploy: `bridge/mac/imsg-read` to
+  the Mac.
+
 - **A tapback failure names its real reason instead of "Mac unreachable" (#155, thanks @lama7).** Exit 69
   was two failures sharing one code: `blip-shim`'s translation of ssh's 255 (the bridge is down) and
   `imsg-react`'s own `EX_UNAVAILABLE` for Mac-local states it already states on stderr (screen locked,

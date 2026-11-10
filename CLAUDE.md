@@ -400,6 +400,10 @@ what it is handed. Keep it that way.
   built row selected, the helper pages the `Conversations` group from the top
   (`AXScrollDownByPage`, its own action) until the selected row exists, acts on
   it, and returns the list to the top. Never search or match by name instead.
+  Messages allows NINE pins: a tenth puts up an alert sheet while the sidebar
+  action still returns success. After a pin that did not land, `pin_refusal()`
+  reads that sheet and reports its words; it presses OK only on a ONE-button
+  sheet about pinning, and any other alert is read out and left open.
 - **`chat:null` exists.** Use `chatKey()`; never `String(m.chat)`. A row with
   neither chat nor handle is a leftover of a deleted conversation (iCloud keeps
   the row, the chat and the join are gone); `fetchMessages` drops it
