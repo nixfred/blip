@@ -244,6 +244,13 @@ what it is handed. Keep it that way.
   payloads. No probe, no trap. The shim no longer `exec`s ssh (it needs the
   exit code to translate); stdio is inherited either way, so attachment
   streaming and `--file-stdin` are untouched — covered by a stub-ssh test.
+  But a remote tool's OWN 69 is not transport: imsg-react uses EX_UNAVAILABLE
+  for Mac-local failures it says on stderr (screen locked, Messages started
+  with no window). `tapbackFailure` calls 69 offline only when the shim's own
+  marker ("unreachable — the iMessage bridge is offline") is on stderr or the
+  tool never ran; the marker check also keeps the shim's `$host` out of the
+  status line. (2026-11-09: a locked gateway said "tapback: Mac unreachable"
+  while sends through the same bridge worked.)
 - **`bridge.conf` is data, never `source`d.** The shim parses four keys and
   validates them; keep it that way (audit #7). `blip-bridged` applies the
   same allowlist before it interpolates `python`/`remote_bin` into a remote

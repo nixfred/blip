@@ -95,11 +95,13 @@ function pendingAfterLoad(p, chat, bubbles, startedAfterDone) {
   return Object.assign({}, p, { tries: p.tries + 1 });
 }
 var TAPBACK_NOT_STARTED = "tapback: imsg-react did not start; re-run blip-setup";
+var SHIM_UNREACHABLE = "unreachable — the iMessage bridge is offline";
 function tapbackFailure(code, stderr) {
-  if (code === 69 || code === 255)
-    return "tapback: Mac unreachable";
-  const line = String(stderr || "").split(`
+  const err = String(stderr || "");
+  const line = err.split(`
 `).map((l) => l.trim()).filter((l) => l !== "").pop() || "";
+  if (code === 255 || code === 69 && (err.includes(SHIM_UNREACHABLE) || !/^imsg-react:/m.test(err)))
+    return "tapback: Mac unreachable";
   const why = line.replace(/^imsg-react:\s*/, "").slice(0, 200);
   return "tapback: " + (why || "imsg-react exit " + code);
 }

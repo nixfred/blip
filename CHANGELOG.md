@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **A tapback failure names its real reason instead of "Mac unreachable" (#155, thanks @lama7).** Exit 69
+  was two failures sharing one code: `blip-shim`'s translation of ssh's 255 (the bridge is down) and
+  `imsg-react`'s own `EX_UNAVAILABLE` for Mac-local states it already states on stderr (screen locked,
+  Messages started with no window). `tapbackFailure` called every 69 transport, so a reachable Mac with a
+  locked screen read "tapback: Mac unreachable" for days while sends through the same bridge worked. A 69 is
+  now unreachable only when the shim's own marker line is on stderr or no `imsg-react:` line ran at all;
+  otherwise the status line shows the tool's reason. 255 stays ssh, always. One new test, and a note under the
+  `blip-shim` exit-code invariant in `CLAUDE.md`.
+
 - **A tapback that has to start Messages lands on the first try (#157, thanks @lama7).** `imsg-read`'s
   `ensure_messages()` treated "the Messages process exists" as ready, but a background launch (`open -g -j`)
   puts the process on the list seconds before System Events can see its menu bar, so the very next probe

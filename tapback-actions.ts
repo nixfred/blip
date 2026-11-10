@@ -171,14 +171,30 @@ export function pendingAfterLoad(
  *  missing from binDir, which blip-setup installs. */
 export const TAPBACK_NOT_STARTED = "tapback: imsg-react did not start; re-run blip-setup";
 
+/** What the shim writes when it turns an ssh failure into 69 (blip-shim,
+ *  the 255 branch). The whole point of checking it: 69 is TWO exit codes.
+ *  The shim's is a transport failure, and imsg-react's own EX_UNAVAILABLE
+ *  is a Mac-local one that names its reason on stderr — a screen locked,
+ *  Messages that would not start, no window to drive. Treating every 69 as
+ *  transport told people their reachable Mac was unreachable (2026-11-09,
+ *  a locked gateway and "tapback: Mac unreachable" while sends worked:
+ *  imsg-react had exited 69 saying "the Mac's screen is locked" and the
+ *  status line swallowed it). So 69 is only the bridge being down when the
+ *  shim itself said so, or when nothing on stderr contradicts it. */
+const SHIM_UNREACHABLE = "unreachable — the iMessage bridge is offline";
+
 /** One status line for a run that did not end in the tapback asked for.
  *  imsg-react says why on stderr ("imsg-react: …"), and each reason says
  *  itself what happened: nothing done, done but unconfirmed, or landed on
  *  another message ("stray"). So the prefix claims nothing. The shim says
  *  so for tapbacks=off. */
 export function tapbackFailure(code: number, stderr: string): string {
-  if (code === 69 || code === 255) return "tapback: Mac unreachable";
-  const line = String(stderr || "").split("\n").map((l) => l.trim()).filter((l) => l !== "").pop() || "";
+  const err = String(stderr || "");
+  const line = err.split("\n").map((l) => l.trim()).filter((l) => l !== "").pop() || "";
+  // 255 is ssh, always. 69 is the shim's 255 translation — the marker says
+  // so — and any 69 with no imsg-react line in sight (the tool never ran).
+  if (code === 255 || (code === 69 && (err.includes(SHIM_UNREACHABLE) || !/^imsg-react:/m.test(err))))
+    return "tapback: Mac unreachable";
   const why = line.replace(/^imsg-react:\s*/, "").slice(0, 200);
   return "tapback: " + (why || "imsg-react exit " + code);
 }
