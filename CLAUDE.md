@@ -559,6 +559,12 @@ what it is handed. Keep it that way.
   test guard it), and the date index returns date order, which reorders the reactions on a message unless the rows are
   sorted by ROWID as the old scan returned them. Do not "optimise" this to probe `associated_message_guid` by guid
   shape: `_strip_assoc` is deliberately lenient and a macOS update that changes the shape would lose reactions silently.
+  **What is left, measured through the live channel on the 530 MB gateway (2026-11-10):** `chats 400` 421 ms (an exact
+  `COUNT` per chat over 3,358 chats; the `messages` field is part of the vendored claude-on-mac JSON and no Blip code reads
+  it, but leave it alone unless a client needs the speed), `groups` 94 ms and 602 KB, `recent 500` 48 ms, `read-state`
+  40 ms, `session` 16 ms; a warm shallow collector run 0.17 s, a deep one 0.8 to 1.0 s, `thread.ts` 0.14 s end to end.
+  Do not chase `chats`: with `watch=true` the poll timer is 60 s and a deep run happens once per push while a surface is
+  open, not once a second.
 
 - **The persistent channel is an ACCELERATOR; the one-shot path is the
   contract.** `blip-bridged` (Linux, started by the LEADER BarWidget) holds
@@ -628,7 +634,7 @@ what it is handed. Keep it that way.
 ## Working on it
 
 ```
-bun test                                   # 620+ tests, ~1.5 s
+bun test                                   # 860+ tests, ~30 s (read-sync.test.ts is 25 s of it: 16 sequences x 6 collector spawns)
 bun collector.ts --deep | jq .unread       # live against the Mac
 bun thread.ts <chat-id> 40 | jq .bubbles   # one conversation
 cp -r *.qml *.ts *.mjs otp-desktop.py manifest.json icons ~/.config/omarchy/plugins/nixfred.blip/
