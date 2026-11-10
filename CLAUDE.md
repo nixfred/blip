@@ -549,6 +549,16 @@ what it is handed. Keep it that way.
   (`read_state(con) == sorted(read_state_scan(con))`). Two traps found on the way: SQLite scans the table for
   `is_read IS NOT 1` and for any OR of `is_read` tests (55 ms) where each branch UNIONed is an index search
   (0.8 ms), and `ORDER BY <expression>` defeats an index that `ORDER BY <column>` uses.
+  **Same lesson, third place (2026-11-10): the reaction scan in `enrich()`.** A conversation load read every
+  reaction in chat.db (28,413 of 282,650 rows, a full scan, 93 ms of a 100 ms load once the cluster map and contact index
+  are cached on the serve channel). It now reads from the window's oldest message minus 90 days (`TAPBACK_SKEW_NS`),
+  2 ms through Apple's `message_idx_date`; `skew_ns=None` is the old query, the fallback and the test oracle
+  (`test_tapback_window.py`). The margin is real data, not caution: 3 of 28,305 reactions are stamped BEFORE their
+  target, the worst by 0.83 days, so "reactions come later" is false and a bound without margin drops real ones.
+  Two traps: an `ORDER BY` in the SQL makes the planner prefer the full scan again (sort in Python, and let the plan
+  test guard it), and the date index returns date order, which reorders the reactions on a message unless the rows are
+  sorted by ROWID as the old scan returned them. Do not "optimise" this to probe `associated_message_guid` by guid
+  shape: `_strip_assoc` is deliberately lenient and a macOS update that changes the shape would lose reactions silently.
 
 - **The persistent channel is an ACCELERATOR; the one-shot path is the
   contract.** `blip-bridged` (Linux, started by the LEADER BarWidget) holds

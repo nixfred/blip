@@ -40,7 +40,7 @@ reconstructed on Sunday from memory.
   The extractions keep your theme, controls, banner and mark-all-read link... I'll handle the follow-on rebases as earlier PRs
   merge rather than leaving those conflicts for you."
 
-### Tue 10 Nov: #158 and #161 merged, #159 #160 #162 #163 sent back with specifics, and a poll that is 4x faster
+### Tue 10 Nov: #158, #161 and #162 merged, #159 #160 #163 sent back with specifics, and a poll that is 4x faster
 
 - **#158 a sent message shows Delivered until it is Read.** Marcus Vorwaller (github.com/marcus; X: none found 10 Nov, asked
   Fred; first merged PR). Blip showed nothing under your newest message until it was read; now it says Delivered, then Read.
@@ -49,6 +49,19 @@ reconstructed on Sunday from memory.
 - **#161 a searchable emoji picker beside Send.** Marcus Vorwaller (same). A smiley opens a Unicode catalogue with search by
   name and categories; choosing an emoji inserts it at the caret and never sends. Rendered in a clean VM on invented data
   before merging.
+- **#162 native stickers, merged the same evening.** Marcus Vorwaller (same; X: none found, asked Fred). Marcus answered
+  every point of the review within the hour and rebased. Stickers now sit on the message they were dragged onto, at the
+  position Messages recorded, or stand alone; GIF, APNG and WebP stickers play inline and Live Stickers animate through
+  ffmpeg. I re-ran the exploit I had reproduced (a text file sent as a video making ffmpeg read another picture): refused
+  on all three decode paths now. Honest residual risk, in the merge message and asked of him as a follow-up: ffmpeg decodes
+  sender-supplied video stickers without a click, so it should run sandboxed.
+- **A conversation opens about ten times faster on the Mac side (Larry's own change, 9b4f8d9).** Folding reactions onto
+  messages read every reaction in the database for every open. Measured on the real gateway: 103 ms to 7 ms for a typical
+  conversation, byte-identical output on 90 real windows. The one thing I would not assume: 3 of 28,305 real reactions are
+  stamped before their message (worst 0.83 days), so the bound has a 90-day margin instead of trusting the clock.
+- **The other three got a second look and a second answer.** Marcus fixed most of what I raised on #159, #160 and #163
+  and rebased within the hour; fresh independent reviews of the new heads found what is left (see the PR comments). They
+  land after #162 in the order #163, #159, #160.
 - **The other four are sent back, with reasons, not refused.** An independent review of each (read-only, nothing sent to the
   Mac) found real problems and I reproduced the worst ones. #162 stickers: ffmpeg guessed the file format from a stranger's
   bytes, so a two-line text file sent as a video came out as a different cached picture. #163 inline voice messages: Qt plays

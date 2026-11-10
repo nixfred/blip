@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Stickers render as stickers (#162, Marcus Vorwaller).** A sticker used to be an empty bubble or a made-up star
+  tapback. Now it is drawn on the message it was dragged onto, at the position, size and angle Messages recorded, or on
+  its own when it stands alone; Memoji, Genmoji and app stickers say what they are to a screen reader. GIF, APNG and
+  WebP stickers play inline (an APNG is converted to a lossless animated WebP, because Qt draws APNG as a still), and a
+  Live Sticker (HEICS) becomes an animated WebP through ffmpeg, or the Mac's transparent still when ffmpeg is missing.
+  Everything is bounded: 2048 px, a 64M-pixel animation budget, 100 frames, 8 seconds, a cache that remembers a failed
+  preview for an hour. ffprobe and ffmpeg are told the container format before they see the file (my review reproduced a
+  two-line text file sent as a video making ffmpeg read a different picture from disk; that no longer works). Needs
+  `ffmpeg` for animation and `qt6-imageformats` for WebP; `blip-setup` says which is missing. Known limit: ffmpeg now
+  decodes sender-supplied video stickers on your machine without a click; running it sandboxed is requested of Marcus.
+- **A conversation loads in about a tenth of the Mac time (9b4f8d9).** Folding reactions onto messages read every
+  reaction in chat.db, a scan of all 282,650 messages, for every conversation open and every push reload: 93 ms of a
+  100 ms load. It now reads only reactions stamped from the window's oldest message minus 90 days, which Apple's own
+  `message_idx_date` answers in 2 ms (6 ms for a three-month-old window, 24 ms for a year-old one). Measured on the real
+  gateway: a typical window 103 ms to 7 ms, a 3,200-row window 126 ms to 32 ms. The answer is identical, not
+  approximately: 90 real windows (4,440 rows, 421 reactions) hash-equal against the old query, 1,200 seeded random
+  databases agree with it, ten mutations each fail a test, and a plan test fails if the planner stops using the index.
+  The margin is deliberate: 3 of 28,305 real reactions are stamped before the message they react to, the worst by 0.83
+  days, so a plain "reactions come later" bound would have dropped real ones. Limit, tested: a reaction stamped more
+  than 90 days before its message is not read.
 - **Blip says the Mac is signed out before a send fails.** When the gateway Mac is at its login window (a logout, or the
   10 Nov WindowServer crash; FileVault means only you can log back in) reading keeps working, because that is plain
   sqlite over ssh, and every send fails with Launch Services error -10810. Blip found out only when a send died. The

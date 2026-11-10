@@ -52,6 +52,20 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-11-10  9b4f8d9 A conversation loads in about a tenth of the Mac time: enrich() no longer reads every reaction in chat.db (a full scan of
+                 282,650 messages, 93 ms of a 100 ms load) but only those stamped from the window's oldest message minus 90 days, answered by
+                 Apple's message_idx_date in 2 ms; rows are sorted by ROWID in Python so reactions keep their old order. Fred Nix / Larry,
+                 github.com/nixfred, X https://x.com/nixfred. Real gateway: 90 windows (4,440 rows, 421 reactions) hash-identical to the old
+                 query, typical window 103 ms to 7 ms; 1,200 seeded random databases agree; 10 of 10 mutants killed; a plan test guards the
+                 index. Documented limit: a reaction stamped more than 90 days before its message is not read (worst real one: 0.83 days).
+                 Door classifier one-way (bridge/mac/imsg); Fred approved the literal diff.
+2026-11-10  #162 Native stickers: a sticker is drawn on the message it was dragged onto (position, scale, rotation from Messages' own
+                 metadata) or alone, GIF/APNG/WebP play inline (APNG converted to animated WebP), Live Stickers (HEICS) become animated WebP
+                 through ffmpeg or the Mac's transparent still. Marcus Vorwaller, github.com/marcus, X: none found (checked 2026-11-10; asked
+                 Fred). Fifth split of his #156. Checked by Larry 10 Nov: sent back once (ffmpeg guessed the format from sender bytes, reproduced;
+                 size gate hit every attachment; type-1000 badge change), all fixed and re-verified; 862 bun, 21 Python, 6 Qt tests pass, CI
+                 green, real gateway chat list identical apart from the sticker key. Door classifier one-way (bridge/mac/imsg, blip-setup,
+                 ci.yml); Fred approved the literal diff. Follow-up asked: run ffmpeg sandboxed.
 2026-11-10  (this commit) Blip says the Mac is signed out before a send fails: a read-only `imsg session` (launchctl print gui/<uid>, rc 0 versus
                  112, under 10 ms, no app touched) and one red line in the list and under the composer when it is a definite "signed out";
                  anything unclear shows nothing. Found the day the gateway's WindowServer crashed (reads worked, every send failed with -10810).
