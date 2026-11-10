@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **A sent message shows Delivered until it is Read** (#158, Marcus Vorwaller). iMessage says Delivered under your
+  newest message and Blip said nothing until it was read. `imsg --rich` now adds `delivered` for your own iMessage and
+  RCS rows (`message.is_delivered`), and the receipt belongs to the newest sent message only: Delivered, then Read with
+  the existing time label. Failed, withdrawn and scheduled rows never claim it, Carrier SMS is unchanged, a message you
+  send yourself keeps its receipt in either echo order, and an older bridge that omits `delivered` still shows Read.
+  The old rule put Read under the newest READ message, which a later unread send left stale, so one test now says
+  "newest sent message". Deploy: the plugin files and `imsg` on the gateway.
+- **A searchable emoji picker beside Send** (#161, Marcus Vorwaller). A smiley opens a Unicode catalogue: search by
+  name, nine categories, an exact pasted sequence always first, arrow keys and Enter. Choosing an emoji replaces the
+  selection or inserts at the caret and returns focus to the composer without sending; Escape keeps the draft. The
+  grid is a `GridView` over a JS array, so only the visible cells exist. It adds a generated 327 KB catalogue module
+  from licensed data (the Unicode and Beeper/Automattic MIT notices ship in `docs/`). Rendered in a clean Omarchy VM on
+  invented data: themed popup, search, categories. An emoji newer than the installed font draws as an empty box.
+  Deploy: the plugin files (`ComposerEmojiPicker.qml`, `EmojiPicker.mjs`, `emoji-picker.ts`, `emoji-catalogue.ts`).
 - **A poll costs a fraction of what it did: the unread snapshot and the chat list stop reading the whole message
   table.** Every poll ran `imsg read-state`, one window function over all 144,621 inbound messages on the
   gateway's 530 MB chat.db (about 600 ms, and it grows with history). While the window or panel is open every
@@ -12,7 +26,9 @@
   `(chat_id, message_date, message_id)` index: 600 ms to 17 ms. `cmd_chats` takes each chat's newest visible
   message from the same index: 1.0 to 1.3 s to 0.33 s. The old `read_state` stays as `read_state_scan`, the
   fallback for a schema without `message_date`, for a predicate that reaches the message table and for more than
-  400 candidate chats, and the oracle the tests hold the new one to. The output is identical on the real
+  400 candidate chats, and the oracle the tests hold the new one to. End to end on gus, wall clock of a collector run:
+  a shallow poll 0.77 s to 0.2 s, a deep poll (window or panel open) 2.1 s to 1.0 s; what is left is the exact
+  per-chat message count in `chats` (238 ms) and the 616 KB `groups` reply, both left alone on purpose. The output is identical on the real
   database: compared for the snapshot over four variants and byte for byte for the chat list over five.
   `read-state` also joins the persistent `serve` channel, so a poll no longer pays a Python start and a database
   open for it; a Mac whose `serve` predates it answers 64 and the client asks one-shot. `saveState()` removes

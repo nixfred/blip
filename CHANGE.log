@@ -52,6 +52,24 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-11-10  #161 A searchable emoji picker beside Send: a smiley button opens a Unicode catalogue (search by name, nine categories, an exact
+                 pasted sequence always first, keyboard navigation); choosing one inserts at the caret or replaces the selection and returns
+                 focus to the composer without sending, Escape keeps the draft. Marcus Vorwaller, github.com/marcus, X: none found (checked
+                 2026-11-10: GitHub profile and social accounts empty, his site marcus.pictures is a photography portfolio with no X link; asked
+                 Fred). First merged PR (fourth split of his #156). Checked by Larry 10 Nov: 822 bun tests, all Python suites, Qt UI test
+                 (6) pass; rendered in a clean Test Drive VM on invented data (themed popup, search, categories, grid); one empty cell was an
+                 emoji newer than that VM's font. Door classifier one-way only for a 4-line CI step; Fred approved the diff.
+2026-11-10  #158 A sent message shows Delivered until it is Read: imsg --rich adds delivered for your own iMessage and RCS rows, the receipt
+                 belongs to the newest sent message only (Delivered, then Read with the existing time label; failed, withdrawn and scheduled rows
+                 never claim it), and a self-thread echo keeps the sent twin's receipt in either order. Marcus Vorwaller, github.com/marcus,
+                 X: none found (checked 2026-11-10; asked Fred). First split of his #156. Checked by Larry 10 Nov: independent review found
+                 nothing, all tests pass on the stack. Door classifier one-way (bridge/mac/imsg, 3 lines); Fred approved the literal diff.
+2026-11-10  401b99d A poll costs a fraction of what it did: the unread snapshot (read-state) goes from 600 ms to 17 ms and the chat list from
+                 1.0-1.3 s to 0.33 s, because both stop reading the whole message table and use Apple's own indexes (message_idx_is_read and
+                 chat_message_join). Measured on the gateway's 530 MB chat.db (282,650 messages): identical output (snapshot over 4 variants,
+                 chat list byte for byte over 5), plus 1,500 random databases against the old code kept as an oracle and 10 mutations each caught.
+                 Collector wall clock on gus: shallow poll 0.77 s to 0.2 s, deep poll (window or panel open) 2.1 s to 1.0 s. Fred Nix / Larry,
+                 github.com/nixfred, X https://x.com/nixfred. Fred approved the literal bridge diff; installed on the gateway, gus and vic.
 2026-11-10  202f600 A pin Messages refuses says why: on macOS 27 a tenth pin puts up an alert ("You can pin up to 9 conversations") while the
                  sidebar action still reports success, so imsg-read ended in "clicked but not pinned" and left the sheet open. After a pin
                  that did not land it now reads the sheet and reports Messages' own words (exit 75 unchanged); it presses OK only on a

@@ -36,6 +36,31 @@ reconstructed on Sunday from memory.
 - **Marcus Vorwaller (github.com/marcus, no X found 9 Nov) on #156, Mon 9 Nov**: "I'm opening it to start a
   conversation, not expecting a merge as-is. Happy to split it, drop parts, or keep the UI in my fork and send only the features you want."
 - Comment sweep Mon 9 Nov (since 8 Nov): the three notes above, nothing else from outside.
+- **Marcus Vorwaller (github.com/marcus) on #156, Tue 10 Nov**, after splitting it into six PRs: "The restyle stays in my fork.
+  The extractions keep your theme, controls, banner and mark-all-read link... I'll handle the follow-on rebases as earlier PRs
+  merge rather than leaving those conflicts for you."
+
+### Tue 10 Nov: #158 and #161 merged, #159 #160 #162 #163 sent back with specifics, and a poll that is 4x faster
+
+- **#158 a sent message shows Delivered until it is Read.** Marcus Vorwaller (github.com/marcus; X: none found 10 Nov, asked
+  Fred; first merged PR). Blip showed nothing under your newest message until it was read; now it says Delivered, then Read.
+  Only the newest sent message owns the receipt, failed, withdrawn and scheduled rows never claim it, and a message you send
+  yourself keeps its receipt. One of his six splits of #156, the first in the order I asked for.
+- **#161 a searchable emoji picker beside Send.** Marcus Vorwaller (same). A smiley opens a Unicode catalogue with search by
+  name and categories; choosing an emoji inserts it at the caret and never sends. Rendered in a clean VM on invented data
+  before merging.
+- **The other four are sent back, with reasons, not refused.** An independent review of each (read-only, nothing sent to the
+  Mac) found real problems and I reproduced the worst ones. #162 stickers: ffmpeg guessed the file format from a stranger's
+  bytes, so a two-line text file sent as a video came out as a different cached picture. #163 inline voice messages: Qt plays
+  bytes the safety check never saw, a machine without QtMultimedia would lose the whole view, and any incoming message cuts
+  off the voice message you are playing. #160 native replies: three failure paths after Return say "nothing sent", so a retry
+  could send the reply twice, and the recipient is never checked before Return. #159 reactions: the macOS 27 path that ships
+  has no test and a look-alike message can attract the reaction. Each comment lists what to change; replies and reactions
+  will be tried on the real 27.2 gateway (self-thread only) once they are fixed.
+- **The speed-up (Larry, nixfred): 0.77 s to 0.2 s for a poll, 2.1 s to 1.0 s while the window is open.** Measured, not
+  guessed: every poll ran a query over every message ever received, and the chat list scanned each conversation whole. Both
+  now use Apple's own indexes. On the real 282,650-message database the answers are identical (compared byte for byte), and
+  the old code is kept as the test oracle.
 
 ### Mon 9 Nov: #154, #157 and #155 merged, #156 asked to split
 
@@ -75,7 +100,7 @@ reconstructed on Sunday from memory.
 
 ### Handles Fred still needs to answer (9 Nov)
 - **Gerald LaMontagne** (github.com/lama7, #155 and #157): nothing published. Asked him on #157. If Fred knows him, ask.
-- **Marcus Vorwaller** (github.com/marcus, #156): no X on his GitHub; not a contributor until a split PR merges.
+- **Marcus Vorwaller** (github.com/marcus, #158 and #161 merged 10 Nov): nothing on his GitHub profile or social accounts, and his site marcus.pictures lists no X. Four more PRs under review. If Fred knows him, ask.
 
 ---
 
