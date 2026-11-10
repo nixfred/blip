@@ -233,6 +233,8 @@ def resolve(con, imsg, guid: str, self_handles: list) -> dict:
     text = norm(imsg.message_text(row))
     if not text:
         raise Stop("unsupported", EX_UNSUPPORTED, "the message has no text")
+    if any(REACTED.fullmatch(text[i + 2:]) for i in range(len(text)) if text[i:i+2] == ", "):
+        raise Stop("ambiguous-text", EX_UNSUPPORTED, "message text resembles a reaction annotation; nothing was sent")
     if LINK.search(text):
         raise Stop("unsupported", EX_UNSUPPORTED, "messages with a link are not supported yet")
 
@@ -1182,6 +1184,17 @@ def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, ru
     expected = emoji_plan(rows, emoji, remove) if emoji else plan(current_kind(rows), kind, remove)
     if expected is None:
         return {"ok": True, "result": "unchanged"}
+    if run is jxa and macos_major() >= 27:
+        version = tuple(int(x) for x in platform.mac_ver()[0].split(".")[:2])
+        if version < (27, 2):
+            raise Stop("unsupported-version", EX_UNSUPPORTED, "picker reactions require macOS 27.2 or newer; nothing was sent")
+        if emoji:
+            ax = NativeAX(time.monotonic() + RUN_LIMIT)
+            try:
+                if not ax.preflight_post():
+                    raise Stop("event-access-denied", EX_NOPERM, "event-posting permission is missing for the bridge process; nothing was sent")
+            finally:
+                ax.close()
     why = system_events_consent()   # before ensure_messages: it is already a System Events call
     if why:
         raise Stop("consent", EX_NOPERM, why)
@@ -1284,6 +1297,8 @@ def clear_stale_picker() -> None:
 
 def failure(r: dict, action: str) -> Stop:
     error = r.get("error") or "failed"
+    if error == "event-access-denied":
+        return Stop(error, EX_NOPERM, "event-posting permission is missing for the bridge process; nothing was sent")
     if error in {"emoji-not-offered", "emoji-picker-unavailable", "ambiguous-emoji"}:
         return Stop(error, EX_NOT_OFFERED,
                     "Messages did not expose that exact emoji as an accessible reaction; nothing was sent. "

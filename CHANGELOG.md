@@ -1,5 +1,7 @@
 # Changelog
 
+Picker reactions require macOS 27.2 or newer; 27.0/27.1 refuse before opening Messages. Missing event-posting permission refuses custom emoji before opening a picker.
+
 ## Unreleased
 
 - **Stickers render as stickers (#162, Marcus Vorwaller).** A sticker used to be an empty bubble or a made-up star

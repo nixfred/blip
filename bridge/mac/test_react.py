@@ -179,6 +179,11 @@ class Resolve(unittest.TestCase):
         target = self.resolve("TARGET")
         self.assertEqual(target["ordinal"], 1)
 
+    def test_target_which_is_itself_a_reaction_annotation_refuses(self):
+        add(self.con, 1, "TARGET", "ok, Ann loved this", True, T0)
+        with self.assertRaises(react.Stop):
+            self.resolve("TARGET")
+
     def test_a_later_day_twin_at_the_same_hhmm_is_counted(self):
         # The transcript labels bubbles with HH:MM only, so yesterday's "ok" at
         # 09:15 and today's "ok" at 09:15 look identical to the scan. Counting
@@ -853,11 +858,12 @@ class NativeEmojiPickerTests(unittest.TestCase):
         return react.native_emoji_picker(q, ax=ax, pause=lambda _: None)
 
     def test_native_classics_validate_context_and_unique_button(self):
-        for change in ("valid", "label", "duplicate", "focus", "origin"):
+        for change in ("valid", "label", "prefix", "duplicate", "focus", "origin"):
             ax, q, cell, picker, labels, *_ = self.scene(recent=True)
             q.pop("emoji"); q["action"] = "Heart"
             cell["AXDescription"] = "Heart"
             if change == "label": labels[0]["AXDescription"] = "Message, other"
+            if change == "prefix": labels[0]["AXDescription"] = "Message, " + q["text"] + ", see you"
             if change == "duplicate": picker["AXChildren"].append(dict(cell))
             if change == "focus": ax.front = False
             if change == "origin": ax.origin_matches = False
@@ -1017,6 +1023,28 @@ class NativeGlyphClickTests(unittest.TestCase):
         self.assertEqual(ax.click_glyph(98, lambda: True)["error"], "perform-failed")
         self.assertEqual(posted, [1, 2])  # always release; never a second down
 
+
+
+class EarlyGateTests(unittest.TestCase):
+    def test_older_os_refuses_before_ui(self):
+        from unittest.mock import Mock
+        ui = Mock()
+        with patch.object(react, "my_rows", return_value=[]), patch.object(react.platform, "mac_ver", return_value=("27.1", (), "")):
+            with self.assertRaises(react.Stop) as err:
+                react.react(None, {"guids":["G"]}, 0, False, [], ui)
+        self.assertIn("27.2", str(err.exception))
+        self.assertEqual(ui.mock_calls, [])
+
+    def test_post_permission_refuses_before_ui_or_picker(self):
+        from unittest.mock import Mock
+        ui, ax = Mock(), Mock()
+        ax.preflight_post.return_value = False
+        with patch.object(react, "my_rows", return_value=[]), patch.object(react.platform, "mac_ver", return_value=("27.2", (), "")), patch.object(react, "NativeAX", return_value=ax):
+            with self.assertRaises(react.Stop) as err:
+                react.react(None, {"guids":["G"]}, 0, False, [], ui, emoji="🪿")
+        self.assertIn("nothing was sent", str(err.exception))
+        self.assertEqual(ui.mock_calls, [])
+        ax.close.assert_called_once()
 
 
 if __name__ == "__main__":

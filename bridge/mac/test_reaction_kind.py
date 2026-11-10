@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
-"""Synthetic sticker rows only. Never opens the user's Messages database."""
-import math
-import io
-import plistlib
+"""Synthetic custom reaction rows only. Never opens the user's Messages database."""
 import sqlite3
-import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
 
 
 def load_imsg():
@@ -54,10 +48,6 @@ class ReactionKind(unittest.TestCase):
             VALUES (?, ?, ?, ?, ?, ?)""", (guid, date, kind, target, emoji, mine))
         return cur.lastrowid
 
-    def attachment(self, mid, aid, sticker=True, name="sticker.png", mime="image/png", info=None):
-        self.con.execute("INSERT INTO attachment VALUES (?, ?, ?, NULL, 128, ?, ?, NULL, NULL)",
-                         (aid, name, mime, sticker, plistlib.dumps(info) if info is not None else None))
-        self.con.execute("INSERT INTO message_attachment_join VALUES (?, ?)", (mid, aid))
 
     def enrich(self, ids):
         marks = ",".join("?" for _ in ids)
@@ -73,3 +63,7 @@ class ReactionKind(unittest.TestCase):
         custom = self.enrich([p])[1][p]["tapbacks"][0]
         self.assertEqual(custom["kind"],"emoji")
         self.assertEqual(custom["emoji"],"👍")
+
+
+if __name__ == "__main__":
+    unittest.main()
