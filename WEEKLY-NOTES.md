@@ -57,6 +57,10 @@ reconstructed on Sunday from memory.
   could send the reply twice, and the recipient is never checked before Return. #159 reactions: the macOS 27 path that ships
   has no test and a look-alike message can attract the reaction. Each comment lists what to change; replies and reactions
   will be tried on the real 27.2 gateway (self-thread only) once they are fixed.
+- **Blip now says when the Mac is signed out (Larry, nixfred).** The day the gateway's WindowServer crashed, reading kept
+  working and every send failed with an error nobody could read; Blip found out only when a send died. The Mac now answers a
+  free read-only question (is anyone logged in at the screen?) and Blip puts one red line in the list and under the composer.
+  Anything unclear shows nothing, so it never cries wolf.
 - **The speed-up (Larry, nixfred): 0.77 s to 0.2 s for a poll, 2.1 s to 1.0 s while the window is open.** Measured, not
   guessed: every poll ran a query over every message ever received, and the chat list scanned each conversation whole. Both
   now use Apple's own indexes. On the real 282,650-message database the answers are identical (compared byte for byte), and

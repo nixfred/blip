@@ -219,6 +219,10 @@ BarWidget {
   // so reading a conversation clears it here and leaves the phone's badge —
   // by design, and indistinguishable from a broken push until status said so.
   property string readPush: ""
+  // Is anyone logged in at the Mac's screen? "signed-out": reads still work and sends cannot
+  // (Messages cannot start without a GUI session). "unknown" is anything unclear, and never
+  // shows a notice. Straight from the collector, which asks the Mac at most every 20 s.
+  property string macSession: "unknown"
   property string lastError: ""
   property string lastRun: ""
   // Unsent compose text per chat id, shared by the panel and the app window.
@@ -708,6 +712,7 @@ BarWidget {
           root.lastError = String(d.error || "")
           root.lastRun = String(d.ts || "")
           if (typeof d.readPush === "string") root.readPush = d.readPush
+          if (d.macSession === "ok" || d.macSession === "signed-out" || d.macSession === "unknown") root.macSession = d.macSession
           if (d.ok === true) {
             // Filter through the optimistic-read ledger: a poll that was
             // already in flight when the user opened a thread must not
@@ -1232,6 +1237,7 @@ BarWidget {
         + " threads=" + root.threads.length + " healthy=" + root.healthy
         + " watch=" + root.watchAlive
         + " read_push=" + (root.readPush !== "" ? root.readPush : "?")
+        + (root.macSession === "signed-out" ? " mac_session=signed-out" : "")
         + " autofill=" + (root.otpAutofill ? (otp.ready ? "ready" : "starting") : "off")
         + " scroll_gain=" + root.scrollGain + (root.touchpadScrollGain !== 1 ? "/" + root.touchpadScrollGain : "")
         + (root.smoothScroll ? " smooth_scroll=on" : "")

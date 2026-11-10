@@ -23,6 +23,10 @@ import {
   messagePreview,
   fetchMessages,
   fetchReadSnapshot,
+  parseMacSession,
+  fetchMacSession,
+  checkMacSession,
+  MAC_SESSION_FRESH_MS,
   loadAllowlist,
   loadMutelist,
   matchesMute,
@@ -856,6 +860,65 @@ describe("state and allowlist I/O", () => {
     const p = join(tmp(), "mixed.json");
     writeFileSync(p, JSON.stringify(["+15551234567", 42, null]));
     expect(loadAllowlist(p)).toEqual(["+15551234567"]);
+  });
+});
+
+describe("Mac login session", () => {
+  const reply = (gui: unknown, version: unknown = 1) => JSON.stringify({ version, gui });
+  const ok = (stdout: string) => ({ status: 0, stdout, stderr: "" }) as never;
+  const cachePath = () => join(mkdtempSync(join(tmpdir(), "blip-session-")), "mac-session.json");
+
+  test("only a definite gui:false says signed-out; everything unclear is unknown", () => {
+    expect(parseMacSession(reply(true))).toBe("ok");
+    expect(parseMacSession(reply(false))).toBe("signed-out");
+    for (const body of [reply(null), reply("no"), reply(0), reply(undefined), reply(true, 2), JSON.stringify({ gui: false }),
+      "", "not json", "null", "[]", "{}"]) {
+      expect(parseMacSession(body)).toBe("unknown");
+    }
+  });
+
+  test("asks the bridge for `session`, and a failure or an older bridge is unknown, never signed-out", () => {
+    const calls: string[][] = [];
+    expect(fetchMacSession(((cmd: string, args: string[]) => { calls.push(args); return ok(reply(false)); }) as never)).toBe("signed-out");
+    expect(calls[0]).toEqual(["--json", "session"]);
+    for (const status of [1, 64, 69, 255, null]) {
+      expect(fetchMacSession((() => ({ status, stdout: reply(false), stderr: "" })) as never)).toBe("unknown");
+    }
+    expect(fetchMacSession((() => { throw new Error("spawn failed"); }) as never)).toBe("unknown");
+  });
+
+  test("the answer is remembered for 20 s, then asked again", () => {
+    const path = cachePath();
+    let calls = 0;
+    const runner = (() => { calls++; return ok(reply(false)); }) as never;
+    const t0 = 1_800_000_000_000;
+    expect(checkMacSession(runner, path, t0)).toBe("signed-out");
+    expect(checkMacSession(runner, path, t0 + MAC_SESSION_FRESH_MS - 1)).toBe("signed-out");
+    expect(calls).toBe(1);
+    expect(checkMacSession((() => { calls++; return ok(reply(true)); }) as never, path, t0 + MAC_SESSION_FRESH_MS)).toBe("ok");
+    expect(calls).toBe(2);
+  });
+
+  test("a clock that went backwards, or a cache that is not ours, is not trusted", () => {
+    const path = cachePath();
+    writeFileSync(path, JSON.stringify({ state: "signed-out", at: 2_000_000_000_000 }));
+    expect(checkMacSession((() => ok(reply(true))) as never, path, 1_800_000_000_000)).toBe("ok");   // `at` is in the future
+    for (const junk of ["not json", "[]", JSON.stringify({ state: "banana", at: 1_800_000_000_000 }),
+      JSON.stringify({ state: "signed-out" }), JSON.stringify({ state: "signed-out", at: "now" })]) {
+      writeFileSync(path, junk);
+      expect(checkMacSession((() => ok(reply(true))) as never, path, 1_800_000_000_000)).toBe("ok");
+    }
+  });
+
+  test("the cache file is private and holds a state and a clock, nothing else", () => {
+    const path = cachePath();
+    checkMacSession((() => ok(reply(false))) as never, path, 1_800_000_000_000);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ state: "signed-out", at: 1_800_000_000_000 });
+  });
+
+  test("an unwritable cache directory still answers", () => {
+    expect(checkMacSession((() => ok(reply(false))) as never, "/proc/blip-nope/mac-session.json", 1_800_000_000_000)).toBe("signed-out");
   });
 });
 

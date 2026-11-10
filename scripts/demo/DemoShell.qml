@@ -23,6 +23,7 @@ ShellRoot {
     id: host
     property var threads: []
     property bool online: true
+    property string macSession: "unknown"   // "signed-out" shows the notice: `ipc call demo macsession signed-out`
     property int unread: 0
     property bool healthy: true
     property string lastError: ""
@@ -127,6 +128,7 @@ ShellRoot {
       function mode(m: string): string { win.narrow = (m === "narrow"); return m }
       function share(url: string): string { return view.shareLink(url) }
       function threads(): string { return String(host.threads.length) }
+      function macsession(state: string): string { host.macSession = state; return state }
     }
   }
 }

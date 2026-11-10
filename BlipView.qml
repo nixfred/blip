@@ -183,6 +183,9 @@ FocusScope {
   readonly property var pinnedThreads: root.threads.filter(function(t) { return t.pinned === true })
   readonly property var unpinnedThreads: root.threads.filter(function(t) { return t.pinned !== true })
   readonly property bool online: hostWidget ? hostWidget.online : false
+  /** The Mac is reachable but nobody is logged in at its screen: reading works, sending cannot. */
+  readonly property bool macSignedOut: online && hostWidget ? hostWidget.macSession === "signed-out" : false
+  readonly property string macSignedOutText: "The Mac is signed out: Blip can read, but cannot send until you log in at the Mac."
   readonly property int unread: hostWidget ? hostWidget.unread : 0
   readonly property var toastAllowlist: hostWidget ? hostWidget.toastAllowlist : []
   readonly property bool toastAllowlistLoaded: hostWidget ? hostWidget.toastAllowlistLoaded === true : false
@@ -2587,6 +2590,18 @@ FocusScope {
               font.pixelSize: root.fontBodySmall
               wrapMode: Text.WordWrap
             }
+            // Reachable, but signed out at the screen: the one failure that reads fine and
+            // sends not at all (-10810). Said before anyone loses a draft to it.
+            Text {
+              Layout.fillWidth: true
+              visible: root.macSignedOut
+              text: "⚠ " + root.macSignedOutText
+              textFormat: Text.PlainText
+              color: root.urgent
+              font.family: root.fontFamily
+              font.pixelSize: root.fontBodySmall
+              wrapMode: Text.WordWrap
+            }
             // Reachable but broken — say exactly what to fix (Full Disk Access,
             // Automation, blip-setup). collector.explainBridgeError writes it.
             Text {
@@ -4207,6 +4222,16 @@ FocusScope {
 
         // No empty status row below the composer. The resize grip overlays
         // the panel corner independently of this layout.
+        Text {
+          visible: root.macSignedOut && root.note === ""
+          Layout.fillWidth: true
+          text: "⚠ " + root.macSignedOutText
+          textFormat: Text.PlainText
+          color: root.urgent
+          font.family: root.fontFamily
+          font.pixelSize: root.fontCaption
+          wrapMode: Text.WordWrap
+        }
         Text {
           visible: root.note !== ""
           Layout.fillWidth: true

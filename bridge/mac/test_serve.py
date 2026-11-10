@@ -36,7 +36,7 @@ class ServeSurface(unittest.TestCase):
     def test_only_read_only_queries_are_reachable(self):
         self.assertEqual(
             imsg.SERVE_ALLOWED,
-            {"recent", "from", "thread", "search", "contacts", "chats", "groups", "analyze", "read-state"},
+            {"recent", "from", "thread", "search", "contacts", "chats", "groups", "analyze", "read-state", "session"},
         )
 
     def test_streaming_and_blocking_commands_stay_one_shot(self):

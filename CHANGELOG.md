@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Blip says the Mac is signed out before a send fails.** When the gateway Mac is at its login window (a logout, or the
+  10 Nov WindowServer crash; FileVault means only you can log back in) reading keeps working, because that is plain
+  sqlite over ssh, and every send fails with Launch Services error -10810. Blip found out only when a send died. The
+  Mac now answers a read-only `imsg session` (`launchctl print gui/<uid>`: exit 0 while someone is logged in at the
+  screen, 112 "Could not find domain" when not; under 10 ms, touches no app, asks for no permission). The collector
+  asks over the persistent channel at most every 20 s, keeps the answer in `~/.local/state/blip/mac-session.json`
+  (a state and a clock, 0600, nothing else), and when it is a definite "signed out" the list and the composer each
+  show one line: "The Mac is signed out: Blip can read, but cannot send until you log in at the Mac." Anything
+  unclear (an older bridge, a probe that failed or timed out, an unreadable reply) is "unknown" and shows nothing,
+  because a notice that cries wolf is worse than none; an unreachable Mac says that instead. `status` adds
+  `mac_session=signed-out` only when it is. Tests: the probe's exit codes, the argv, the timeout and the unknown
+  cases on the Mac; the parse, the 20 s cache, a clock that went backwards, junk cache files and the 0600 mode in
+  the collector; the two notices and the `online &&` gate in the view; each has a mutation that fails one.
+  Deploy: `imsg` on the gateway and the plugin files (`collector.ts`, `BarWidget.qml`, `BlipView.qml`); a plugin
+  against an older Mac simply never shows the notice.
 - **A sent message shows Delivered until it is Read** (#158, Marcus Vorwaller). iMessage says Delivered under your
   newest message and Blip said nothing until it was read. `imsg --rich` now adds `delivered` for your own iMessage and
   RCS rows (`message.is_delivered`), and the receipt belongs to the newest sent message only: Delivered, then Read with

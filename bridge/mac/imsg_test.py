@@ -146,6 +146,50 @@ class ChatPreviewUsesJoinIndex(unittest.TestCase):
             self.assertEqual(fast, slow, "case %d rows=%r" % (case, rows))
 
 
+class GuiSessionTests(unittest.TestCase):
+    """`imsg session` reports whether anyone is logged in at the Mac's screen, because a send
+    cannot start Messages without one (-10810) while reads keep working."""
+
+    def alive(self, **run):
+        from unittest.mock import patch
+        with patch.object(imsg.subprocess, "run", **run) as mocked:
+            return imsg.gui_session_alive(), mocked
+
+    def test_the_gui_domain_exists_while_someone_is_logged_in(self):
+        from types import SimpleNamespace as NS
+        alive, run = self.alive(return_value=NS(returncode=0))
+        self.assertIs(alive, True)
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[:2], ["/bin/launchctl", "print"])
+        self.assertEqual(argv[2], "gui/%d" % os.getuid())       # this user's own domain, nobody else's
+        self.assertEqual(run.call_args.kwargs["timeout"], 5)
+        self.assertIs(run.call_args.kwargs["stdout"], imsg.subprocess.DEVNULL)   # `print` is huge; none of it is read
+
+    def test_no_gui_domain_means_nobody_is_logged_in(self):
+        from types import SimpleNamespace as NS
+        for rc in (112, 113, 1):                                # "Could not find domain", "does not support"
+            self.assertIs(self.alive(return_value=NS(returncode=rc))[0], False)
+
+    def test_a_probe_that_cannot_run_or_hangs_is_unknown_not_signed_out(self):
+        import subprocess
+        self.assertIsNone(self.alive(side_effect=FileNotFoundError())[0])
+        self.assertIsNone(self.alive(side_effect=subprocess.TimeoutExpired("launchctl", 5))[0])
+
+    def test_the_command_prints_one_versioned_json_line(self):
+        from unittest.mock import patch
+        for value in (True, False, None):
+            out = io.StringIO()
+            with patch.object(imsg, "gui_session_alive", return_value=value), contextlib.redirect_stdout(out):
+                imsg.cmd_session(None, SimpleNamespace())
+            self.assertEqual(json.loads(out.getvalue()), {"version": 1, "gui": value})
+            self.assertEqual(out.getvalue().count("\n"), 1)
+
+    def test_session_is_a_real_read_only_subcommand_on_the_serve_channel(self):
+        ns = imsg.build_parser().parse_args(["--json", "session"])
+        self.assertEqual(ns.func, imsg.cmd_session)
+        self.assertIn("session", imsg.SERVE_ALLOWED)
+
+
 class ChatProjectionTests(unittest.TestCase):
     def test_chat_json_deduplicates_parallel_service_rows(self):
         con = sqlite3.connect(":memory:")

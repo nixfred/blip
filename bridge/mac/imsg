@@ -2470,6 +2470,29 @@ def cmd_read_state(con, args):
     print(json.dumps({"version": 1, "chats": rows}))
 
 
+def gui_session_alive():
+    """True when this user has a graphical login session on the Mac, False when not, None when
+    it could not be told.
+
+    A send goes through Messages, and Launch Services can start an app only inside a GUI session.
+    After a logout (the 10 Nov WindowServer crash left the gateway at the login window; FileVault
+    means only the owner can log back in) every send fails with -10810 while reads, which are
+    plain sqlite over ssh, keep working. launchd's own answer is exact and free: the `gui/<uid>`
+    domain exists while someone is logged in at the screen and is gone when they are not (rc 0
+    versus rc 112, "Could not find domain"). It touches no app, so it asks for no permission."""
+    try:
+        r = subprocess.run(["/bin/launchctl", "print", f"gui/{os.getuid()}"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.returncode == 0
+
+
+def cmd_session(con, args):
+    """One JSON line: is anyone logged in at the Mac's screen (see gui_session_alive)."""
+    print(json.dumps({"version": 1, "gui": gui_session_alive()}))
+
+
 def cmd_watch(con, args):
     """Block forever, emitting one line whenever chat.db changes — a push
     channel for remote clients (Blip) that otherwise poll.
@@ -2631,7 +2654,7 @@ def cmd_analyze(con, args):
 # attachment/avatar stream binary and would park the channel behind a 100 MB
 # photo; watch blocks forever by design; serve would recurse. Those keep the
 # one-shot path, which still works and is what everything falls back to.
-SERVE_ALLOWED = {"recent", "from", "thread", "search", "contacts", "chats", "groups", "analyze", "read-state"}
+SERVE_ALLOWED = {"recent", "from", "thread", "search", "contacts", "chats", "groups", "analyze", "read-state", "session"}
 
 
 def cmd_serve(con, args) -> None:
@@ -2798,6 +2821,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_avatar)
     s = sub.add_parser("read-state", parents=[common], help="complete metadata-only unread snapshot")
     s.set_defaults(func=cmd_read_state)
+    s = sub.add_parser("session", parents=[common], help="is anyone logged in at the Mac's screen (sends need it)")
+    s.set_defaults(func=cmd_session)
     s = sub.add_parser("watch", parents=[common],
                        help="emit a line whenever chat.db changes (push channel)")
     s.set_defaults(func=cmd_watch)

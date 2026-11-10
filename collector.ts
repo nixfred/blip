@@ -227,6 +227,9 @@ export interface BlipOutput {
   /** Which reads are pushed to the Mac: "off", "all" (the mark-all gesture
    *  only — the default) or "thread" (also each conversation you open). */
   readPush: PushRead;
+  /** Whether anyone is logged in at the Mac's screen. "signed-out" means reads work and
+   *  sends cannot. Absent on a failed poll and from a collector that predates it. */
+  macSession?: MacSession;
 }
 
 // ---------------------------------------------------------------- state I/O
@@ -2315,6 +2318,51 @@ export function fetchReadSnapshot(runner = spawnSync): ReadSnapshot | null {
   } catch { return null; }
 }
 
+// ---------------------------------------------------------------- Mac login session
+
+/** Is anyone logged in at the gateway Mac's screen? Sends cannot start Messages without a
+ *  GUI session (Launch Services error -10810, the 10 Nov WindowServer crash), while reads
+ *  keep working, so Blip used to find out only when a send failed. The answer is remembered
+ *  for a few seconds in its own file: no message content, just a state and a clock. */
+export const MAC_SESSION_PATH = `${HOME}/.local/state/blip/mac-session.json`;
+export type MacSession = "ok" | "signed-out" | "unknown";
+export const MAC_SESSION_FRESH_MS = 20_000;
+
+/** "unknown" is the default for anything that is not a clear yes or no: an older bridge, an
+ *  unreadable reply, a probe that could not run. Only a definite `gui:false` says signed-out,
+ *  because a banner that cries wolf is worse than none. */
+export function parseMacSession(stdout: string): MacSession {
+  try {
+    const v = JSON.parse(stdout);
+    if (!v || v.version !== 1) return "unknown";
+    return v.gui === true ? "ok" : v.gui === false ? "signed-out" : "unknown";
+  } catch { return "unknown"; }
+}
+
+export function fetchMacSession(runner = spawnSync): MacSession {
+  try {
+    const r = bridgeRun(["--json", "session"], runner, { timeout: 8000, maxBuffer: 4096 });
+    return r.status === 0 ? parseMacSession(String(r.stdout)) : "unknown";
+  } catch { return "unknown"; }
+}
+
+export function checkMacSession(runner = spawnSync, path = MAC_SESSION_PATH, now = Date.now()): MacSession {
+  try {
+    const c = JSON.parse(readFileSync(path, "utf8"));
+    if (typeof c?.at === "number" && now - c.at >= 0 && now - c.at < MAC_SESSION_FRESH_MS &&
+        (c.state === "ok" || c.state === "signed-out" || c.state === "unknown")) return c.state;
+  } catch { /* no cache, or one that is not ours: ask */ }
+  const state = fetchMacSession(runner);
+  try {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    const temp = `${path}.${process.pid}.tmp`;
+    writeFileSync(temp, JSON.stringify({ state, at: now }), { mode: 0o600 });
+    renameSync(temp, path);
+    sweepStaleTemps(path);
+  } catch { /* an unwritable cache only costs one more probe */ }
+  return state;
+}
+
 export function collect(deep: boolean, markRead = false, readChat = "", seenTs = "", unreadChat = "", explicitRead = false): BlipOutput {
   // When this POLL ran — the output's own metadata, not a message stamp.
   // Distinct from nowTs() below, which is the clock message stamps are
@@ -2677,6 +2725,8 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
     // and impossible to tell apart from a broken push without this (Fred,
     // 2026-09-08: "they are not marking them read on my iphone").
     readPush,
+    // Cached for 20 s, so this is one probe in about four polls, not one per poll.
+    macSession: checkMacSession(),
   };
 }
 

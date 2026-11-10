@@ -52,6 +52,11 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-11-10  (this commit) Blip says the Mac is signed out before a send fails: a read-only `imsg session` (launchctl print gui/<uid>, rc 0 versus
+                 112, under 10 ms, no app touched) and one red line in the list and under the composer when it is a definite "signed out";
+                 anything unclear shows nothing. Found the day the gateway's WindowServer crashed (reads worked, every send failed with -10810).
+                 Fred Nix / Larry, github.com/nixfred, X https://x.com/nixfred. Rendered in a clean Test Drive VM on invented data; 831 bun
+                 tests, each new branch has a mutation that fails one. Door classifier one-way (bridge/mac/imsg); Fred approved the literal diff.
 2026-11-10  #161 A searchable emoji picker beside Send: a smiley button opens a Unicode catalogue (search by name, nine categories, an exact
                  pasted sequence always first, keyboard navigation); choosing one inserts at the caret or replaces the selection and returns
                  focus to the composer without sending, Escape keeps the draft. Marcus Vorwaller, github.com/marcus, X: none found (checked

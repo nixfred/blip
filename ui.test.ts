@@ -1252,3 +1252,30 @@ describe("the bar glyph survives an Omarchy whose OpticalGlyph has no paintedSiz
     expect(optical).toMatch(/^\s*paintedSize\s*:\s*Style\.bar\.iconSize\s*$/m);
   });
 });
+
+describe("a signed-out Mac is said before a send fails (reads work, sends cannot)", () => {
+  test("the widget takes macSession only from the three known values, and status shows signed-out", () => {
+    expect(widget).toContain('property string macSession: "unknown"');
+    expect(widget).toContain('d.macSession === "ok" || d.macSession === "signed-out" || d.macSession === "unknown"');
+    expect(widget).toContain('(root.macSession === "signed-out" ? " mac_session=signed-out" : "")');
+  });
+
+  test("the view shows the notice only when the Mac is reachable AND signed out", () => {
+    expect(panel).toContain('readonly property bool macSignedOut: online && hostWidget ? hostWidget.macSession === "signed-out" : false');
+    // one notice in the list, one under the composer; both PlainText and both gated on the same flag
+    const uses = panel.split("root.macSignedOutText").length - 1;
+    expect(uses).toBe(2);
+    expect(panel).toContain("visible: root.macSignedOut\n");
+    expect(panel).toContain('visible: root.macSignedOut && root.note === ""');
+    for (const at of [panel.indexOf("visible: root.macSignedOut\n"), panel.indexOf('visible: root.macSignedOut && root.note === ""')]) {
+      expect(panel.slice(at, at + 260)).toContain("textFormat: Text.PlainText");
+    }
+  });
+
+  test("an unreachable Mac says that instead, never both", () => {
+    // macSignedOut starts with `online &&`; the offline block is `visible: !root.online`.
+    expect(panel).toContain("visible: !root.online\n");
+    expect(panel).toMatch(/macSignedOut: online &&/);
+  });
+});
+

@@ -115,6 +115,14 @@ what it is handed. Keep it that way.
   bubble until a real from-me row with the same text lands, resolving one
   send per row. The read watermark (`--seen`) skips pending bubbles: their ts
   is THIS machine's clock. A failed send retains its bubble with a failure reason in memory. Never go back to "wait 1.5 s, then reload".
+- **A Mac that is signed out READS fine and cannot SEND.** Reads are sqlite over ssh and need no login; a send
+  needs Messages, and Launch Services starts an app only inside a GUI session, so at the login window every send
+  dies with -10810 (`friendlySendError` says it in plain words). `imsg session` is the read-only probe
+  (`launchctl print gui/<uid>`: rc 0 logged in, rc 112 not); `checkMacSession()` asks over the channel at most every
+  20 s and caches `{state, at}` in `mac-session.json`. Only a definite `gui:false` is "signed-out". Everything else,
+  an older bridge, a timeout, junk, is "unknown" and shows NOTHING, and an unreachable Mac shows the offline
+  message instead (`macSignedOut` is `online && ...`). Never block a send on it: the answer can be 20 s stale, and a
+  Mac that was just logged back in must send at once.
 - **A peeked thread is not read.** In the window, the sidebar cursor resting on
   a row shows that thread (`peeking`); focus stays in the list and neither
   read path fires — `markRead()` in BlipView (the only caller of the host's
