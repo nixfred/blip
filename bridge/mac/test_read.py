@@ -610,6 +610,100 @@ class SidebarAction(unittest.TestCase):
         self.assertIn("endsWith(', Pinned')", js)
 
 
+FAKE_SIDEBAR = r"""
+// A Messages sidebar that, like the real one, builds only the rows near the
+// viewport: `window` rows from `top`, paged 10 at a time.
+const S = JSON.parse(process.argv[2]);
+const log = [];
+const rows = S.rows.map((d, i) => ({ desc: d, sel: i === S.selected,
+  acts: d.endsWith(', Pinned') ? ['Name:Unpin'] : ['AXPress', 'Name:Pin ' + d.split(',')[0]] }));
+let top = S.top;
+const arr = a => ({ count: String(a.length), objectAtIndex: i => a[i] });  // JXA counts are strings
+const list = { kind: 'list' };
+const app = { kind: 'app', children: [{ kind: 'window', children: [list] }] };
+function built() { return rows.slice(top, top + S.window); }
+function value(el, name) {
+  if (el.kind === 'app' || el.kind === 'window') return name === 'AXChildren' ? arr(el.children)
+    : name === 'AXRole' ? (el.kind === 'window' ? 'AXWindow' : 'AXApplication') : null;
+  if (el === list) return name === 'AXChildren' ? arr(built()) : name === 'AXDescription' ? 'Conversations' : null;
+  return name === 'AXSelected' ? el.sel : name === 'AXDescription' ? el.desc : null;
+}
+globalThis.ObjC = { import() {}, unwrap: x => x, castRefToObject: x => x };
+globalThis.Ref = () => [];
+globalThis.delay = () => {};
+globalThis.$ = Object.assign(s => s, {
+  AXUIElementCreateApplication: () => app,
+  AXUIElementCopyAttributeValue(el, name, ref) { const v = value(el, name); if (v === null) return -25205; ref[0] = v; return 0; },
+  AXUIElementCopyActionNames(el, ref) { ref[0] = arr(el.acts || []); return 0; },
+  AXUIElementPerformAction(el, act) {
+    if (el === list) {
+      log.push(act);
+      const last = Math.max(0, rows.length - S.window);
+      if (act === 'AXScrollDownByPage') top = Math.min(last, top + 10);
+      if (act === 'AXScrollUpByPage') top = Math.max(0, top - 10);
+    } else log.push('row:' + el.desc + ':' + act);
+    return 0;
+  },
+});
+"""
+
+
+class SidebarScroll(unittest.TestCase):
+    """The real SIDEBAR_JS, run under bun or node against a fake sidebar.
+    On macOS 27 `open imessage:` selects a far-down chat without bringing its
+    row into view (27.0.1 and 27.2, #132), so nothing built is selected."""
+
+    ROWS = [f"Friend {i}, hello" for i in range(60)]
+
+    def run_sidebar(self, want="Pin", selected=48, top=0, rows=None, window=12):
+        import json, shutil
+        engine = shutil.which("bun") or shutil.which("node")
+        if not engine:
+            self.skipTest("no JavaScript runtime")
+        state = {"rows": rows or self.ROWS, "selected": selected, "top": top, "window": window}
+        js = FAKE_SIDEBAR + read.SIDEBAR_JS + (
+            "\nconst result = run([" + json.dumps(want) + ", '4242']);"
+            "\nconsole.log(JSON.stringify({result, log, top}));\n")
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "sidebar.js"
+            path.write_text(js)
+            out = subprocess.run([engine, str(path), json.dumps(state)],
+                                 capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_a_far_down_chat_is_paged_into_view_pinned_and_the_list_returns_to_the_top(self):
+        got = self.run_sidebar(selected=48)
+        self.assertEqual(got["result"], "done")
+        self.assertIn("row:Friend 48, hello:Name:Pin Friend 48", got["log"])
+        self.assertIn("AXScrollDownByPage", got["log"])
+        self.assertEqual(got["top"], 0)
+
+    def test_a_built_selected_row_never_scrolls(self):
+        got = self.run_sidebar(selected=3)
+        self.assertEqual(got["result"], "done")
+        self.assertFalse([a for a in got["log"] if a.startswith("AXScroll")])
+
+    def test_a_list_left_scrolled_down_is_searched_from_the_top(self):
+        got = self.run_sidebar(selected=2, top=40)
+        self.assertEqual(got["result"], "done")
+        self.assertIn("row:Friend 2, hello:Name:Pin Friend 2", got["log"])
+        self.assertEqual(got["top"], 0)
+
+    def test_nothing_selected_anywhere_ends_at_the_bottom_says_so_and_returns_to_the_top(self):
+        got = self.run_sidebar(selected=-1)
+        self.assertEqual(got["result"], "none 0 conversations are selected in the sidebar")
+        self.assertFalse([a for a in got["log"] if a.startswith("row:")])
+        self.assertEqual(got["top"], 0)
+
+    def test_a_pinned_tile_found_after_paging_is_already_pinned(self):
+        rows = list(self.ROWS)
+        rows[30] = "Friend 30, Pinned"
+        got = self.run_sidebar(selected=30, rows=rows)
+        self.assertEqual(got["result"], "already")
+        self.assertFalse([a for a in got["log"] if a.startswith("row:")])
+
+
 class ActionProbes(unittest.TestCase):
     """The verifiers read Messages' own records with synthetic fixtures."""
 

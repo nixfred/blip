@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Pin works on a conversation far down the list (#132).** On macOS 27 Messages builds only the ~15
+  sidebar rows near the viewport, and opening a conversation through `open imessage:` does not scroll its row
+  into view, so for a chat 54th of 397 no row was selected and Pin stopped with "0 conversations are selected
+  in the sidebar". That was true on 27.0.1 as well as 27.2: #150's round trips used a chat already on screen.
+  `imsg-read` now pages the sidebar from the top with its own `AXScrollDownByPage` action until the selected
+  row is built, pins it, and pages the list back to the top. It still acts only on the row Messages reports
+  selected, never on a name match; a list with no selected row anywhere ends with the same error as before.
+  Verified on the 27.0.1 gateway with a DM 48th by recency: `--pin` exit 0 in 10 s and `--unpin` exit 0 in
+  14 s, the other app stayed in front, and the pin list was back to its original five in order. A new test
+  runs the real `SIDEBAR_JS` under bun against a sidebar that builds only nearby rows. Deploy:
+  `bridge/mac/imsg-read` to the Mac.
+
 - **A friend's shared city under their name (#152, thanks @mmdisbrow).** With `shared_city=on` in
   `bridge.conf` (off by default), an open direct conversation shows the city the friend shares with you
   through Find My, in place of their phone or email, in both the panel and the app. A location older than

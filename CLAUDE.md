@@ -387,8 +387,12 @@ what it is handed. Keep it that way.
   The pid comes from `messages_pid()` (pgrep), never LaunchServices: over ssh on
   27.2 `NSRunningApplication` and `NSWorkspace` cannot see GUI apps, and JXA
   returns every `count` as a STRING (compare `Number(count)`, never `=== 0`).
-  OPEN on 27.2: Messages renders only ~15 sidebar rows and `open imessage:` did
-  not bring a far-down chat's row into view, so nothing is `AXSelected` for it.
+  Messages builds only the ~15 sidebar rows near the viewport, and `open
+  imessage:` selects a far-down chat WITHOUT scrolling its row into view (27.0.1
+  and 27.2; #150 was only ever tested on a chat already on screen). With no
+  built row selected, the helper pages the `Conversations` group from the top
+  (`AXScrollDownByPage`, its own action) until the selected row exists, acts on
+  it, and returns the list to the top. Never search or match by name instead.
 - **`chat:null` exists.** Use `chatKey()`; never `String(m.chat)`. A row with
   neither chat nor handle is a leftover of a deleted conversation (iCloud keeps
   the row, the chat and the join are gone); `fetchMessages` drops it
