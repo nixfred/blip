@@ -5,6 +5,23 @@
 //
 // Pure, shared with the QML renderer. Rebuild the QML module:
 //   bun build tapback-actions.ts --target browser --format esm --outfile TapbackActions.mjs
+import { EMOJI_CATALOGUE } from "./emoji-catalogue";
+
+export const EMOJI_GROUPS = ["All", "Smileys & Emotion", "People & Body", "Animals & Nature", "Food & Drink", "Travel & Places", "Activities", "Objects", "Symbols", "Flags"];
+export interface ReactionChoice { emoji: string; name: string; kind: string }
+const EMOJI_CHOICES: ReactionChoice[] = EMOJI_CATALOGUE.map((r) => ({ emoji: r[0], name: r[1], kind: "emoji:" + r[0] }));
+const EMOJI_NAMES = new Map(EMOJI_CATALOGUE.map((r) => [r[0], r[1]]));
+
+/** The grid is virtualized in QML; searching and category policy live here.
+ *  Pasting a valid sequence always exposes that exact emoji as the first hit. */
+export function searchReactionEmoji(query: string, group = "All"): ReactionChoice[] {
+  const q = String(query || "").trim().toLowerCase();
+  const words = q.split(/\s+/).filter(Boolean);
+  const choices = EMOJI_CHOICES.filter((r, i) => (group === "All" || EMOJI_CATALOGUE[i][2] === group)
+    && (r.emoji === q || words.every((w) => r.name.toLowerCase().includes(w))));
+  if (validReactionEmoji(q) && !choices.some((r) => r.emoji === q)) choices.unshift({ emoji: q, name: EMOJI_NAMES.get(q) || "Custom emoji", kind: "emoji:" + q });
+  return choices;
+}
 
 /** The six classic tapbacks, in Messages' order: imsg-react's names and the
  *  emoji imsg reports for them on the read path. */
@@ -45,11 +62,15 @@ export function moveTapbackCursor(cursor: number, dir: number, n = TAPBACKS.leng
  *  dropped, one pair of quotes stripped, the last line wins, on/yes/true/1 in
  *  any case. */
 export function tapbacksOn(conf: string): boolean {
+  return confOn(conf, "tapbacks");
+}
+
+function confOn(conf: string, key: string): boolean {
   let v = "";
   for (const raw of String(conf || "").split("\n")) {
     const line = raw.replace(/#.*/, "").replace(/\s+/g, "");
     const eq = line.indexOf("=");
-    if (eq < 0 || line.slice(0, eq) !== "tapbacks") continue;
+    if (eq < 0 || line.slice(0, eq) !== key) continue;
     v = line.slice(eq + 1).replace(/^"/, "").replace(/"$/, "").replace(/^'/, "").replace(/'$/, "");
   }
   return ["on", "yes", "true", "1"].includes(v.toLowerCase());
@@ -69,7 +90,7 @@ export interface TapbackTarget {
   pending?: boolean;
   failed?: boolean;
   scheduled?: boolean;
-  tapbacks?: { emoji: string; from_me: boolean }[] | null;
+  tapbacks?: { emoji: string; from_me: boolean; kind?: string }[] | null;
 }
 
 /** "love" for "❤️" (with or without the emoji variation selector); "" for
@@ -80,12 +101,15 @@ export function tapbackKind(emoji: string): string {
   return hit ? hit.kind : "";
 }
 
-/** The classic tapback you have on the bubble now, or "". */
+/** Preserve custom-emoji identity even when its glyph is one of the classics.
+ *  Apple stores those as different types (2006 versus 2000…2005). */
 export function myTapback(message: TapbackTarget | null): string {
   for (const t of message?.tapbacks ?? []) {
-    if (t.from_me) {
+    if (t.from_me && t.kind !== "sticker") {
+      if (t.kind === "emoji") return emojiKind(t.emoji);
       const kind = tapbackKind(t.emoji);
       if (kind) return kind;
+      return emojiKind(t.emoji);
     }
   }
   return "";
@@ -107,7 +131,63 @@ export function canTapback(message: TapbackTarget | null, group: boolean): boole
  *  removes it, as on the phone; any other replaces it (one per person). The
  *  tool re-reads chat.db and does nothing when the menu's view was stale. */
 export function tapbackArgs(guid: string, kind: string, current: string): string[] {
+  if (!TAPBACKS.some((t) => t.kind === kind)) return [];
   return ["--guid", guid, kind, ...(current === kind ? ["--remove"] : []), "--yes"];
+}
+
+/** Bounded emoji syntax shared with QML: one emoji sequence, never prose.
+ *  Accepts ZWJ families/professions, skin tones, flag pairs and keycaps.
+ *  Mac validation is independent; an unsupported glyph is never substituted. */
+export function validReactionEmoji(value: string): boolean {
+  if (typeof value !== "string" || value.length === 0 || value.length > 64) return false;
+  // QML's Array.from(string) walks UTF-16 units on supported Qt builds;
+  // explicitly advance over surrogate pairs instead of relying on it.
+  const points: number[] = [];
+  for (let i = 0; i < value.length;) {
+    const point = value.codePointAt(i)!;
+    points.push(point);
+    i += point > 0xffff ? 2 : 1;
+  }
+  if (points.length === 2 && points.every((n) => n >= 0x1f1e6 && n <= 0x1f1ff)) return true;
+  if (/^[0-9#*]\uFE0F?\u20E3$/.test(value)) return true;
+  const base = (n: number) => (n >= 0x1f000 && n <= 0x1faff && !(n >= 0x1f1e6 && n <= 0x1f1ff)) || (n >= 0x2600 && n <= 0x27bf)
+    || [0xa9, 0xae, 0x203c, 0x2049, 0x2122, 0x2139, 0x2194, 0x2195, 0x2196, 0x2197, 0x2198, 0x2199,
+      0x21a9, 0x21aa, 0x231a, 0x231b, 0x2328, 0x23cf, 0x23e9, 0x23ea, 0x23eb, 0x23ec, 0x23ed,
+      0x23ee, 0x23ef, 0x23f0, 0x23f1, 0x23f2, 0x23f3, 0x23f8, 0x23f9, 0x23fa, 0x24c2,
+      0x25aa, 0x25ab, 0x25b6, 0x25c0, 0x25fb, 0x25fc, 0x25fd, 0x25fe, 0x2934, 0x2935,
+      0x2b05, 0x2b06, 0x2b07, 0x2b1b, 0x2b1c, 0x2b50, 0x2b55, 0x3030, 0x303d, 0x3297, 0x3299].includes(n);
+  let at = 0;
+  for (;;) {
+    const n = points[at++];
+    if (!base(n) || (n >= 0x1f3fb && n <= 0x1f3ff)) return false;
+    if (points[at] === 0xfe0f || points[at] === 0xfe0e) at++;
+    if (points[at] >= 0x1f3fb && points[at] <= 0x1f3ff) at++;
+    // Unicode subdivision flags, e.g. England, finish with CANCEL TAG.
+    if (n === 0x1f3f4 && points[at] >= 0xe0020 && points[at] <= 0xe007e) {
+      while (points[at] >= 0xe0020 && points[at] <= 0xe007e) at++;
+      if (points[at++] !== 0xe007f) return false;
+    }
+    if (at === points.length) return true;
+    if (points[at++] !== 0x200d || at === points.length) return false;
+  }
+}
+
+export function emojiKind(emoji: string): string {
+  return validReactionEmoji(emoji) ? "emoji:" + emoji : "";
+}
+
+export function reactionEmoji(kind: string): string {
+  const classic = TAPBACKS.find((t) => t.kind === kind);
+  if (classic) return classic.emoji;
+  return kind.startsWith("emoji:") && validReactionEmoji(kind.slice(6)) ? kind.slice(6) : "";
+}
+
+/** Custom content travels only on stdin, including the Mac→osascript hop. */
+export function tapbackRequest(guid: string, kind: string, current: string): { args: string[]; stdin: string } | null {
+  if (!/^[A-Za-z0-9:/_-]{1,128}$/.test(guid) || !reactionEmoji(kind)) return null;
+  if (!kind.startsWith("emoji:")) return { args: tapbackArgs(guid, kind, current), stdin: "" };
+  return { args: ["--guid", guid, "--emoji-stdin", ...(current === kind ? ["--remove"] : []), "--yes"],
+    stdin: JSON.stringify({ emoji: kind.slice(6), name: EMOJI_NAMES.get(kind.slice(6)) || "" }) };
 }
 
 /** A tapback on its way: drawn at once, dimmed, until chat.db has the
@@ -140,10 +220,10 @@ export function shownTapbacks(
 ): { emoji: string; from_me: boolean; pending?: boolean }[] {
   const list = message?.tapbacks ?? [];
   if (!message || !p || String(message.guid || "") !== p.guid || tapbackSettled(message, p)) return list;
-  const hit = TAPBACKS.find((t) => t.kind === p.kind);
-  if (!hit) return list;
-  const others = list.filter((t) => !(t.from_me && tapbackKind(t.emoji)));
-  return [...others, { emoji: hit.emoji, from_me: true, pending: true }];
+  const emoji = reactionEmoji(p.kind);
+  if (!emoji) return list;
+  const others = list.filter((t) => !t.from_me || t.kind === "sticker");
+  return [...others, { emoji, from_me: true, pending: true }];
 }
 
 /** What is left of a pending tapback once a thread load lands: nothing when

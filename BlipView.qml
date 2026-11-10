@@ -4395,13 +4395,14 @@ FocusScope {
     if (root.tapbacksBusy || !root.tapbacksOn || !hostWidget || !TapbackActions.canTapback(message, root.activeIsGroup)) return
     var chat = String(root.active.chat)
     var current = TapbackActions.myTapback(message)
-    var argv = SourceId.bridgeArgv(chat, "imsg-react", hostWidget.binDir)
-      .concat(TapbackActions.tapbackArgs(String(message.guid), kind, current))
+    var request = TapbackActions.tapbackRequest(String(message.guid), kind, current)
+    if (!request) { root.note = "That reaction is not supported"; return }
+    var argv = SourceId.bridgeArgv(chat, "imsg-react", hostWidget.binDir).concat(request.args)
     // the dimmed pill says it is on its way; an earlier failure is old news
     if (root.note.indexOf("tapback: ") === 0) root.note = ""
     hostWidget.takeTapbackFailure(chat)
     root.pendingTapback = TapbackActions.pendingTapback(chat, String(message.guid), kind, current)
-    if (!hostWidget.runTapback(chat, argv)) root.pendingTapback = null
+    if (!hostWidget.runTapback(chat, argv, request.stdin)) root.pendingTapback = null
   }
   function openEmojiPicker() {
     if (emojiPopup.visible) { emojiPopup.close(); return }

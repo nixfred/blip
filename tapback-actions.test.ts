@@ -3,8 +3,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   canTapback, initialTapbackCursor, moveTapbackCursor, myTapback, tapbackForKey, pendingAfterLoad, SETTLE_TRIES, pendingTapback, shownTapbacks, TAPBACKS, tapbackArgs, tapbackFailure, tapbackKind, TAPBACK_NOT_STARTED,
-  tapbackSettled, tapbacksOn,
+  tapbackSettled, tapbacksOn, validReactionEmoji, emojiKind, reactionEmoji, tapbackRequest, searchReactionEmoji,
 } from "./tapback-actions";
+import { EMOJI_CATALOGUE } from "./emoji-catalogue";
 
 const text = { guid: "ABC-123", text: "see you at eight", attachments: [], link: null };
 
@@ -24,11 +25,52 @@ test("the emoji imsg reports map back to a kind, with or without the variation s
   expect(tapbackKind("🚀")).toBe("");
 });
 
-test("yours is the first classic tapback marked from_me; others' and custom ones are not", () => {
+test("yours preserves classic/custom identity and ignores others", () => {
   expect(myTapback(null)).toBe("");
   expect(myTapback({ tapbacks: [{ emoji: "👍", from_me: false }] })).toBe("");
   expect(myTapback({ tapbacks: [{ emoji: "👍", from_me: false }, { emoji: "😂", from_me: true }] })).toBe("laugh");
-  expect(myTapback({ tapbacks: [{ emoji: "🚀", from_me: true }] })).toBe("");
+  expect(myTapback({ tapbacks: [{ emoji: "🚀", from_me: true }] })).toBe("emoji:🚀");
+  expect(myTapback({ tapbacks: [{ emoji: "👍", from_me: true, kind: "emoji" }] })).toBe("emoji:👍");
+  expect(myTapback({ tapbacks: [{ emoji: "⭐", from_me: true, kind: "sticker" }] })).toBe("");
+});
+
+test("single-emoji grammar accepts the full catalogue and rejects prose/multiple emoji", () => {
+  expect(EMOJI_CATALOGUE.length).toBeGreaterThan(3900);
+  for (const [emoji] of EMOJI_CATALOGUE) expect(validReactionEmoji(emoji)).toBe(true);
+  for (const value of ["", "hello", "日本語", "🚀🚀", "hello🚀", "🚀\n", "🇺", "🏽", "\u200d🚀", "🚀\u200d", "a".repeat(65)])
+    expect(validReactionEmoji(value)).toBe(false);
+  for (const emoji of ["👩🏽‍💻", "👨‍👩‍👧‍👦", "🇬🇧", "1️⃣", "❤️"])
+    expect(reactionEmoji(emojiKind(emoji))).toBe(emoji);
+});
+
+test("custom emoji, including search metadata, travels only on stdin", () => {
+  const request = tapbackRequest("G", "emoji:🚀", "emoji:🚀")!;
+  expect(request.args).toEqual(["--guid", "G", "--emoji-stdin", "--remove", "--yes"]);
+  expect(JSON.parse(request.stdin)).toEqual({ emoji: "🚀", name: "rocket" });
+  expect(request.args.join(" ")).not.toContain("🚀");
+  expect(tapbackRequest("G", "emoji:👍", "like")!.args).not.toContain("--remove");
+  expect(tapbackRequest("G", "love", "love")).toEqual({args: ["--guid", "G", "love", "--remove", "--yes"], stdin: ""});
+  expect(tapbackRequest("G;bad", "love", "")).toBeNull();
+  expect(tapbackRequest("G", "emoji:hello", "")).toBeNull();
+  expect(tapbackArgs("G", "emoji:🚀", "")).toEqual([]);
+});
+
+test("search supports categories, compound names, skin tones, and direct paste", () => {
+  expect(searchReactionEmoji("rocket")[0].emoji).toBe("🚀");
+  expect(searchReactionEmoji("rocket", "Animals & Nature")).toEqual([]);
+  expect(searchReactionEmoji("woman technologist medium skin").some((r) => r.emoji === "👩🏽‍💻")).toBe(true);
+  expect(searchReactionEmoji("👩🏽‍💻")[0].kind).toBe("emoji:👩🏽‍💻");
+  expect(searchReactionEmoji("not-a-real-emoji-name")).toEqual([]);
+});
+
+test("custom pending state replaces yours and waits for the exact emoji", () => {
+  const p = pendingTapback("chat", "ABC-123", "emoji:🚀", "emoji:🎉");
+  const message = { ...text, tapbacks: [{emoji:"🎉",from_me:true,kind:"emoji"}] };
+  expect(shownTapbacks(message, p)).toEqual([{emoji:"🚀",from_me:true,pending:true}]);
+  expect(tapbackSettled(message, p)).toBe(false);
+  expect(tapbackSettled({ ...text, tapbacks:[{emoji:"🚀",from_me:true,kind:"emoji"}] }, p)).toBe(true);
+  const customLike = pendingTapback("chat", "ABC-123", "emoji:👍", "");
+  expect(tapbackSettled({ ...text, tapbacks:[{emoji:"👍",from_me:true}] }, customLike)).toBe(false);
 });
 
 test("offered only where imsg-react acts: a delivered text bubble in a 1:1", () => {

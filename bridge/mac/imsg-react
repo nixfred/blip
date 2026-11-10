@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""imsg-react — add or remove one classic tapback on one message.
+"""imsg-react — add or remove one classic or exact-emoji tapback on one message.
 
     imsg-react --guid <GUID> love             dry run: say what would happen
     imsg-react --guid <GUID> love --yes       add ❤️ (nothing to do if it is there)
     imsg-react --guid <GUID> love --remove --yes
 
 Tapbacks: love like dislike laugh emphasize question.
+Custom emoji: --emoji-stdin reads bounded JSON {"emoji":"…","name":"…"}.
+The optional name only searches; an exact Unicode AX identity must match
+before pressing, and type 2006/3006 plus associated_message_emoji verifies it.
 
 The old note said sending a tapback needs SIP off. That was true of code
 injection; it is not true of Accessibility. Every rendered bubble in Messages'
@@ -15,13 +18,19 @@ SIP on, under the Accessibility grant imsg-read already holds. Going through
 Messages means the tapback syncs like one sent from the phone.
 
 macOS 27 took those actions off the bubbles (measured 27.0.1: a bubble offers
-"Tapback Details…", "Reply…", "Copy" and the like, none of the six). What it
-kept is Edit ▸ "Tapback Last Message…", which opens the Tapback Picker on the
-conversation's newest message, with the six as buttons of the same names.
-Neither a click nor an AX press selects an older bubble, so on 27 only the
-newest message can take a tapback; anything older is refused (exit 65). The
-picker names the message it opened on, and nothing is pressed unless that is
-the target's text. chat.db still decides success.
+"Tapback Details…", "Reply…", "Copy" and the like, none of the six). Performing
+"Tapback Details…" opens the Tapback Picker on that bubble, any bubble, with the
+six as buttons of the same names (measured 27.2). The picker names the message
+it opened on, and nothing is pressed unless that is the target's text. chat.db
+still decides success.
+
+macOS 27.2 custom emoji use public native AX APIs to find the presentation
+and its detached CharacterPalette. A result must expose the exact sequence
+twice (glyph wrapper and enabled static-text child). That wrapper's AXPress
+is ignored on 27.2, so one frame-stable, globally hit-tested click selects it.
+The target, main window/title, presentation and glyph are revalidated first.
+Live self-thread receipts verified add, replace, remove and a ZWJ sequence;
+see docs/reactions.md for the limits and tests. Never retry after a gesture.
 
 How one run goes:
   1. chat.db names the target: the message's text, its side, its minute, and
@@ -67,7 +76,9 @@ already allowed; a prompt at an empty Mac becomes a denial (#36). Exit 77.
 
 Refused before Messages is touched: groups (not tested yet), tapback rows,
 messages without text, attachments, links, and rich-link / app cards
-(their AX labels differ). Custom-emoji tapbacks are not here yet.
+(their AX labels differ). Custom emoji use an exact bubble action or picker
+identity, never a guessed index, image sticker, or typed message. If Messages
+does not expose that identity, the operation fails visibly without pressing.
 
 Enabled from Linux by tapbacks=on in bridge.conf (the shim refuses otherwise).
 Message text never rides argv: it goes to osascript on stdin.
@@ -92,6 +103,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import unicodedata
 
 APPLE_EPOCH = 978307200
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -122,6 +134,7 @@ LATER_SCAN = 5000   # later rows checked for an identical HH:MM twin; at the cap
 EX_NOT_OFFERED, EX_USAGE, EX_UNSUPPORTED, EX_UNAVAILABLE, EX_SOFTWARE, EX_TEMPFAIL, EX_NOPERM = 1, 64, 65, 69, 70, 75, 77
 # osascript errors that may come after the action went through
 MAYBE_PERFORMED = {"timeout", "osascript", "perform-failed"}
+NOT_OPENED = {"unsettled", "not-rendered", "ambiguous", "not-offered", "no-conversation"}
 
 USER_TCC = os.path.expanduser("~/Library/Application Support/com.apple.TCC/TCC.db")
 SSH_CLIENT = "/usr/libexec/sshd-keygen-wrapper"   # the TCC client every ssh session runs as
@@ -175,6 +188,12 @@ MSG_COLS = """m.ROWID, m.guid, m.text, m.attributedBody, m.is_from_me, m.date, m
 # A link turns the bubble into a preview card whose label is the page's
 # title, not the text, even with no balloon_bundle_id on the row.
 LINK = re.compile(r"://|\bwww\.", re.I)
+# What a reacted bubble's label adds after its text, measured on 27.2 ("2 reactions,
+# You laughed at this", "Ann loved this", "Ann reacted with 🪿"). The JXA bodyIs twin
+# must match. A sender is never "I", so a real "ok, I loved this" stays its own text;
+# only the time, side and ordinal tell "ok" from a real "ok, Ann loved this".
+_REACTION = r"(\d+ reactions?|(?!I )[^,]+ (loved|liked|disliked|laughed at|emphasized|questioned) this|(?!I )[^,]+ reacted with [^,]+)"
+REACTED = re.compile(_REACTION + "(, " + _REACTION + ")*")
 
 # A bubble: a real message, not a tapback row. Same filter the transcript uses.
 BUBBLE = "m.item_type = 0 AND (m.associated_message_type IS NULL OR m.associated_message_type < 2000 OR m.associated_message_type >= 4000)"
@@ -283,8 +302,11 @@ def my_rows(con, guids: list, self_handles: list, since: int = 0) -> list:
     writes the tapback as an inbound echo from your own address."""
     handles = list(self_handles) or [""]
     aimed = " OR ".join("m.associated_message_guid LIKE '%' || ?" for _ in guids)
+    has_emoji = any(r[1] == "associated_message_emoji" for r in con.execute("PRAGMA table_info(message)"))
+    emoji_col = "m.associated_message_emoji" if has_emoji else "NULL"
     return [dict(r) for r in con.execute(
-        f"""SELECT m.ROWID, m.associated_message_type AS type, m.associated_message_guid AS ag, m.date
+        f"""SELECT m.ROWID, m.associated_message_type AS type, m.associated_message_guid AS ag, m.date,
+                   {emoji_col} AS emoji
               FROM message m LEFT JOIN handle h ON h.ROWID = m.handle_id
              WHERE m.associated_message_type BETWEEN 2000 AND 3999 AND m.date > ? AND ({aimed})
                AND (m.is_from_me = 1 OR h.id IN ({','.join('?' * len(handles))}))
@@ -328,6 +350,50 @@ def plan(current, kind: int, remove: bool):
     if remove:
         return 3000 + kind if current == kind else None
     return None if current == kind else 2000 + kind
+
+
+def emoji_plan(rows: list, emoji: str, remove: bool):
+    """2006 alone is insufficient: two different emoji share that row type."""
+    current = rows[-1] if rows else {}
+    same = current.get("type") == 2006 and current.get("emoji") == emoji
+    return (3006 if same else None) if remove else (None if same else 2006)
+
+
+def read_emoji(stream) -> dict:
+    """Content stays on bounded stdin. A label is search metadata, never an action identity."""
+    raw = stream.read(2049)
+    if len(raw) > 2048:
+        raise Stop("usage", EX_USAGE, "emoji request is too large")
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeError):
+        raise Stop("usage", EX_USAGE, "expected one emoji request on stdin")
+    emoji = data.get("emoji") if isinstance(data, dict) else None
+    name = data.get("name", "") if isinstance(data, dict) else None
+    # The exact sequence is additionally checked by Messages' identity and
+    # chat.db. Reject prose/control chars before any database or UI access.
+    if (not valid_emoji(emoji)
+            or not isinstance(name, str) or len(name) > 160
+            or any(unicodedata.category(c).startswith("C") for c in name)):
+        raise Stop("usage", EX_USAGE, "expected one emoji sequence and an optional search name")
+    return {"emoji": emoji, "name": name}
+
+
+def valid_emoji(value) -> bool:
+    """Single bounded emoji sequence; same grammar as tapback-actions.ts."""
+    if not isinstance(value, str) or not 1 <= len(value.encode("utf-16-le", "surrogatepass")) // 2 <= 64:
+        return False
+    if re.fullmatch(r"[\U0001f1e6-\U0001f1ff]{2}|[0-9#*]\ufe0f?\u20e3", value):
+        return True
+    base = (r"[\U0001f000-\U0001f1e5\U0001f200-\U0001f3fa\U0001f400-\U0001faff\u2600-\u27bf"
+            r"\u00a9\u00ae\u203c\u2049\u2122\u2139\u2194-\u2199\u21a9\u21aa"
+            r"\u231a\u231b\u2328\u23cf\u23e9-\u23f3\u23f8-\u23fa\u24c2"
+            r"\u25aa\u25ab\u25b6\u25c0\u25fb-\u25fe\u2934\u2935\u2b05-\u2b07"
+            r"\u2b1b\u2b1c\u2b50\u2b55\u3030\u303d\u3297\u3299]")
+    unit = base + r"[\ufe0e\ufe0f]?[\U0001f3fb-\U0001f3ff]?"
+    if re.fullmatch(r"\U0001f3f4[\ufe0e\ufe0f]?[\U000e0020-\U000e007e]+\U000e007f", value):
+        return True
+    return re.fullmatch(unit + r"(?:\u200d" + unit + r")*", value) is not None
 
 
 def answer(con, target: dict, self_handles: list, since: int, pause=0.2):
@@ -375,7 +441,7 @@ function parseLabel(d) {
   let h = parseInt(m[2], 10);
   if (m[4] === "PM" && h < 12) h += 12;
   if (m[4] === "AM" && h === 12) h = 0;
-  return { time: (h < 10 ? "0" : "") + h + ":" + m[3], body: norm(m[1].replace(/^[^,]*, /, "")) };
+  return { time: (h < 10 ? "0" : "") + h + ":" + m[3], body: norm(m[1].replace(/^[^,]*, /, "").replace(/^Reply…, /, "")) };
 }
 // Exactly the text, or the text followed by the tapback annotation, which
 // opens with its count: "ok" must not match a neighbouring "ok, see you", nor
@@ -383,15 +449,74 @@ function parseLabel(d) {
 function bodyIs(body, want) {
   if (body === want) return true;
   if (!body.startsWith(want + ", ")) return false;
-  return /^\d+ reactions?(, .+ this)*$/.test(body.slice(want.length + 2));
+  return /^(\d+ reactions?|(?!I )[^,]+ (loved|liked|disliked|laughed at|emphasized|questioned) this|(?!I )[^,]+ reacted with [^,]+)(, (\d+ reactions?|(?!I )[^,]+ (loved|liked|disliked|laughed at|emphasized|questioned) this|(?!I )[^,]+ reacted with [^,]+))*$/
+    .test(body.slice(want.length + 2));
+}
+function attribute(el, name) { return safe(() => el.attributes.byName(name).value(), null); }
+function emojiIdentity(el, emoji) {
+  return String(attribute(el, "AXIdentifier") || "") === emoji ||
+    String(attribute(el, "AXValue") || "") === emoji;
+}
+function pickerTargetMatches(q) {
+  if (!q.text) return false;
+  const els = safe(() => win().entireContents(), []);
+  const descriptions = els.map(e => String(safe(() => e.description(), "")));
+  const labels = descriptions.filter(d => /^Message, /.test(d));
+  return descriptions.filter(d => d === "Tapback Picker").length === 1 && labels.length > 0 &&
+    labels.every(d => bodyIs(norm(d.slice(9)), q.text));
+}
+// No arrow-count or Return fallback. A search result must expose the exact
+// requested sequence, including skin tone, ZWJ and variation selectors.
+// Beeper's platform-imessage documents direct action names and picker ids;
+// detached/inaccessible CharacterPalette windows fail closed here.
+function pressEmoji(els, emoji, q) {
+  const hits = els.filter(e => ["AXButton", "AXCell"].indexOf(safe(() => e.role(), "")) >= 0 && emojiIdentity(e, emoji) &&
+    safe(() => e.enabled(), false) === true &&
+    safe(() => e.actions.name(), []).indexOf("AXPress") >= 0);
+  if (hits.length !== 1) return { ok: false, error: hits.length ? "ambiguous-emoji" : "emoji-not-offered" };
+  const el = hits[0];
+  if (!pickerTargetMatches(q) || !safe(() => proc.frontmost(), false) || !emojiIdentity(el, emoji) || !safe(() => el.enabled(), false))
+    return { ok: false, error: "moved" };
+  try { el.actions.byName("AXPress").perform(); return { ok: true }; }
+  catch (e) { return { ok: false, error: "perform-failed" }; }
+}
+function emojiPicker(q) {
+  if (!pickerTargetMatches(q)) return { ok: false, error: "picker-elsewhere" };
+  let popover = null;
+  for (let n = 0; n < 8 && !popover; n++) {
+    delay(0.2);
+    // Restrict inspection to Messages' own windows and AXPopover elements.
+    // Never search arbitrary app windows or type into the compose field.
+    const windows = safe(() => proc.windows(), []);
+    const pops = [];
+    for (const w of windows) {
+      const els = [w].concat(safe(() => w.entireContents(), []));
+      for (const el of els) if (safe(() => el.role(), "") === "AXPopover" || safe(() => el.roleDescription(), "") === "popover") pops.push(el);
+    }
+    if (pops.length === 1) popover = pops[0];
+    else if (pops.length > 1) return { ok: false, error: "ambiguous-emoji" };
+  }
+  if (!popover) return { ok: false, error: "emoji-picker-unavailable" };
+  let els = safe(() => popover.entireContents(), []);
+  const direct = pressEmoji(els, q.emoji, q);
+  if (direct.ok || direct.error !== "emoji-not-offered") return direct;
+  const fields = els.filter(e => safe(() => e.subrole(), "") === "AXSearchField" && safe(() => e.enabled(), false));
+  if (fields.length !== 1 || !q.name || !pickerTargetMatches(q) || !safe(() => proc.frontmost(), false))
+    return { ok: false, error: "emoji-not-offered" };
+  // The name narrows results, but does not determine what is pressed.
+  try { fields[0].value = q.name; } catch (e) { return { ok: false, error: "emoji-picker-unavailable" }; }
+  delay(0.8);
+  return pressEmoji(safe(() => popover.entireContents(), []), q.emoji, q);
 }
 // The transcript is one group whose child groups are the message rows, each
 // labelled like its bubble; their labels come in bulk reads, since one AX
 // read per element costs ~70 ms. A row holds the live bubble somewhere below
 // it, at a depth that varies by kind; the row itself offers only scrolling
 // and the menu (see LIVE).
-function collect() {
+function collect(q) {
   const all = win().entireContents();
+  // A picture's live bubble is a button below its row (imsg-reply, 27.2).
+  const kinds = q && q.picture ? /\.(groups|uiElements|buttons)\.at\(\d+\)$/ : /\.(groups|uiElements)\.at\(\d+\)$/;
   const paths = all.map(el => Automation.getDisplayString(el));
   const at = {}, kids = {}, fields = [];
   paths.forEach((s, i) => {
@@ -420,7 +545,7 @@ function collect() {
   const copies = row => {
     const out = [];
     paths.forEach((s, i) => {
-      if (s !== row.path && !(s.startsWith(row.path + ".") && /\.(groups|uiElements)\.at\(\d+\)$/.test(s))) return;
+      if (s !== row.path && !(s.startsWith(row.path + ".") && kinds.test(s))) return;
       const L = parseLabel(String(safe(() => all[i].description(), "") || ""));
       if (L && L.time === row.L.time && L.body === row.L.body) out.push(all[i]);
     });
@@ -436,7 +561,7 @@ function liveCopies(els, q) {
   return els.map(el => ({ el, names: actionNames(el) })).filter(c => live(c.names, q));
 }
 function scan(q) {
-  const { rows, copies, fields } = collect();
+  const { rows, copies, fields } = collect(q);
   // The compose field spans the transcript: its centre splits sent from received.
   let wide = null;
   for (const f of fields) { const fr = frame(f); if (!wide || fr.w > wide.w) wide = fr; }
@@ -502,8 +627,21 @@ function picker(q) {
     out.error = "picker-elsewhere";
     return out;
   }
+  if (q.emoji) {
+    const children = safe(() => pk.entireContents(), []);
+    const direct = pressEmoji(children, q.emoji, q);
+    if (direct.ok || direct.error !== "emoji-not-offered") return direct;
+    if (q.remove) return direct; // removing must select the exact existing reaction
+    const add = children.filter(e => safe(() => e.role(), "") === "AXButton" &&
+      String(safe(() => e.description(), "")) === "Add custom emoji reaction" && safe(() => e.enabled(), false));
+    if (add.length !== 1 || !safe(() => proc.frontmost(), false)) return direct;
+    try { add[0].actions.byName("AXPress").perform(); }
+    catch (e) { return { ok: false, error: "emoji-picker-unavailable" }; }
+    return emojiPicker(q);
+  }
   const btn = safe(() => pk.entireContents(), []).find(e =>
-    safe(() => e.role(), "") === "AXButton" && String(safe(() => e.description(), "")) === q.action);
+    safe(() => e.role(), "") === "AXButton" && String(safe(() => e.description(), "")) === q.action
+      && safe(() => e.enabled(), false));
   if (!btn) { se.keyCode(53); out.error = "not-offered"; out.offered = []; return out; }
   // The action's NAME is AXPress; "press" is only its description.
   try { btn.actions.byName("AXPress").perform(); out.ok = true; }
@@ -513,10 +651,11 @@ function picker(q) {
 function run() {
   const input = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
   const q = JSON.parse(String(ObjC.unwrap($.NSString.alloc.initWithDataEncoding(input, $.NSUTF8StringEncoding))));
+  if (q.mode === "emoji") return JSON.stringify(emojiPicker(q));
   if (q.mode === "page") {
     // Live bubbles carry the transcript's page-scroll actions. No page below
     // means already at the bottom.
-    const { rows, copies } = collect();
+    const { rows, copies } = collect(q);
     const down = q.direction === "down";
     let c = null;
     for (let n = 0; n < rows.length && !c; n++) c = liveCopies(copies(rows[down ? rows.length - 1 - n : n]), q)[0];
@@ -571,6 +710,414 @@ function run() {
 """
 
 
+class NativeAX:
+    """Public Accessibility/CoreFoundation APIs, with no extra dependency.
+
+    System Events does not expose detached CharacterPalette popovers. Native
+    AX also avoids its per-attribute Apple-event latency. Every owned CF value
+    is released together after the bounded operation; borrowed children remain
+    alive while their containing arrays are retained.
+    """
+    def __init__(self, deadline):
+        import ctypes as C
+        self.C, self.deadline, self.refs, self.keys = C, deadline, [], {}
+        P, L = C.c_void_p, C.c_long
+        self.cf = C.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        self.ax = C.CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+        def bind(lib, name, result, args):
+            fn = getattr(lib, name)
+            fn.restype, fn.argtypes = result, args
+            return fn
+        self.string = bind(self.cf, "CFStringCreateWithCString", P, [P, C.c_char_p, C.c_uint])
+        self.getstring = bind(self.cf, "CFStringGetCString", C.c_bool, [P, C.c_char_p, L, C.c_uint])
+        self.count = bind(self.cf, "CFArrayGetCount", L, [P])
+        self.at = bind(self.cf, "CFArrayGetValueAtIndex", P, [P, L])
+        self.typeid = bind(self.cf, "CFGetTypeID", C.c_ulong, [P])
+        self.types = {name: bind(self.cf, "CF" + name + "GetTypeID", C.c_ulong, [])()
+                      for name in ("String", "Array", "Boolean", "Number", "Dictionary")}
+        self.boolean = bind(self.cf, "CFBooleanGetValue", C.c_bool, [P])
+        self.number = bind(self.cf, "CFNumberGetValue", C.c_bool, [P, C.c_int, P])
+        self.dictget = bind(self.cf, "CFDictionaryGetValue", P, [P, P])
+        self.release = bind(self.cf, "CFRelease", None, [P])
+        self.equal = bind(self.cf, "CFEqual", C.c_bool, [P, P])
+        self.copyattr = bind(self.ax, "AXUIElementCopyAttributeValue", C.c_int, [P, P, C.POINTER(P)])
+        self.copyactions = bind(self.ax, "AXUIElementCopyActionNames", C.c_int, [P, C.POINTER(P)])
+        self.setattr = bind(self.ax, "AXUIElementSetAttributeValue", C.c_int, [P, P, P])
+        self.perform = bind(self.ax, "AXUIElementPerformAction", C.c_int, [P, P])
+        self.hit = bind(self.ax, "AXUIElementCopyElementAtPosition", C.c_int,
+                        [P, C.c_float, C.c_float, C.POINTER(P)])
+        self.windows = bind(self.ax, "CGWindowListCopyWindowInfo", P, [C.c_uint, C.c_uint])
+        class Point(C.Structure):
+            _fields_ = [("x", C.c_double), ("y", C.c_double)]
+        self.Point = Point
+        self.axvalue = bind(self.ax, "AXValueGetValue", C.c_bool, [P, C.c_int, P])
+        self.event = bind(self.ax, "CGEventCreate", P, [P])
+        self.location = bind(self.ax, "CGEventGetLocation", Point, [P])
+        self.mouse_event = bind(self.ax, "CGEventCreateMouseEvent", P, [P, C.c_uint, Point, C.c_uint])
+        self.post_event = bind(self.ax, "CGEventPost", None, [C.c_uint, P])
+        self.button_state = bind(self.ax, "CGEventSourceButtonState", C.c_bool, [C.c_int, C.c_uint])
+        self.flags_state = bind(self.ax, "CGEventSourceFlagsState", C.c_ulonglong, [C.c_int])
+        create = bind(self.ax, "AXUIElementCreateApplication", P, [C.c_int])
+        set_timeout = bind(self.ax, "AXUIElementSetMessagingTimeout", C.c_int, [P, C.c_float])
+        pids = subprocess.check_output(["/usr/bin/pgrep", "-x", "Messages"], timeout=2).splitlines()
+        if len(pids) != 1:
+            raise RuntimeError("Messages process is not unique")
+        self.pid = int(pids[0])
+        self.app = self.own(create(self.pid))
+        self.system = self.own(bind(self.ax, "AXUIElementCreateSystemWide", P, [])())
+        set_timeout(self.app, 0.5)
+
+    def check(self):
+        if time.monotonic() >= self.deadline:
+            raise TimeoutError("emoji selection deadline reached")
+
+    def own(self, value):
+        if value:
+            self.refs.append(value)
+        return value
+
+    def key(self, name):
+        if name not in self.keys:
+            self.keys[name] = self.own(self.string(None, name.encode(), 0x08000100))
+        return self.keys[name]
+
+    def decode(self, ref):
+        if not ref:
+            return None
+        kind = self.typeid(ref)
+        if kind == self.types["String"]:
+            buf = self.C.create_string_buffer(8192)
+            return buf.value.decode("utf-8") if self.getstring(ref, buf, len(buf), 0x08000100) else None
+        if kind == self.types["Array"]:
+            size = self.count(ref)
+            if size > 4096:
+                raise RuntimeError("Accessibility array exceeded its bound")
+            return [self.at(ref, i) for i in range(size)]
+        if kind == self.types["Boolean"]:
+            return bool(self.boolean(ref))
+        if kind == self.types["Number"]:
+            number = self.C.c_double()
+            return number.value if self.number(ref, 13, self.C.byref(number)) else None
+        return ref
+
+    def attr(self, el, name):
+        self.check()
+        out = self.C.c_void_p()
+        if not el or self.copyattr(el, self.key(name), self.C.byref(out)):
+            return None
+        return self.decode(self.own(out.value))
+
+    def children(self, el):
+        return self.attr(el, "AXChildren") or []
+
+    def walk(self, el, limit=1800):
+        queue, seen = [(el, None)], 0
+        while queue:
+            self.check()
+            if seen >= limit:
+                raise RuntimeError("Accessibility tree exceeded its bound")
+            item, parent = queue.pop(0)
+            seen += 1
+            yield item, parent
+            queue.extend((child, item) for child in self.children(item))
+
+    def actions(self, el):
+        self.check()
+        out = self.C.c_void_p()
+        if self.copyactions(el, self.C.byref(out)):
+            return []
+        return [self.decode(x) for x in self.decode(self.own(out.value)) or []]
+
+    def press(self, el):
+        self.check()
+        return self.perform(el, self.key("AXPress")) == 0
+
+    def frame(self, el):
+        point, size = self.Point(), self.Point()
+        p, s = self.attr(el, "AXPosition"), self.attr(el, "AXSize")
+        if not p or not s or not self.axvalue(p, 1, self.C.byref(point)) or not self.axvalue(s, 2, self.C.byref(size)):
+            return None
+        return point.x, point.y, size.x, size.y
+
+    def click_glyph(self, el, validate):
+        """One bounded click on an exact AX glyph, never a guessed grid cell.
+
+        CharacterPalette acknowledges AXPress on its AXUnknown glyph wrappers
+        without choosing them on macOS 27.2. Hit-test the current center back
+        to that same wrapper or its one static-text child; revalidate context,
+        identity and bounds immediately before the single down/up gesture.
+        """
+        self.check()
+        before = self.frame(el)
+        if not before or not all(abs(v) < 100000 for v in before) or not (4 <= before[2] <= 128 and 4 <= before[3] <= 128):
+            return {"ok": False, "error": "moved"}
+        point = self.Point(before[0] + before[2] / 2, before[1] + before[3] / 2)
+        hit = self.C.c_void_p()
+        if self.hit(self.system, point.x, point.y, self.C.byref(hit)):
+            return {"ok": False, "error": "moved"}
+        hit = self.own(hit.value)
+        children = self.children(el)
+        if not (self.equal(hit, el) or (len(children) == 1 and self.equal(hit, children[0]))):
+            return {"ok": False, "error": "moved"}
+        # Do not mix a synthetic click with a person's drag or held modifier.
+        if any(self.button_state(0, n) for n in range(5)) or self.flags_state(0) & 0x9e0000:
+            return {"ok": False, "error": "moved"}
+        original_event = self.own(self.event(None))
+        if not original_event:
+            return {"ok": False, "error": "moved"}
+        original = self.location(original_event)
+        down = self.own(self.mouse_event(None, 1, point, 0))
+        up = self.own(self.mouse_event(None, 2, point, 0))
+        if not down or not up or not validate() or self.frame(el) != before:
+            return {"ok": False, "error": "moved"}
+        hit_now = self.C.c_void_p()
+        if self.hit(self.system, point.x, point.y, self.C.byref(hit_now)):
+            return {"ok": False, "error": "moved"}
+        hit_now = self.own(hit_now.value)
+        if not (self.equal(hit_now, el) or (len(children) == 1 and self.equal(hit_now, children[0]))):
+            return {"ok": False, "error": "moved"}
+        self.check()
+        # No fallback or second click follows these events, even if no receipt
+        # arrives. A user moving immediately afterward retains their pointer.
+        try:
+            try:
+                self.post_event(0, down)
+            finally:
+                self.post_event(0, up)
+            current_event = self.own(self.event(None))
+            if current_event:
+                current = self.location(current_event)
+                if abs(current.x - point.x) < 1 and abs(current.y - point.y) < 1:
+                    restore = self.own(self.mouse_event(None, 5, original, 0))
+                    if restore:
+                        self.post_event(0, restore)
+        except Exception:
+            return {"ok": False, "error": "perform-failed"}
+        return {"ok": True}
+
+    def search(self, el, text):
+        self.check()
+        return self.setattr(el, self.key("AXValue"), self.key(text)) == 0
+
+    def foreground(self):
+        return self.attr(self.app, "AXFrontmost") is True
+
+    def origin(self, picker, container):
+        window = self.attr(self.app, "AXMainWindow")
+        parent = self.attr(container, "AXParent")
+        picker_parent = self.attr(picker, "AXParent")
+        if not window or not parent or not picker_parent or not self.equal(picker_parent, container):
+            return None
+        title = self.attr(window, "AXTitle")
+        return (window, title, parent) if isinstance(title, str) else None
+
+    def same_origin(self, origin, picker, container):
+        current = self.origin(picker, container)
+        return bool(origin and current and self.equal(origin[0], current[0])
+                    and origin[1] == current[1] and self.equal(origin[2], current[2]))
+
+    def pickers(self):
+        # The presentation container is a direct child of iOSContentGroup.
+        # Do not traverse conversation/history cells to find its sibling UI.
+        found = []
+        for window in self.attr(self.app, "AXWindows") or []:
+            for group in self.children(window):
+                if self.attr(group, "AXSubrole") != "iOSContentGroup":
+                    continue
+                for presentation in self.children(group):
+                    for el in self.children(presentation):
+                        if self.attr(el, "AXIdentifier") == "TapbackPickerCollectionView":
+                            found.append((el, presentation))
+        return found
+
+    def popovers(self):
+        """Discover, never click, a detached Messages-owned picker window.
+
+        The point is only an AX hit-test. It must resolve to a search field
+        whose parent is AXPopover. Subsequent selection uses exact identities.
+        Window bounds alone can never authorize any input or press.
+        """
+        found = []
+        self.check()
+        windows = self.decode(self.own(self.windows(16, 0))) or []
+        def field(obj, name):
+            return self.decode(self.dictget(obj, self.key(name)))
+        for window in windows:
+            self.check()
+            if field(window, "kCGWindowOwnerPID") != self.pid or not field(window, "kCGWindowIsOnscreen"):
+                continue
+            if (field(window, "kCGWindowAlpha") or 0) <= 0:
+                continue
+            bounds = self.dictget(window, self.key("kCGWindowBounds"))
+            if not bounds:
+                continue
+            x, y, width, height = [field(bounds, k) for k in ("X", "Y", "Width", "Height")]
+            if any(v is None for v in (x, y, width, height)) or not (300 <= width <= 420 and 350 <= height <= 560):
+                continue
+            out = self.C.c_void_p()
+            if self.hit(self.app, x + width / 2, y + 38, self.C.byref(out)):
+                continue
+            el = self.own(out.value)
+            if self.attr(el, "AXSubrole") != "AXSearchField":
+                continue
+            parent = self.attr(el, "AXParent")
+            if self.attr(parent, "AXRole") == "AXPopover" and not any(self.equal(parent, p) for p in found):
+                found.append(parent)
+        return found
+
+    def close(self):
+        for ref in reversed(self.refs):
+            self.release(ref)
+        self.refs.clear()
+
+
+def native_emoji_picker(q, ax=None, pause=time.sleep, open_picker=None):
+    """One exact custom reaction in the picker already opened by picker_route.
+
+    Only identifiers/roles are traversed in the transcript. Message-label
+    reads are restricted to siblings in the verified picker presentation.
+    No CharacterPalette process search, global keyboard input, or grid index.
+    """
+    owned = ax is None
+    ax = ax or NativeAX(time.monotonic() + 30)
+    pressed = False
+    try:
+        matches = ax.pickers()
+        if not matches and open_picker:
+            why = open_picker()
+            if why:
+                return {"ok": False, "error": "no-picker"}
+            # The menu event is deliberately asynchronous. Acting on the old
+            # presentation during its transition can acknowledge AXPress but
+            # do nothing. An existing picker is reused, never toggled closed.
+            pause(0.8)
+        for _ in range(15):
+            matches = ax.pickers()
+            if matches:
+                break
+            pause(0.3)
+        if len(matches) != 1:
+            return {"ok": False, "error": "no-picker" if not matches else "ambiguous-emoji"}
+        # A press during the picker's opening transition is acknowledged and
+        # then ignored (27.2), for classic buttons and glyphs alike.
+        pause(0.8)
+        matches = ax.pickers()
+        if len(matches) != 1:
+            return {"ok": False, "error": "no-picker" if not matches else "ambiguous-emoji"}
+        picker, container = matches[0]
+        origin = ax.origin(picker, container)
+
+        def context():
+            if (not ax.foreground() or not ax.same_origin(origin, picker, container)
+                    or ax.attr(picker, "AXIdentifier") != "TapbackPickerCollectionView"):
+                return False
+            labels = []
+            for sibling in ax.children(container):
+                if ax.attr(sibling, "AXRole") != "AXGroup" or ax.attr(sibling, "AXIdentifier") == "TapbackPickerCollectionView":
+                    continue
+                label = ax.attr(sibling, "AXDescription") or ""
+                if label.startswith("Message, "):
+                    labels.append(norm(label[9:]))
+            return bool(labels) and all(label == q["text"] or
+                (label.startswith(q["text"] + ", ") and REACTED.fullmatch(label[len(q["text"]) + 2:]))
+                for label in labels)
+
+        if not q.get("emoji"):
+            hits = [el for el, _ in ax.walk(picker) if ax.attr(el, "AXRole") == "AXButton"
+                    and ax.attr(el, "AXDescription") == q["action"] and ax.attr(el, "AXEnabled") is True]
+            if len(hits) != 1:
+                return {"ok": False, "error": "not-offered", "offered": []}
+            if not context():
+                return {"ok": False, "error": "picker-elsewhere"}
+            pressed = True
+            # A slow AX acknowledgement proves nothing either way: chat.db decides.
+            return {"ok": True} if ax.press(hits[0]) else {"ok": False, "error": "perform-failed"}
+
+        def exact(el):
+            if ax.attr(el, "AXRole") == "AXUnknown":
+                # CharacterPalette 27.2 exposes each glyph as AXUnknown with
+                # AXPress, an exact glyph description and one static-text
+                # child containing the same sequence. A named image/sticker
+                # or a search field cannot satisfy this identity contract.
+                children = ax.children(el)
+                return (ax.attr(el, "AXDescription") == q["emoji"] and len(children) == 1
+                        and ax.attr(children[0], "AXRole") == "AXStaticText"
+                        and ax.attr(children[0], "AXValue") == q["emoji"])
+            return ax.attr(el, "AXIdentifier") == q["emoji"] or ax.attr(el, "AXValue") == q["emoji"]
+
+        def enabled(el):
+            state = ax.attr(el, "AXEnabled")
+            if state is not None:
+                return state is True
+            # The system's AXUnknown glyph wrapper omits AXEnabled. Its
+            # exact static-text child supplies the enabled state instead.
+            children = ax.children(el)
+            return (ax.attr(el, "AXRole") == "AXUnknown" and len(children) == 1
+                    and ax.attr(children[0], "AXRole") == "AXStaticText"
+                    and ax.attr(children[0], "AXEnabled") is True)
+
+        def choose(root):
+            nonlocal pressed
+            hits = [el for el, _ in ax.walk(root) if ax.attr(el, "AXRole") in ("AXButton", "AXCell", "AXUnknown")
+                    and exact(el) and enabled(el) and "AXPress" in ax.actions(el)]
+            if len(hits) != 1:
+                return {"ok": False, "error": "ambiguous-emoji" if hits else "emoji-not-offered"}
+            if not context() or not exact(hits[0]) or not enabled(hits[0]):
+                return {"ok": False, "error": "moved"}
+            if ax.attr(hits[0], "AXRole") == "AXUnknown":
+                result = ax.click_glyph(hits[0], lambda: context() and exact(hits[0]) and enabled(hits[0]))
+                pressed = result.get("ok", False) or result.get("error") == "perform-failed"
+                return result
+            pressed = True
+            return {"ok": True} if ax.press(hits[0]) else {"ok": False, "error": "perform-failed"}
+
+        if not context():
+            return {"ok": False, "error": "picker-elsewhere"}
+        pause(0.2)
+        if not context():
+            return {"ok": False, "error": "moved"}
+        direct = choose(picker)
+        if direct.get("ok") or direct.get("error") != "emoji-not-offered" or q.get("remove"):
+            return direct
+        more = [el for el in ax.children(container) if ax.attr(el, "AXRole") == "AXButton"
+                and ax.attr(el, "AXDescription") == "Add custom emoji reaction"
+                and ax.attr(el, "AXEnabled") is True and "AXPress" in ax.actions(el)]
+        if len(more) != 1 or not context():
+            return {"ok": False, "error": "emoji-picker-unavailable"}
+        if not ax.press(more[0]):
+            return {"ok": False, "error": "emoji-picker-unavailable"}
+        popovers = []
+        for _ in range(8):
+            pause(0.2)
+            if not context():
+                return {"ok": False, "error": "moved"}
+            popovers = ax.popovers()
+            if popovers:
+                break
+        if len(popovers) != 1:
+            return {"ok": False, "error": "ambiguous-emoji" if popovers else "emoji-picker-unavailable"}
+        popover = popovers[0]
+        if not q.get("name"):
+            return choose(popover)
+        # Search before enumerating the catalogue; an unfiltered system
+        # picker may contain thousands of cells. The field is a direct child.
+        fields = [el for el in ax.children(popover) if ax.attr(el, "AXSubrole") == "AXSearchField"
+                  and ax.attr(el, "AXEnabled") is True]
+        if len(fields) != 1 or not context():
+            return {"ok": False, "error": "emoji-picker-unavailable"}
+        if not ax.search(fields[0], q["name"]):
+            return {"ok": False, "error": "emoji-picker-unavailable"}
+        pause(0.8)
+        return choose(popover)
+    except TimeoutError:
+        return {"ok": False, "error": "timeout" if pressed else "emoji-picker-unavailable"}
+    except Exception:
+        return {"ok": False, "error": "perform-failed" if pressed else "emoji-picker-unavailable"}
+    finally:
+        if owned:
+            ax.close()
+
+
 def jxa(request: dict) -> dict:
     """Run the AX script with one request on stdin; its JSON answer, or an error."""
     try:
@@ -596,8 +1143,8 @@ def perform(target: dict, action: str, run=jxa, deadline=None) -> dict:
     that finds it where the last one did. Paging and settling are the only
     things repeated, and they stop at `deadline` (time.monotonic())."""
     request = {"text": target["text"], "from_me": target["from_me"], "hhmm": target["hhmm"],
-               "ordinal": target["ordinal"], "newest": target["newest"], "actions": ACTIONS,
-               "action": action, "frame": "", "mode": "perform"}
+               "ordinal": target["ordinal"], "newest": target["newest"], "actions": ACTIONS + [action],
+               "action": action, "frame": "", "mode": "perform", "picture": bool(target.get("picture"))}
     down = up = settles = 0
     looked_again = bottom_seen = False
     while True:
@@ -739,16 +1286,14 @@ def system_events_consent(path: str = USER_TCC, probe=ae_permission) -> str:
 
 # --------------------------------------------------------------------- run
 
-def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, run=jxa) -> dict:
+def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, run=jxa, emoji="", name="") -> dict:
     """Steps 3-4: one press, then chat.db (see the module docstring). `ui` is the
     imsg-read module (lock, selection, focus); tests pass a stand-in."""
-    action = TAPBACKS_BY_KIND[kind]
-    expected = plan(current_kind(my_rows(con, target["guids"], self_handles)), kind, remove)
+    action = emoji if emoji else TAPBACKS_BY_KIND[kind]
+    rows = my_rows(con, target["guids"], self_handles)
+    expected = emoji_plan(rows, emoji, remove) if emoji else plan(current_kind(rows), kind, remove)
     if expected is None:
         return {"ok": True, "result": "unchanged"}
-    if macos_major() >= 27 and not is_last(con, target):   # refused before Messages is touched
-        raise Stop("not-last", EX_UNSUPPORTED,
-                   "on this macOS only the newest message in a conversation can take a tapback")
     why = system_events_consent()   # before ensure_messages: it is already a System Events call
     if why:
         raise Stop("consent", EX_NOPERM, why)
@@ -766,22 +1311,37 @@ def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, ru
         if why:
             raise Stop("unavailable", EX_UNAVAILABLE, why)
         since = apple_now()
-        # macOS 27 bubbles carry no tapbacks, so the bubble search cannot even
-        # page (it pages with a live bubble's actions): straight to the picker.
-        r = (picker_route(con, target, action, run) if macos_major() >= 27
+        # macOS 27 bubbles carry no tapbacks, only the way to their picker.
+        r = (picker_route(target, action, run, emoji=emoji, name=name, remove=remove, deadline=deadline) if macos_major() >= 27
              else perform(target, action, run=run, deadline=deadline))
         if r.get("error") == "not-offered" and PICKER_SIGN in r.get("offered", []):
-            r = picker_route(con, target, action, run)   # a 27-style bubble on an older version
+            r = picker_route(target, action, run, emoji=emoji, name=name, remove=remove, deadline=deadline)
+        elif emoji and not remove and r.get("error") == "not-offered":
+            # Opening the catalogue is not sending. The final choice still
+            # needs exact AX identity; a missing/ambiguous result is refused.
+            if time.monotonic() >= deadline:
+                raise Stop("timeout", EX_TEMPFAIL, "emoji selection deadline reached; nothing was sent")
+            opened = perform(target, "Add Emoji as Tapback", run=run, deadline=deadline)
+            if opened.get("ok") and time.monotonic() >= deadline:
+                raise Stop("timeout", EX_TEMPFAIL, "emoji selection deadline reached; nothing was sent")
+            r = run({"mode": "emoji", "emoji": emoji, "name": name, "text": target["text"]}) if opened.get("ok") else opened
         if not r.get("ok") and r.get("error") not in MAYBE_PERFORMED:
+            if macos_major() >= 27 and run is jxa and r.get("error") not in NOT_OPENED:
+                close_picker()
             raise failure(r, action)   # nothing was pressed
         row = answer(con, target, self_handles, since)
         if row is None:
+            if macos_major() >= 27 and run is jxa:
+                close_picker()
             if not r.get("ok"):
                 raise failure(r, action)
             raise Stop("no-row", EX_TEMPFAIL, f"'{action}' was performed but no tapback row reached chat.db")
         if row["type"] != expected:
             raise Stop("unexpected", EX_TEMPFAIL, f"chat.db shows tapback type {row['type']}, not {expected}",
                        type=row["type"])
+        if emoji and row.get("emoji") != emoji:
+            raise Stop("unexpected-emoji", EX_TEMPFAIL,
+                       "chat.db did not confirm the exact requested emoji; check the reaction in Messages")
     finally:
         ui.restore_front(prev)
     return {"ok": True, "result": "removed" if expected >= 3000 else "added", "type": expected,
@@ -795,49 +1355,57 @@ def macos_major() -> int:
         return 0
 
 
-CLICK_PICKER = """tell application "Messages" to activate
-delay 0.6
-ignoring application responses
-  tell application "System Events" to click menu item "Tapback Last Message…" of menu 1 of menu bar item "Edit" of menu bar 1 of process "Messages"
-end ignoring"""
+def picker_route(target: dict, action: str, run, emoji="", name="", remove=False, deadline=None) -> dict:
+    """macOS 27: open the picker from the target bubble, then choose in it. The
+    bubble search finds, settles and re-reads the bubble before that one press."""
+    if run is jxa:
+        clear_stale_picker()
+    opened = perform(target, PICKER_SIGN, run=run, deadline=deadline)
+    if not opened.get("ok"):
+        # Nothing was chosen, even if the press landed: only the picker sends.
+        return {"ok": False, "error": "no-picker"} if opened.get("error") in MAYBE_PERFORMED else opened
+    request = {"mode": "picker", "text": target["text"], "action": action}
+    if emoji:
+        request.update(emoji=emoji, name=name, remove=remove)
+    if run is jxa:
+        return native_emoji_picker(request)
+    return run(request)
 
 
-def click_picker_item() -> str:
-    """Edit ▸ Tapback Last Message…, without waiting for Messages to answer:
-    a System Events click on it can block until the picker closes (27.0.1,
-    by index and by name alike). "" or why it could not be sent."""
+def close_picker() -> None:
+    """Escape out of a picker a run left open. Left there it blocks the next run,
+    and the JXA scan's entireContents would then walk the whole emoji catalogue,
+    pinning Messages' main thread for minutes (27.2). Only ever to Messages."""
+    script = 'tell application "System Events" to if frontmost of process "Messages" then key code 53'
     try:
-        r = subprocess.run(["/usr/bin/osascript", "-e", CLICK_PICKER], capture_output=True, timeout=15)
+        subprocess.run(["/usr/bin/osascript", "-e", script], capture_output=True, timeout=10)
     except subprocess.TimeoutExpired:
-        return "the menu click timed out"
-    return "" if r.returncode == 0 else r.stderr.decode("utf-8", "replace").strip()[-200:]
+        pass
 
 
-def picker_route(con, target: dict, action: str, run, click=None) -> dict:
-    if not is_last(con, target):
-        raise Stop("not-last", EX_UNSUPPORTED,
-                   "on this macOS only the newest message in a conversation can take a tapback")
-    why = (click or click_picker_item)()
-    if why:
-        return {"ok": False, "error": "no-picker", "detail": why}
-    return run({"mode": "picker", "text": target["text"], "action": action})
-
-
-def is_last(con, target: dict) -> bool:
-    """Whether the target is the conversation's newest message: the one Edit ▸
-    Tapback Last Message… opens the picker on. Tapbacks and announcements are
-    not messages; Recently Deleted ones are not drawn."""
-    marks = ",".join("?" * len(target["chats"]))
-    row = con.execute(
-        f"""SELECT m.guid FROM message m JOIN chat_message_join j ON j.message_id = m.ROWID
-            WHERE j.chat_id IN ({marks}) AND m.associated_message_type = 0 AND m.item_type = 0
-              AND m.ROWID NOT IN (SELECT message_id FROM chat_recoverable_message_join)
-            ORDER BY m.date DESC, m.ROWID DESC LIMIT 1""", list(target["chats"])).fetchone()
-    return row is not None and row["guid"] in target["guids"]
+def clear_stale_picker() -> None:
+    """Before any scan: the native check never enumerates the catalogue. Each
+    Escape closes one layer, the catalogue first and then the picker under it."""
+    for _ in range(3):
+        ax = NativeAX(time.monotonic() + 5)
+        try:
+            stale = bool(ax.pickers() or ax.popovers())
+        except Exception:
+            stale = False
+        finally:
+            ax.close()
+        if not stale:
+            return
+        close_picker()
+        time.sleep(0.5)
 
 
 def failure(r: dict, action: str) -> Stop:
     error = r.get("error") or "failed"
+    if error in {"emoji-not-offered", "emoji-picker-unavailable", "ambiguous-emoji"}:
+        return Stop(error, EX_NOT_OFFERED,
+                    "Messages did not expose that exact emoji as an accessible reaction; nothing was sent. "
+                    "Try a recently used emoji or a classic Tapback")
     if error == "picker-elsewhere":
         return Stop(error, EX_TEMPFAIL, "the tapback picker opened on another message; nothing was done")
     if error == "no-picker":
@@ -854,8 +1422,9 @@ def failure(r: dict, action: str) -> Stop:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="imsg-react", add_help=True,
                                 description="Add or remove one tapback. Dry run unless --yes.")
-    p.add_argument("tapback", choices=sorted(TAPBACKS))
+    p.add_argument("tapback", nargs="?", choices=sorted(TAPBACKS))
     p.add_argument("--guid", required=True, help="the message's GUID (message.guid)")
+    p.add_argument("--emoji-stdin", action="store_true", help="read an exact emoji and optional search name as JSON on stdin")
     p.add_argument("--remove", action="store_true", help="remove this tapback instead of adding it")
     p.add_argument("--yes", action="store_true", help="act; without it nothing on the Mac changes")
     try:
@@ -864,7 +1433,10 @@ def main(argv=None) -> int:
         return EX_USAGE if e.code else 0
     if not re.fullmatch(r"[A-Za-z0-9:/_-]{1,128}", a.guid):
         return emit(Stop("usage", EX_USAGE, "that is not a message GUID"))
+    if bool(a.tapback) == bool(a.emoji_stdin):
+        return emit(Stop("usage", EX_USAGE, "choose one classic tapback or --emoji-stdin"))
     try:
+        custom = read_emoji(sys.stdin) if a.emoji_stdin else {"emoji": "", "name": ""}
         imsg = sibling("imsg")
         try:
             self_handles = sibling("imsg-send").detect_self_handles()
@@ -873,14 +1445,15 @@ def main(argv=None) -> int:
         con = sqlite3.connect(f"file:{imsg.DB_PATH}?mode=ro", uri=True, timeout=5)
         con.row_factory = sqlite3.Row
         target = resolve(con, imsg, a.guid, self_handles)
-        action, kind = TAPBACKS[a.tapback]
+        action, kind = (custom["emoji"], 6) if a.emoji_stdin else TAPBACKS[a.tapback]
         if not a.yes:
-            expected = plan(current_kind(my_rows(con, target["guids"], self_handles)), kind, a.remove)
+            rows = my_rows(con, target["guids"], self_handles)
+            expected = emoji_plan(rows, custom["emoji"], a.remove) if a.emoji_stdin else plan(current_kind(rows), kind, a.remove)
             would = "unchanged" if expected is None else ("remove" if expected >= 3000 else "add")
             return emit({"ok": True, "result": "dry-run", "would": would, "action": action})
         ui = sibling("imsg-read")
         with ui.messages_ui_lock():
-            return emit(react(con, target, kind, a.remove, self_handles, ui))
+            return emit(react(con, target, kind, a.remove, self_handles, ui, **custom))
     except Stop as stop:
         return emit(stop)
     except TimeoutError as exc:   # the Messages lock; before OSError, which it is
