@@ -28,6 +28,7 @@ import hashlib
 import html
 import io
 import json
+import math
 import os
 import plistlib
 import re
@@ -37,6 +38,7 @@ import subprocess
 import sys
 import unicodedata
 from glob import glob
+from xml.parsers.expat import ExpatError
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from read_state import read_state
@@ -68,7 +70,13 @@ ATTACHMENT_MIME_SQL = """COALESCE(NULLIF(a.mime_type, ''), CASE a.uti
     WHEN 'org.3gpp.adaptive-multi-rate-audio' THEN 'audio/amr'
     WHEN 'public.jpeg' THEN 'image/jpeg'
     WHEN 'public.png' THEN 'image/png'
+    WHEN 'public.webp' THEN 'image/webp'
+    WHEN 'org.webmproject.webp' THEN 'image/webp'
+    WHEN 'com.compuserve.gif' THEN 'image/gif'
     WHEN 'public.heic' THEN 'image/heic'
+    WHEN 'public.heif' THEN 'image/heif'
+    WHEN 'public.heics' THEN 'image/heic-sequence'
+    WHEN 'public.heifs' THEN 'image/heif-sequence'
     WHEN 'com.apple.quicktime-movie' THEN 'video/quicktime'
     WHEN 'public.mpeg-4' THEN 'video/mp4'
     END)"""
@@ -899,7 +907,7 @@ def pin_order_for(pins: list[set[str]], *candidates: str | None) -> int | None:
     return None
 
 
-# ---------- --rich enrichment (tapbacks, read receipts, replies, attachments) ----------
+# ---------- --rich enrichment (tapbacks, stickers, read receipts, replies, attachments) ----------
 
 # Tapback rows are their own messages pointing at a target via
 # associated_message_guid ("p:0/<GUID>" / "bp:<GUID>"). 2xxx adds, 3xxx removes;
@@ -926,6 +934,105 @@ def _strip_assoc(guid: str | None) -> str:
     if ":" in guid:
         return guid.rsplit(":", 1)[1]
     return guid
+
+
+def _assoc_part(guid: str | None) -> int:
+    """The body-part index in p:N/GUID; a balloon/bare GUID targets part 0."""
+    match = re.match(r"^p:(\d{1,6})/", guid or "")
+    return int(match.group(1)) if match else 0
+
+
+def _row_value(row, key, default=None):
+    # Older schemas and callers' projected rows need not have new columns.
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return default
+
+
+def _small_plist_dict(blob) -> dict:
+    """Sticker metadata is untrusted, optional, and never an executable archive."""
+    if not isinstance(blob, (bytes, bytearray, memoryview)) or len(blob) > 65536:
+        return {}
+    try:
+        value = plistlib.loads(bytes(blob))
+        return value if isinstance(value, dict) else {}
+    except (plistlib.InvalidFileException, ExpatError, ValueError, TypeError, OverflowError, RecursionError):
+        return {}
+
+
+def _sticker_number(value, low, high):
+    # Apple's geometry values are usually decimal strings. Never accept a
+    # boolean, NaN, infinity, or an enormous value as a layout coordinate.
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    try:
+        number = float(value)
+    except (ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) and low <= number <= high else None
+
+
+def _sticker_label(value, limit=160) -> str:
+    if not isinstance(value, str):
+        return ""
+    return "".join(c for c in value if not unicodedata.category(c).startswith("C"))[:limit].strip()
+
+
+def sticker_metadata(row, force=False) -> dict | None:
+    """Recognize by Messages' flag or association, never by size/name/MIME.
+
+    sticker_user_info uses sxs/sys (normalized center), ssa (scale), sro
+    (clockwise radians), spw (parent preview width), and pid (source bundle).
+    See docs/STICKERS.md for the independently inspected format sources.
+    Unknown/malformed geometry falls back to a separate attached-sticker row.
+    No raw plist, path, or arbitrary metadata is forwarded.
+    """
+    if not (force or _row_value(row, "is_sticker") == 1):
+        return None
+    info = _small_plist_dict(_row_value(row, "sticker_user_info"))
+    attribution = _small_plist_dict(_row_value(row, "attribution_info"))
+    bundle = info.get("pid", "")
+    bundle = bundle.rsplit(":", 1)[-1] if isinstance(bundle, str) else ""
+    source = {
+        "com.apple.messages.genmoji": "genmoji",
+        "com.apple.Animoji.StickersApp.MessagesExtension": "memoji",
+        "com.apple.Jellyfish.Animoji": "memoji",
+        "com.apple.Stickers.UserGenerated.MessagesExtension": "user",
+    }.get(bundle, "app" if bundle else "unknown")
+    label = _sticker_label(_row_value(row, "emoji_description")) or _sticker_label(attribution.get("accessl"))
+    out = {"source": source, "label": label or ("Memoji" if source == "memoji" else "Sticker")}
+    name = _sticker_label(attribution.get("name"), 80)
+    if name:
+        out["app_name"] = name
+    placement = {key: _sticker_number(info.get(raw), low, high) for key, raw, low, high in (
+        ("x", "sxs", -3, 3), ("y", "sys", -3, 3),
+        ("scale", "ssa", 0.1, 4), ("rotation", "sro", -math.pi * 2, math.pi * 2),
+    )}
+    if all(value is not None for value in placement.values()):
+        parent_width = _sticker_number(info.get("spw"), 1, 10000)
+        if parent_width is not None:
+            placement["parentWidth"] = parent_width
+        out["placement"] = placement
+    mime = (_row_value(row, "mime") or "").lower()
+    out["animated"] = mime in ("image/gif", "image/apng", "image/heics", "image/heic-sequence", "image/heif-sequence") or mime.startswith("video/")
+    return out
+
+
+def sticker_attachment_columns(con):
+    """Optional fields were introduced in different macOS releases."""
+    names = {_pragma_name(r) for r in con.execute("PRAGMA table_info(attachment)")}
+    fields = {"is_sticker": "0", "sticker_user_info": "NULL", "attribution_info": "NULL",
+              "emoji_image_short_description": "NULL"}
+    return ", ".join(
+        ("a." + field if field in names else default) + " AS " +
+        ("emoji_description" if field == "emoji_image_short_description" else field)
+        for field, default in fields.items()
+    )
+
+
+def sticker_flag_sql(con):
+    return "a.is_sticker" if any(_pragma_name(r) == "is_sticker" for r in con.execute("PRAGMA table_info(attachment)")) else "0"
 
 
 def _effect_name(style_id: str | None) -> str | None:
@@ -1021,24 +1128,44 @@ def enrich(con, rows, with_names: bool):
     kept = [r for r in rows if not (r["assoc_type"] and 2000 <= r["assoc_type"] < 4000)]
     targets = {r["guid"]: r["ROWID"] for r in kept if r["guid"]}
     extras: dict[int, dict] = {r["ROWID"]: {} for r in kept}
+    # An associated sticker can be inside the window while its parent is
+    # outside it. Keep it visible as a standalone sticker in that case.
+    orphans = {r["ROWID"]: r for r in rows if r["assoc_type"] == 2007
+               and _strip_assoc(_row_value(r, "assoc_guid")) not in targets}
+    orphan_targets = {_strip_assoc(_row_value(r, "assoc_guid")) for r in orphans.values()}
+    legacy_stickers = []
 
     # Tapbacks: scan every assoc row in the DB (type-filtered), net per sender+target.
     emoji_col = ", m.associated_message_emoji AS emo" if has_emoji else ""
-    latest: dict[tuple[str, str], sqlite3.Row] = {}
+    latest: dict[tuple[str, str, int], sqlite3.Row] = {}
     for r in con.execute(
-        f"""SELECT m.associated_message_guid AS ag, m.associated_message_type AS t,
+        f"""SELECT m.ROWID AS mid, m.guid, m.associated_message_guid AS ag, m.associated_message_type AS t,
                    m.is_from_me, m.date, h.id AS handle{emoji_col}
             FROM {MESSAGE_SRC} m LEFT JOIN handle h ON h.ROWID = m.handle_id
-            WHERE m.associated_message_type BETWEEN 2000 AND 3999"""
+            WHERE m.associated_message_type = 1000 OR m.associated_message_type BETWEEN 2000 AND 3999"""
     ):
         tg = _strip_assoc(r["ag"])
-        if tg not in targets:
+        if tg not in targets and tg not in orphan_targets:
+            continue
+        if r["t"] == 1000:
+            # A dragged sticker is additive, not the sender's one tapback
+            # slot. Several stickers from the same person must all survive.
+            if tg in targets:
+                legacy_stickers.append(r)
             continue
         who = "me" if r["is_from_me"] else (r["handle"] or "?")
-        key = (who, tg)
-        if key not in latest or r["date"] > latest[key]["date"]:
+        key = (who, tg, _assoc_part(r["ag"]))
+        if key not in latest or (r["date"], _row_value(r, "mid", 0)) > (latest[key]["date"], _row_value(latest[key], "mid", 0)):
             latest[key] = r
-    for (who, tg), r in latest.items():
+    sticker_rows = list(legacy_stickers)
+    for (who, tg, part), r in latest.items():
+        if tg not in targets:
+            # Only the currently active sticker is shown, not a later
+            # removed/replaced sticker that happened to fall in the window.
+            if r["t"] == 2007 and _row_value(r, "mid") in orphans:
+                kept.append(orphans[r["mid"]])
+                extras[r["mid"]] = {"sticker_orphan": True}
+            continue
         # A rendered reaction (or its removal) is newer activity than the
         # target bubble. Preserve its timestamp for the client's read boundary.
         e = extras[targets[tg]]
@@ -1046,34 +1173,102 @@ def enrich(con, rows, with_names: bool):
         e["activity_ts"] = max(e.get("activity_ts", ""), activity)
         if not (2000 <= r["t"] < 3000):
             continue  # net-removed
+        if r["t"] == 2007:
+            sticker_rows.append(r)
+            continue  # a sticker has image bytes, never a made-up star emoji
         kind = r["t"] - 2000
         emoji = (r["emo"] if has_emoji and r["emo"] else None) or TAPBACK_EMOJI.get(kind, "⭐")
         extras[targets[tg]].setdefault("tapbacks", []).append({
             "emoji": emoji,
             "from_me": bool(r["is_from_me"]),
             "by": None if r["is_from_me"] else (name_for(r["handle"]) if with_names else None) or r["handle"],
+            **({"kind": "emoji"} if kind == 6 else {}),
         })
+
+    # Fold sticker events onto their parent, even when the event itself fell
+    # outside the query window. The target's display date stays unchanged.
+    sticker_destinations = {}
+    for r in sticker_rows:
+        mid = r["mid"]
+        target = targets[_strip_assoc(r["ag"])]
+        if mid == target:
+            continue  # malformed self-reference
+        sticker_destinations[mid] = (target, r)
+        e = extras[target]
+        e["activity_ts"] = max(e.get("activity_ts", ""), fmt_ts(r["date"]))
+    # A sticker can itself be the target of another sticker. Keep both on
+    # the surviving root bubble; coordinates relative to a removed sticker
+    # are not coordinates relative to the root, so those use the strip.
+    nested_stickers = set()
+    for mid in list(sticker_destinations):
+        target, event = sticker_destinations[mid]
+        seen = {mid}
+        while target in sticker_destinations and target not in seen:
+            seen.add(target)
+            target = sticker_destinations[target][0]
+        if target in seen:
+            del sticker_destinations[mid]  # malformed cycle: keep the event row
+        elif target != sticker_destinations[mid][0]:
+            sticker_destinations[mid] = (target, event)
+            nested_stickers.add(mid)
+            extras[target]["activity_ts"] = max(extras[target].get("activity_ts", ""), fmt_ts(event["date"]))
+    kept = [r for r in kept if r["ROWID"] not in sticker_destinations]
+    # Preserve the input chronology after adding orphan 2007 rows.
+    order = {r["ROWID"]: i for i, r in enumerate(rows)}
+    kept.sort(key=lambda r: order[r["ROWID"]])
 
     # Attachments. transfer_name is null mid-download; .pluginPayloadAttachment
     # blobs are rich-link-preview internals (a URL message can carry four of
     # them), not user files — both are noise to a client.
-    rowids = [r["ROWID"] for r in kept]
+    rowids = [r["ROWID"] for r in kept] + list(sticker_destinations)
+    force_stickers = {r["ROWID"] for r in kept if r["assoc_type"] in (1000, 2007)} | set(sticker_destinations)
+    attachment_fields = sticker_attachment_columns(con)
     for a in _chunked_in(
         con,
         f"""SELECT maj.message_id AS mid, a.ROWID AS aid, a.transfer_name AS name,
-                  {attachment_mime_sql(con)} AS mime, a.total_bytes AS bytes
+                  {attachment_mime_sql(con)} AS mime, a.total_bytes AS bytes, {attachment_fields}
            FROM message_attachment_join maj
            JOIN attachment a ON a.ROWID = maj.attachment_id
-           WHERE a.transfer_name IS NOT NULL
-             AND a.transfer_name NOT LIKE '%.pluginPayloadAttachment'
+           WHERE (a.transfer_name IS NULL OR a.transfer_name NOT LIKE '%.pluginPayloadAttachment')
              AND maj.message_id IN ({{marks}})""",
         rowids,
     ):
-        extras.setdefault(a["mid"], {}).setdefault("attachments", []).append(
-            # id as a STRING: attachment ROWIDs are 64-bit and JS number
-            # consumers lose precision past 2^53.
-            {"id": str(a["aid"]), "name": a["name"], "mime": a["mime"], "bytes": a["bytes"]}
-        )
+        # id as a STRING: attachment ROWIDs are 64-bit and JS number
+        # consumers lose precision past 2^53.
+        attachment = {"id": str(a["aid"]), "name": a["name"] or "Sticker", "mime": a["mime"], "bytes": a["bytes"]}
+        sticker = sticker_metadata(a, force=a["mid"] in force_stickers)
+        if a["name"] is None and sticker is None:
+            continue  # unfinished ordinary transfer, not a displayable file
+        if sticker is not None:
+            attachment["sticker"] = sticker
+        extras.setdefault(a["mid"], {}).setdefault("attachments", []).append(attachment)
+
+    for mid in force_stickers:
+        if not extras.get(mid, {}).get("attachments"):
+            extras.setdefault(mid, {})["attachments"] = [{"id": "", "name": "Sticker", "mime": None, "bytes": None,
+                "sticker": {"source": "unknown", "label": "Sticker", "animated": False}}]
+
+    for mid, (target, r) in sticker_destinations.items():
+        attachments = extras.get(mid, {}).get("attachments", [])
+        if not attachments:
+            attachments = [{"id": "", "name": "Sticker", "mime": None, "bytes": None,
+                            "sticker": {"source": "unknown", "label": "Sticker", "animated": False}}]
+        for attachment in attachments:
+            overlay = {"attachment": attachment, "guid": r["guid"] or "", "part": _assoc_part(r["ag"]),
+                       "from_me": bool(r["is_from_me"]), "ts": fmt_ts(r["date"]),
+                       "by": None if r["is_from_me"] else (name_for(r["handle"]) if with_names else None) or r["handle"]}
+            if r["t"] == 2007:
+                overlay["reaction"] = True
+            placement = attachment.get("sticker", {}).get("placement")
+            if placement is not None and mid not in nested_stickers:
+                overlay["placement"] = placement
+            elif mid in nested_stickers:
+                # Preserve attribution but never apply the old target's
+                # coordinate system to an unrelated body part.
+                attachment = dict(attachment)
+                attachment["sticker"] = {k: v for k, v in attachment.get("sticker", {}).items() if k != "placement"}
+                overlay["attachment"] = attachment
+            extras[target].setdefault("stickers", []).append(overlay)
 
     # Rich-link cards: the balloon payload names the URL/title/summary; the
     # preview image is the nth .pluginPayloadAttachment row of the message.
@@ -1290,6 +1485,7 @@ def base_select(con) -> str:
                    m.service, h.id AS handle, c.chat_identifier, c.room_name,
                    m.guid, m.date_read, m.is_delivered, m.is_read, m.error, {edit_cols} {sched_cols}
                    m.associated_message_type AS assoc_type,
+                   m.associated_message_guid AS assoc_guid,
                    m.thread_originator_guid AS orig_guid,
                    m.expressive_send_style_id AS style_id,
                    m.is_audio_message,
@@ -1659,7 +1855,8 @@ def cmd_chats(con, args):
         attachments = {}
         for attachment in _chunked_in(
             con,
-            f"""SELECT maj.message_id AS mid, a.transfer_name AS name, {attachment_mime_sql(con)} AS mime
+            f"""SELECT maj.message_id AS mid, a.transfer_name AS name, {attachment_mime_sql(con)} AS mime,
+                       {sticker_flag_sql(con)} AS is_sticker
                  FROM message_attachment_join maj
                  JOIN attachment a ON a.ROWID = maj.attachment_id
                 WHERE maj.message_id IN ({{marks}})
@@ -1669,6 +1866,7 @@ def cmd_chats(con, args):
         ):
             attachments.setdefault(attachment["mid"], {
                 "name": attachment["name"] or "", "mime": attachment["mime"] or "",
+                **({"sticker": True} if attachment["is_sticker"] == 1 else {}),
             })
 
         participants = {}
@@ -2364,12 +2562,14 @@ def cmd_attachment(con, args):
     """
     if not re.fullmatch(r"[0-9]{1,18}", args.id):
         sys.exit("error: attachment id must be decimal digits")
+    sticker_column = sticker_flag_sql(con) + " = 1"
     row = con.execute(
         f"""SELECT a.filename, {attachment_mime_sql(con)} AS mime_type
             FROM attachment a
             JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID
             JOIN {MESSAGE_SRC} m ON m.ROWID = maj.message_id
-            WHERE a.ROWID = ? AND a.transfer_name IS NOT NULL
+            WHERE a.ROWID = ? AND (a.transfer_name IS NOT NULL OR {sticker_column}
+                                   OR m.associated_message_type IN (1000, 2007))
             LIMIT 1""",
         (int(args.id),),
     ).fetchone()
@@ -2401,16 +2601,19 @@ def cmd_attachment(con, args):
 
     src = path
     tmp = None
-    if args.jpeg and (row["mime_type"] or "").startswith("image/"):
+    image_format = "png" if getattr(args, "png", False) else "jpeg"
+    if (getattr(args, "jpeg", False) or getattr(args, "png", False)) and (row["mime_type"] or "").startswith("image/"):
         import subprocess
         import tempfile
 
-        fd_t, tmp = tempfile.mkstemp(suffix=".jpg")
+        fd_t, tmp = tempfile.mkstemp(suffix=".png" if image_format == "png" else ".jpg")
         os.close(fd_t)
-        cmd = ["sips", "-s", "format", "jpeg"]
+        cmd = ["sips", "-s", "format", image_format]
         if getattr(args, "max_dim", 0):
             # -Z is "resample, longest edge, preserve aspect"; it never upscales.
-            cmd += ["-Z", str(int(args.max_dim)), "-s", "formatOptions", "80"]
+            cmd += ["-Z", str(int(args.max_dim))]
+            if image_format == "jpeg":
+                cmd += ["-s", "formatOptions", "80"]
         cmd += [path, "--out", tmp]
         try:
             r = subprocess.run(cmd, capture_output=True, timeout=60)
@@ -2780,7 +2983,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="do not resolve handles via Contacts")
     common.add_argument("--rich", action="store_true", default=argparse.SUPPRESS,
                         help="JSON only: fold tapbacks onto their targets and add "
-                             "read_at/edited/retracted/reply_to/attachments/effect/audio")
+                             "read_at/edited/retracted/reply_to/attachments/stickers/effect/audio")
     common.add_argument("--hide-spam", action="store_true", default=argparse.SUPPRESS,
                         help="omit chats with is_filtered=2 (iPhone Spam)")
     common.add_argument("--hide-unknown", action="store_true", default=argparse.SUPPRESS,
@@ -2810,10 +3013,13 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("attachment", parents=[common],
                        help="stream one attachment's bytes to stdout (id from --rich)")
     s.add_argument("id")
-    s.add_argument("--jpeg", action="store_true",
+    conversion = s.add_mutually_exclusive_group()
+    conversion.add_argument("--jpeg", action="store_true",
                    help="convert image/* (HEIC) to JPEG via sips before streaming")
+    conversion.add_argument("--png", action="store_true",
+                   help="convert image/* to PNG via sips, preserving sticker transparency")
     s.add_argument("--max-dim", type=int, default=0, dest="max_dim",
-                   help="with --jpeg, resample to N px on the long edge (inline previews)")
+                   help="with --jpeg/--png, resample to N px on the long edge (inline previews)")
     s.set_defaults(func=cmd_attachment)
     s = sub.add_parser("avatar", parents=[common], help="stream a contact photo (JPEG) for a handle, or a group's own photo with --chat")
     s.add_argument("handle", nargs="?", default="")

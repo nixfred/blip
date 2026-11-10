@@ -1,3 +1,4 @@
+import "Stickers.mjs" as Stickers
 import "SendState.mjs" as SendState
 import "MessageActions.mjs" as MessageActions
 import "SourceId.mjs" as SourceId
@@ -1143,11 +1144,12 @@ FocusScope {
       }
     }
     fetchQueue.push({ id: id, name: String(att.name || "file"),
-                      mime: String(att.mime || ""), action: action || "",
+                      mime: String(att.mime || ""), sticker: !!att.sticker, action: action || "",
                       auto: auto === true })
     pumpFetch()
   }
 
+  property bool fetchJobSticker: false
   property string fetchJobAction: ""
   property string fetchJobMime: ""
   property string fetchJobName: ""
@@ -1158,8 +1160,9 @@ FocusScope {
     fetchJobAction = job.action
     fetchJobMime = job.mime
     fetchJobName = job.name
+    fetchJobSticker = job.sticker === true
     // Auto-pulls carry a hard transfer cap: claimed metadata is not the limit.
-    fetchProc.command = ["bun", root.fetchScript, job.id, job.name, job.mime, job.auto ? "5242880" : ""]
+    fetchProc.command = ["bun", root.fetchScript, job.id, job.name, job.mime, job.auto ? "5242880" : ""].concat(job.sticker ? ["--sticker"] : [])
     fetchProc.running = true
   }
 
@@ -1171,7 +1174,7 @@ FocusScope {
   function autoFetchImages() {
     if (!inThread) return
     for (var i = 0; i < bubbles.length; i++) {
-      var atts = bubbles[i].attachments || []
+      var atts = (bubbles[i].attachments || []).concat((bubbles[i].stickers || []).map(function(sticker) { return sticker.attachment }))
       for (var j = 0; j < atts.length; j++) {
         // Bytes must be KNOWN — null/0 must not slip through and auto-pull
         // something the click-path 100 MB ceiling would allow. The SOURCE cap
@@ -1180,7 +1183,7 @@ FocusScope {
         // while sips turns a 5.07 MB HEIC into a 7.80 MB JPEG, so full-size
         // iPhone photos were rejected at both ends and simply never appeared.
         var b = atts[j].bytes
-        if (isImageMime(atts[j].mime) && typeof b === "number" && b > 0 && b <= root.autoFetchMaxSource)
+        if ((isImageMime(atts[j].mime) || (atts[j].sticker && String(atts[j].mime || "").indexOf("video/") === 0)) && typeof b === "number" && b > 0 && b <= root.autoFetchMaxSource)
           enqueueFetch(atts[j], "", true)
       }
       // link-card preview PNGs are small; the auto-fetch transfer cap bounds them
@@ -1192,6 +1195,15 @@ FocusScope {
   /** Chip/image click: fetch-then-open. ALWAYS round-trips fetch.ts, even
    *  when attFiles already has a url — the LRU may have evicted the file
    *  since (Codex finding #5); a cache hit is instant anyway. */
+  function stickerLoading(id) {
+    return id !== "" && (root.fetchingId === id || root.fetchQueue.some(function(job) { return job.id === id }))
+  }
+  function activateSticker(att) {
+    var id = String(att.id || "")
+    if (!id) return
+    if (!root.attFiles[id]) root.enqueueFetch(att, "preview", true)
+    else root.openAttachment(att)
+  }
   function openAttachment(att) {
     var id = String(att.id || "")
     if (id === "") return
@@ -1983,7 +1995,7 @@ FocusScope {
           if (!isFinite(pixelHeight) || pixelHeight < 1 || pixelHeight > 100000) pixelHeight = 0
           if (!keepInline) {
             var metrics = Object.assign({}, root.attMetrics)
-            metrics[id] = { pixelRatio: ratio, pixelWidth: pixelWidth, pixelHeight: pixelHeight }
+            metrics[id] = { pixelRatio: ratio, pixelWidth: pixelWidth, pixelHeight: pixelHeight, animated: d.animated === true, renderMime: String(d.renderMime || ""), animationUnavailable: d.animationUnavailable === true }
             root.attMetrics = metrics
           }
           if (d.ok === true && root.fetchJobAction === "copy") {
@@ -3551,7 +3563,8 @@ FocusScope {
                     readonly property var fileUrl: root.attFiles[chipRow.attId]
                     readonly property bool failed: chipRow.fileUrl === ""
                     readonly property var imageMetrics: root.attMetrics[chipRow.attId] || ({})
-                    readonly property bool showImage:
+                    readonly property bool isSticker: !!modelData.sticker
+                    readonly property bool showImage: !isSticker &&
                       root.isImageMime(chipRow.modelData.mime) &&
                       chipRow.fileUrl !== undefined && chipRow.fileUrl !== ""
                     Layout.fillWidth: true
@@ -3571,6 +3584,18 @@ FocusScope {
                     // every right-aligned element off-screen with it.
                     Item {
                       id: attImage
+                      StickerLayer {
+                        anchors.fill: parent
+                        z: 3
+                        visible: chipRow.index === 0 && !textBubbleRow.visible
+                        stickers: visible ? Stickers.placedStickers(bubbleRow.modelData.stickers) : []
+                        files: root.attFiles; metrics: root.attMetrics
+                        fetchingId: root.fetchingId; fetchQueue: root.fetchQueue
+                        textColor: root.dim
+                        playing: root.surfaceOpen && bubbleRow.y + chipRow.y + height >= flick.contentY && bubbleRow.y + chipRow.y <= flick.contentY + flick.height
+                        onOpenRequested: function(att) { root.activateSticker(att) }
+                        onContextRequested: function(att) { root.openAttachmentMenu(bubbleRow.modelData, att) }
+                      }
                       TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.modelData.tapbacks }
                       visible: chipRow.showImage
                       readonly property bool animated: root.isAnimatedMime(chipRow.modelData.mime)
@@ -3652,9 +3677,38 @@ FocusScope {
                       }
                     }
 
+                    StickerImage {
+                      visible: chipRow.isSticker
+                      Layout.preferredWidth: Math.min(Style.space(160), content.width * 0.50)
+                      Layout.preferredHeight: Layout.preferredWidth
+                      attachment: chipRow.modelData
+                      source: chipRow.isSticker ? (chipRow.fileUrl || "") : ""
+                      loading: root.stickerLoading(chipRow.attId)
+                      failed: chipRow.attId === "" || chipRow.failed
+                      animated: chipRow.imageMetrics.animated === true
+                      animationUnavailable: chipRow.imageMetrics.animationUnavailable === true
+                      playing: root.surfaceOpen && chipRow.y + bubbleRow.y + height >= flick.contentY && chipRow.y + bubbleRow.y <= flick.contentY + flick.height
+                      textColor: root.dim
+                      fontSize: root.fontCaption
+                      onTapped: root.activateSticker(chipRow.modelData)
+                      onContextRequested: root.openAttachmentMenu(bubbleRow.modelData, chipRow.modelData)
+                      StickerLayer {
+                        anchors.fill: parent
+                        z: 3
+                        visible: chipRow.index === 0 && !textBubbleRow.visible
+                        stickers: visible ? Stickers.placedStickers(bubbleRow.modelData.stickers) : []
+                        files: root.attFiles; metrics: root.attMetrics
+                        fetchingId: root.fetchingId; fetchQueue: root.fetchQueue
+                        textColor: root.dim
+                        playing: root.surfaceOpen && bubbleRow.y + chipRow.y + height >= flick.contentY && bubbleRow.y + chipRow.y <= flick.contentY + flick.height
+                        onOpenRequested: function(att) { root.activateSticker(att) }
+                        onContextRequested: function(att) { root.openAttachmentMenu(bubbleRow.modelData, att) }
+                      }
+                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks }
+                    }
                     Rectangle {
                       TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.modelData.tapbacks }
-                      visible: !chipRow.showImage
+                      visible: !chipRow.showImage && !chipRow.isSticker
                       Layout.preferredWidth: Math.ceil(chipText.implicitWidth) + Style.space(18)
                       Layout.preferredHeight: Math.ceil(chipText.implicitHeight) + Style.space(12)
                       radius: Style.space(14)
@@ -3800,6 +3854,7 @@ FocusScope {
                 // the sender's far side guarantees right/left placement even
                 // when the delegate's own width collapses to its content.
                 RowLayout {
+                  id: textBubbleRow
                   Layout.fillWidth: true
                   // a tapback pill overlaps the top edge — leave room for it
                   Layout.topMargin: (modelData.groupStart ? Style.space(6) : 0)
@@ -3894,6 +3949,17 @@ FocusScope {
                       }
                     }
 
+                    StickerLayer {
+                      anchors.fill: parent
+                      z: 3
+                      stickers: Stickers.placedStickers(bubbleRow.modelData.stickers)
+                      files: root.attFiles; metrics: root.attMetrics
+                      fetchingId: root.fetchingId; fetchQueue: root.fetchQueue
+                      textColor: root.dim
+                      playing: root.surfaceOpen && bubbleRow.y + height >= flick.contentY && bubbleRow.y <= flick.contentY + flick.height
+                      onOpenRequested: function(att) { root.activateSticker(att) }
+                      onContextRequested: function(att) { root.openAttachmentMenu(bubbleRow.modelData, att) }
+                    }
                     TapbackPill { mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks }
                   }
 
@@ -3934,6 +4000,40 @@ FocusScope {
                   Item { Layout.fillWidth: true; visible: !bubbleRow.mine }
                 }
 
+                RowLayout {
+                  Layout.fillWidth: true
+                  visible: unplacedStickerFlow.stickers.length > 0
+                  Item { Layout.fillWidth: true; visible: bubbleRow.mine }
+                  Flow {
+                    id: unplacedStickerFlow
+                    readonly property bool imageSurface: (bubbleRow.modelData.attachments || []).length > 0 && (root.isImageMime(bubbleRow.modelData.attachments[0].mime) || !!bubbleRow.modelData.attachments[0].sticker) && !!root.attFiles[String(bubbleRow.modelData.attachments[0].id)]
+                    readonly property var stickers: textBubbleRow.visible || imageSurface ? (bubbleRow.modelData.stickers || []).filter(function(sticker) { return sticker.reaction === true || !sticker.placement || sticker.part !== 0 }) : (bubbleRow.modelData.stickers || [])
+                    Layout.preferredWidth: Math.min(content.width * 0.78, stickers.length * Style.space(58))
+                    Layout.preferredHeight: childrenRect.height
+                    spacing: Style.space(6)
+                    Repeater {
+                      model: unplacedStickerFlow.stickers
+                      delegate: StickerImage {
+                        required property var modelData
+                        readonly property string attachmentId: String(modelData.attachment.id || "")
+                        width: Style.space(52); height: width
+                        attachment: modelData.attachment
+                        source: root.attFiles[attachmentId] || ""
+                        loading: root.stickerLoading(attachmentId)
+                        failed: attachmentId === "" || root.attFiles[attachmentId] === ""
+                        animated: (root.attMetrics[attachmentId] || {}).animated === true
+                        animationUnavailable: (root.attMetrics[attachmentId] || {}).animationUnavailable === true
+                        playing: root.surfaceOpen && bubbleRow.y + height >= flick.contentY && bubbleRow.y <= flick.contentY + flick.height
+                        compact: true
+                        textColor: root.dim
+                        Accessible.description: (animationUnavailable ? "Static preview; animation unavailable. " : "") + "Sticker attached to message part " + String(modelData.part + 1)
+                        onTapped: root.activateSticker(modelData.attachment)
+                        onContextRequested: root.openAttachmentMenu(bubbleRow.modelData, modelData.attachment)
+                      }
+                    }
+                  }
+                  Item { Layout.fillWidth: true; visible: !bubbleRow.mine }
+                }
                 // Delivered becomes Read under the newest sent message.
                 RowLayout {
                   Layout.fillWidth: true
