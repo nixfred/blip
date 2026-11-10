@@ -189,7 +189,7 @@ describe("alpha and animated sticker fetches", () => {
     const runner = ((_cmd: string, args: string[]) => { calls.push(args); return { status: 0, stdout: png() }; }) as never;
     const aid = id();
     const result = fetchAttachment(aid, "sticker.heic", "image/heic", runner, cap, true);
-    expect(calls).toEqual([["attachment", aid, "--png"]]);
+    expect(calls).toEqual([["attachment", aid, "--png", "--max-dim", "2048"]]);
     expect(result.renderMime).toBe("image/png");
     expect(result.path).toContain("-png-");
     expect(cachedOriginal(result.path)).toBe(result.path);
@@ -273,7 +273,7 @@ describe("alpha and animated sticker fetches", () => {
     const aid = id(), r = fetchAttachment(aid, "live.heics", "image/heic-sequence", runner, cap, true);
     expect(r.ok).toBe(true); expect(r.renderMime).toBe("image/png"); expect(r.animationUnavailable).toBe(true);
     expect(calls[0].args).toEqual(["attachment", aid]);
-    expect(calls.at(-1).args).toEqual(["attachment", aid, "--png"]);
+    expect(calls.at(-1).args).toEqual(["attachment", aid, "--png", "--max-dim", "2048"]);
     expect(readdirSync(CACHE_DIR).some(n => n.startsWith(".sticker-"))).toBe(false);
   });
   test("HEICS color and alpha tracks are selected only after bounded metadata validation", () => {
@@ -298,4 +298,52 @@ describe("alpha and animated sticker fetches", () => {
       expect(readdirSync(dir)).toEqual([]);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
+});
+
+test("decoder frame budget does not trust advertised APNG count", () => {
+  stickerAnimationPreview(png(2, 1024, 1024), ((_cmd: string, args: string[]) => {
+    expect(args[args.indexOf("-frames:v") + 1]).toBe("61");
+    expect(args[args.indexOf("-max_pixels") + 1]).toBe("4194304");
+    return {status: 0, stdout: webp()};
+  }) as never);
+});
+test("MOV input gate, pixel ceiling, and independent sequence limits", () => {
+  for (const [width, height, count, seconds, animated] of [
+    [2048, 2048, 2, 1, true], [2049, 2049, 2, 1, false],
+    [64, 64, 100, 8, true], [64, 64, 101, 8, false],
+    [64, 64, 100, 8.01, false], [1024, 1024, 62, 1, false],
+  ] as const) {
+    let decoded = false;
+    const r = stickerSequencePreview(Buffer.from("media"), "video/quicktime", ((cmd: string, args: string[]) => {
+      expect(args[args.indexOf("-f") + 1]).toBe("mov");
+      expect(args.indexOf("-f")).toBeLessThan(args.indexOf("-i"));
+      expect(args[args.indexOf("-max_pixels") + 1]).toBe("4194304");
+      if (cmd === "ffprobe") return {status: 0, stdout: JSON.stringify({streams:[{index:0, codec_type:"video", width,height,nb_frames:String(count),duration:String(seconds)}]})};
+      decoded = true;
+      if (animated) expect(Number(args[args.indexOf("-frames:v") + 1]) * width * height).toBeLessThanOrEqual(64_000_000);
+      return {status:0, stdout:animated ? webp() : png()};
+    }) as never);
+    expect(r?.renderMime === "image/webp").toBe(animated);
+    expect(decoded).toBe(width <= 2048);
+  }
+});
+test("failed APNG conversion is cached as a still", () => {
+  const aid=id(); let calls=0;
+  const runner=((cmd:string)=>{calls++; return {status:cmd === "ffmpeg" ? 1 : 0, stdout:png(2)};}) as never;
+  expect(fetchAttachment(aid,"failure.png","image/png",runner,cap,true).animationUnavailable).toBe(true);
+  const before=calls;
+  expect(fetchAttachment(aid,"failure.png","image/png",runner,cap,true).animationUnavailable).toBe(true);
+  expect(calls).toBe(before);
+});
+
+test("a failed video decode is not retried on every thread open", () => {
+  const aid=id(); let calls=0;
+  const runner=((cmd:string)=>{calls++; return {status:cmd === "ffprobe" ? 1 : 0, stdout:Buffer.from("ffconcat version 1.0\nfile other.png")};}) as never;
+  expect(fetchAttachment(aid,"fake.mov","video/quicktime",runner,cap,true).ok).toBe(false);
+  const before=calls;
+  expect(fetchAttachment(aid,"fake.mov","video/quicktime",runner,cap,true).ok).toBe(false);
+  expect(calls).toBe(before);
+});
+test("the real MOV demuxer refuses a concat payload", () => {
+  expect(stickerSequencePreview(Buffer.from("ffconcat version 1.0\nfile other.png"),"video/quicktime")).toBeUndefined();
 });

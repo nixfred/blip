@@ -221,6 +221,11 @@ class Stickers(unittest.TestCase):
             r["sticker_user_info"] = plistlib.dumps({**info, "sxs": bad})
             self.assertNotIn("placement", self.imsg.sticker_metadata(r))
 
+    def test_valid_plist_over_cap_is_rejected(self):
+        blob = plistlib.dumps({"value": "x" * 65536})
+        self.assertGreater(len(blob), 65536)
+        self.assertEqual(self.imsg._small_plist_dict(blob), {})
+
     def test_bad_plists_never_take_down_thread(self):
         for bad in [None, b"garbage", b"<?xml version='1.0'?><plist><dict>",
                     b"<?xml version='1.0'?><plist>&unknown;</plist>", b"x" * 65537, plistlib.dumps([1, 2])]:

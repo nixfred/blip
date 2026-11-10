@@ -163,3 +163,5 @@ advance frames, and checks playback pause. It does not open Messages or send.
 In the upstream UI, native sticker reactions are shown in a compact strip attached to the parent message. Known part-0 placements overlay the text or first image surface; unknown placements remain in the strip. The fork’s reaction-balloon restyle is not included.
 
 ![Synthetic sticker examples in the upstream UI](img/stickers.png)
+
+Legacy type-1000 rows retain upstream unread counting and toast behavior. Decoder output is capped to min(100, floor(64 million / frame pixels)) frames even when container frame counts lie. Failed APNG conversions cache the still fallback.

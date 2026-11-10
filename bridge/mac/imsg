@@ -1355,7 +1355,7 @@ def render(rows, as_json: bool, with_names: bool = True, con=None, rich: bool = 
                 **_edit_flags(r["date_edited"], r["date_retracted"], r["message_summary_info"]),
                 # Tapback rows are messages too, but no Apple client counts
                 # them toward a badge — flag them so clients can match.
-                "tapback": bool(r["assoc_type"] == 1000 or (r["assoc_type"] and 2000 <= r["assoc_type"] < 4000)),
+                "tapback": bool(r["assoc_type"] and 2000 <= r["assoc_type"] < 4000),
                 # Delivery failure code on OWN messages (0 = fine). AppleScript
                 # reports success for sends that die later; this is the only
                 # place the truth lands (e.g. 25 = attachment not readable).

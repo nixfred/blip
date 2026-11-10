@@ -745,3 +745,5 @@ Read-sync UI regression: `python3 scripts/test-read-ui.py` executes the shipping
 QML badge bindings and read/unread functions with synthetic data under QtTest.
 `threadsJson` must remain bound to the CURRENT threads, including optimistic
 edits; a poll-only cache allowed a 3-unread badge alongside only 2 unread rows.
+
+Sticker Save also accepts the `-png-` transform: HEIC is a bounded PNG conversion, and HEICS is a single-frame still, not the original sequence.

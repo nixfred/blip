@@ -34,8 +34,12 @@ webp_available=0
 for qt_root in /usr/lib/qt6 /usr/lib64/qt6 /usr/lib/x86_64-linux-gnu/qt6 /usr/lib/aarch64-linux-gnu/qt6; do
   [[ -f "$qt_root/plugins/imageformats/libqwebp.so" ]] && webp_available=1
  done
+IFS=: read -r -a qt_extra <<< "${QT_PLUGIN_PATH:-}"
+for qt_path in "${qt_extra[@]}"; do
+  [[ -f "$qt_path/imageformats/libqwebp.so" ]] && webp_available=1
+done
 if (( !webp_available )); then
-  missing+=("Qt WebP image plugin"); pkgs+=(qt6-imageformats)
+  echo "• optional, for animated stickers: sudo pacman -S --needed qt6-imageformats"
 fi
 if (( ${#missing[@]} )); then
   echo "✗ missing on this machine: ${missing[*]}" >&2
