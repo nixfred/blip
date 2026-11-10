@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { AUDIO_ANALYSIS_SECONDS, AUDIO_SAMPLE_RATE, durationLabel, fitWaveform, normalizeWaveform,
   playbackFraction, seekPosition, waveformFromPcm16 } from "./audio-waveform";
@@ -85,6 +87,7 @@ describe("bounded private audio analysis", () => {
         const r = analyzeAudio(path, (() => { calls++; return {status:0,stdout:JSON.stringify({streams:[{codec_type:"audio"}],format:{duration:seconds}})}; }) as never);
         expect(calls).toBe(1); expect(r.waveform).toEqual([]); expect(r.unavailable).toBe(true);
         expect(r.durationMs).toBe(seconds===601 ? 601000 : 0);
+        expect(r.externalDemuxer).toBe("wav");
       }
       const timedOut = analyzeAudio(path, ((cmd: string) => cmd === "ffprobe"
         ? {status:0,stdout:'{"streams":[{"codec_type":"audio"}],"format":{"duration":"2"}}'} : {status:null,stdout:Buffer.alloc(0),error:Error("ETIMEDOUT")}) as never);
@@ -110,4 +113,24 @@ test("a lying duration never produces playable normalized audio", () => {
       : {status:0,stdout:pcm(Array(AUDIO_SAMPLE_RATE).fill(100))}) as never);
     expect(r.playable).toBe(false); expect(r.playbackUrl).toBeUndefined();
   } finally {rmSync(dir,{recursive:true,force:true});}
+});
+
+
+test("normalized sender PCM cannot override WAV format probing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "blip-audio-probe-"));
+  try {
+    const ts = spawnSync("ffmpeg", ["-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=32x32:rate=25", "-f", "lavfi", "-i", "sine=frequency=440", "-t", "0.5", "-c:v", "mpeg2video", "-c:a", "mp2", "-f", "mpegts", "pipe:1"]);
+    expect(ts.status).toBe(0);
+    const payload = Buffer.alloc(Math.ceil(ts.stdout.length / 2) * 2); ts.stdout.copy(payload);
+    const input = join(dir, "voice.wav"); writeFileSync(input, wavHeader());
+    const r = analyzeAudio(input, ((cmd: string) => cmd === "ffprobe"
+      ? {status:0, stdout:JSON.stringify({streams:[{codec_type:"audio"}],format:{duration:payload.length / (2 * AUDIO_SAMPLE_RATE)}})}
+      : {status:0, stdout:payload}) as never);
+    expect(r.playable).toBe(true);
+    const guessed = spawnSync("ffprobe", ["-v","error","-show_entries","format=format_name:stream=codec_type","-of","json",fileURLToPath(r.playbackUrl!)]);
+    expect(guessed.status).toBe(0);
+    const meta = JSON.parse(String(guessed.stdout));
+    expect(meta.format.format_name).toBe("wav");
+    expect(meta.streams.map((s:any)=>s.codec_type)).toEqual(["audio"]);
+  } finally { rmSync(dir,{recursive:true,force:true}); }
 });

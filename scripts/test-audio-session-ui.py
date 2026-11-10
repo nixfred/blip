@@ -24,6 +24,7 @@ qml = '''import QtQuick
 import QtTest
 Item {
   id: root
+  property QtObject externalAudio: QtObject { property bool running: false; property var command: [] }
   property var audioPlayback: ({status: Loader.Ready})
   property int rowBudget: 1
   property int rowBatch: 1
@@ -111,12 +112,19 @@ Item {
       root.openAttachment({id:"b",mime:"Audio/WAV"});
       compare(root.requests[0].action,"open");
     }
+    function test_external_fallback_stops_on_surface_close() {
+      root.toggleAudio({id:"a"}); root.attFiles=({a:"file:///synthetic/voice.ogg"});
+      root.attMetrics=({a:{audio:{playable:false,externalDemuxer:"ogg"}}});
+      root.settleAudioFetch("a",true);
+      verify(externalAudio.running); verify(externalAudio.command.indexOf("--") >= 0);
+      root.surfaceOpen=false; verify(!externalAudio.running);
+    }
     function test_missing_id_or_closed_surface_cannot_request_play() {
       root.toggleAudio({id:""}); root.surfaceOpen=false; root.toggleAudio({id:"a"}); compare(root.requests.length,0);
     }
   }
 }
-'''.replace('@SURFACE@', source[source.index('  onSurfaceOpenChanged: {'):source.index('  function pumpAvatar()', source.index('  onSurfaceOpenChanged: {'))]).replace('@FUNCTIONS@', '\n'.join(function(name) for name in ['toggleAudio','settleAudioFetch','failAudio','stopAudio','openAttachment']))
+'''.replace('@SURFACE@', source[source.index('  onSurfaceOpenChanged: {'):source.index('  function pumpAvatar()', source.index('  onSurfaceOpenChanged: {'))]).replace('@FUNCTIONS@', '\n'.join(function(name) for name in ['toggleAudio','settleAudioFetch','failAudio','stopAudio','openAttachment','playExternalAudio']))
 runner = shutil.which('qmltestrunner') or '/usr/lib/qt6/bin/qmltestrunner'
 with tempfile.TemporaryDirectory(prefix='blip-audio-session-') as tmp:
     path=Path(tmp); (path/'tst_audio.qml').write_text(qml)

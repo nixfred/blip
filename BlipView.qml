@@ -1136,7 +1136,7 @@ FocusScope {
         root.playingAudio = id
         root.audioPlaying = true
       } else if (metadata && metadata.externalDemuxer) {
-        Quickshell.execDetached(["mpv", "--no-video", "--demuxer=lavf", "--demuxer-lavf-format=" + metadata.externalDemuxer, "--", String(root.attFiles[id])])
+        root.playExternalAudio(metadata.externalDemuxer, String(root.attFiles[id]))
         root.note = "Opened audio externally"
       } else root.note = "Audio preview unavailable — right-click to save the file"
     } else if (!ok && belongsHere) {
@@ -1154,7 +1154,14 @@ FocusScope {
     root.attFiles = files
     if (requested) root.note = "Could not play this audio message — try again or save the file"
   }
+  function playExternalAudio(format, path) {
+    root.stopAudio()
+    externalAudio.command = ["mpv", "--no-video", "--demuxer=lavf", "--demuxer-lavf-format=" + format, "--", path]
+    externalAudio.running = true
+  }
+  Process { id: externalAudio }
   function stopAudio() {
+    externalAudio.running = false
     root.audioPlaying = false
     root.playingAudio = ""
     root.pendingAudioId = ""
@@ -2063,7 +2070,7 @@ FocusScope {
             // The ordinary Open route remains the fallback when QtMultimedia cannot load.
             if (String(root.fetchJobMime || "").toLowerCase().indexOf("audio/") === 0) {
               if (d.audio && d.audio.externalDemuxer)
-                Quickshell.execDetached(["mpv", "--no-video", "--demuxer=lavf", "--demuxer-lavf-format=" + d.audio.externalDemuxer, "--", String(d.path || "")])
+                root.playExternalAudio(d.audio.externalDemuxer, String(d.path || ""))
               else root.note = "Audio format unavailable — right-click to save"
             } else if (root.openableMime(root.fetchJobMime)) {
               Quickshell.execDetached(["xdg-open", String(d.url || "")])
