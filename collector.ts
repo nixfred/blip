@@ -23,8 +23,8 @@ import { openSync, writeSync, fsyncSync, closeSync } from "node:fs";
 import { homedir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, chmodSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { appendFileSync, chmodSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { parseReadSnapshot, parseReadIntents, queueReadIntent, retryReadIntent, reconcileReadIntents,
   type ReadSnapshot, type ReadIntents } from "./read-sync";
 
@@ -356,11 +356,28 @@ export function saveState(state: BlipState, path = STATE_PATH): boolean {
     try { writeSync(fd, JSON.stringify({ ...state, toasted: state.toasted.slice(-200) })); fsyncSync(fd); } finally { closeSync(fd); }
     renameSync(temp, path);
     chmodSync(path, 0o600);
+    sweepStaleTemps(path);
     return true;
   } catch {
     try { unlinkSync(temp); } catch { /* temp may not exist */ }
     return false;
   }
+}
+
+/** A collector killed between openSync and renameSync leaves `<state>.<pid>.tmp`
+ *  behind, and nothing ever reads it again (one sat in ~/.local/state/blip for two
+ *  months, 160 KB). The pid is no use as a liveness test across reboots, so age is:
+ *  a live writer finishes in milliseconds, and an hour is far past that. */
+export function sweepStaleTemps(path: string, now = Date.now(), maxAgeMs = 3600_000): void {
+  try {
+    const dir = dirname(path);
+    const prefix = basename(path) + ".";
+    for (const name of readdirSync(dir)) {
+      if (!name.startsWith(prefix) || !/^\d+\.tmp$/.test(name.slice(prefix.length))) continue;
+      const file = join(dir, name);
+      try { if (now - statSync(file).mtimeMs > maxAgeMs) unlinkSync(file); } catch { /* raced with its owner */ }
+    }
+  } catch { /* housekeeping never fails a save */ }
 }
 
 export function loadAllowlist(path = ALLOWLIST_PATH): string[] {
@@ -2272,11 +2289,20 @@ export function runReadAction(args: string[], runner = spawnSync): { ok: boolean
   } catch { return { ok: false, error: "Mac read action could not start" }; }
 }
 
+/** The complete unread snapshot. It runs on EVERY poll, so it rides the persistent
+ *  channel like `recent` does: one-shot it paid a Python start and a database open
+ *  (~90 ms) on top of the query. A channel answer of 64 means the Mac's `serve`
+ *  predates `read-state` (the client was updated before the bridge); ask one-shot
+ *  instead of reporting the snapshot unavailable. */
 export function fetchReadSnapshot(runner = spawnSync): ReadSnapshot | null {
   try {
-    const r = runner(shimPath("imsg"), ["--json", "read-state"], {
-      encoding: "utf8", timeout: 20000, maxBuffer: 16 * 1024 * 1024,
-    });
+    const argv = ["--json", "read-state"];
+    const opts = { timeout: 20000, maxBuffer: 16 * 1024 * 1024 };
+    let r = bridgeRun(argv, runner, opts);
+    if (r.status === 64) {
+      const slow = runner(shimPath("imsg"), argv, { encoding: "utf8", ...opts });
+      r = { status: slow.status, stdout: String(slow.stdout ?? ""), stderr: String(slow.stderr ?? "") };
+    }
     return r.status === 0 ? parseReadSnapshot(JSON.parse(String(r.stdout))) : null;
   } catch { return null; }
 }

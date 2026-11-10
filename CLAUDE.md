@@ -526,6 +526,18 @@ what it is handed. Keep it that way.
   handle that misses the exact last-ten key falls back to a linear scan of
   every contact. Profile on the Mac with `cProfile` + `runpy` before changing
   anything (see the war-room note on wheel scrolling for the same lesson).
+  **Except where it WAS work, and that was found only by measuring (2026-11-10).** On a 530 MB chat.db
+  (282,650 messages) every poll paid 0.6 s for `read-state`, a window function over every inbound message
+  ever received, and every deep poll (window or panel open: all of them) paid ~1 s for `chats`, ~300
+  per-conversation lookups ordered by an expression, so a shallow collector run took 0.77 s and a deep one
+  2.1 s. The fix is the INDEXES Apple ships, not caching: `message_idx_is_read` finds the 24 unread rows of
+  144,621 in 1 ms, and `chat_message_join (chat_id, message_date, message_id)` walks a chat newest-first and
+  stops at the first row that qualifies. `read_state()` is the indexed answer; `read_state_scan()` is the old
+  whole-table one, kept as the fallback AND as the oracle `test_read_sync.py` fuzzes it against. Any change to
+  what counts as unread is made in the scan's contract first, then proven equal on a real database
+  (`read_state(con) == sorted(read_state_scan(con))`). Two traps found on the way: SQLite scans the table for
+  `is_read IS NOT 1` and for any OR of `is_read` tests (55 ms) where each branch UNIONed is an index search
+  (0.8 ms), and `ORDER BY <expression>` defeats an index that `ORDER BY <column>` uses.
 
 - **The persistent channel is an ACCELERATOR; the one-shot path is the
   contract.** `blip-bridged` (Linux, started by the LEADER BarWidget) holds

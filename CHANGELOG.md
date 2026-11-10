@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **A poll costs a fraction of what it did: the unread snapshot and the chat list stop reading the whole message
+  table.** Every poll ran `imsg read-state`, one window function over all 144,621 inbound messages on the
+  gateway's 530 MB chat.db (about 600 ms, and it grows with history). While the window or panel is open every
+  poll is a deep poll that also runs `imsg chats`, whose newest-message lookup ordered by an expression and so
+  scanned each of ~300 conversations whole. `read_state()` now finds the few chats that can have anything unread
+  from Apple's own `message_idx_is_read` index (24 rows of 144,621), runs the unchanged window query over only
+  those, and takes every other chat's newest inbound date from `chat_message_join`'s
+  `(chat_id, message_date, message_id)` index: 600 ms to 17 ms. `cmd_chats` takes each chat's newest visible
+  message from the same index: 1.0 to 1.3 s to 0.33 s. The old `read_state` stays as `read_state_scan`, the
+  fallback for a schema without `message_date`, for a predicate that reaches the message table and for more than
+  400 candidate chats, and the oracle the tests hold the new one to. The output is identical on the real
+  database: compared for the snapshot over four variants and byte for byte for the chat list over five.
+  `read-state` also joins the persistent `serve` channel, so a poll no longer pays a Python start and a database
+  open for it; a Mac whose `serve` predates it answers 64 and the client asks one-shot. `saveState()` removes
+  `state.json.<pid>.tmp` files an hour old (a 160 KB one from 14 Sep was still there). One edge is corrected on
+  the way: a stray NULL schedule column used to outrank a newer ordinary row in `cmd_chats` (`ORDER BY` sorts
+  NULL first); Messages writes 0, never NULL, so real data is unchanged. Tests: 1,500 random databases against
+  the oracle, join-index previews against the expression query, `fetchReadSnapshot`, the temp sweep; each new
+  branch has a mutation that fails one. Deploy: `read_state.py` and `imsg` to the gateway (`~/.blip/bin`, via
+  `install.sh`) and `collector.ts` to the plugin; the wire format is unchanged, so any order works.
 - **A failed send clears itself when the same words are delivered later.** A failed attempt used to stay on
   screen for the life of the shell, so after the gateway Mac was logged back in and the retry went out, a red
   "Not Delivered" bubble still sat under a message that had been delivered (10 Nov). `withPendingSends()` now

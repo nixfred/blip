@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -22,6 +22,7 @@ import {
   displayName,
   messagePreview,
   fetchMessages,
+  fetchReadSnapshot,
   loadAllowlist,
   loadMutelist,
   matchesMute,
@@ -37,6 +38,7 @@ import {
   applyPins,
   maxTs,
   saveState,
+  sweepStaleTemps,
   selectToasts,
   toastKey,
   windowCutoff,
@@ -857,6 +859,34 @@ describe("state and allowlist I/O", () => {
   });
 });
 
+describe("stale atomic-write leftovers", () => {
+  const fresh = () => { const d = mkdtempSync(join(tmpdir(), "blip-sweep-")); return { d, state: join(d, "state.json") }; };
+  const plant = (path: string, ageMs: number) => {
+    writeFileSync(path, "{}");
+    const t = (Date.now() - ageMs) / 1000;
+    utimesSync(path, t, t);
+  };
+
+  test("a save removes an hour-old state.json.<pid>.tmp and keeps everything else", () => {
+    const { d, state } = fresh();
+    plant(join(d, "state.json.3447586.tmp"), 2 * 3600_000);     // the real one: a crash, two months ago
+    plant(join(d, "state.json.99.tmp"), 60_000);                // a writer that is running right now
+    plant(join(d, "state.json.bak"), 9 * 3600_000);             // not ours: no pid, no .tmp
+    plant(join(d, "window.json.123.tmp"), 9 * 3600_000);        // another file's temp
+    plant(join(d, "state.json.12x.tmp"), 9 * 3600_000);         // pid must be digits
+    plant(join(d, "AAAAAAAAAAA123.tmp"), 9 * 3600_000);         // digits after a prefix-length stem, but not our file
+    expect(saveState({ ...loadState(state) }, state)).toBe(true);
+    expect(existsSync(join(d, "state.json.3447586.tmp"))).toBe(false);
+    for (const keep of ["state.json.99.tmp", "state.json.bak", "window.json.123.tmp", "state.json.12x.tmp", "AAAAAAAAAAA123.tmp", "state.json"]) {
+      expect(existsSync(join(d, keep))).toBe(true);
+    }
+  });
+
+  test("an unreadable directory never fails the save or the sweep", () => {
+    expect(() => sweepStaleTemps("/nonexistent-dir-for-blip/state.json")).not.toThrow();
+  });
+});
+
 describe("fetchMessages", () => {
   const fake = (r: { status: number; stdout?: string; stderr?: string }) =>
     (() => ({ status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" })) as never;
@@ -911,6 +941,49 @@ describe("fetchMessages", () => {
     const r = fetchMessages(10, fake({ status: 0, stdout: '{"oops":true}' }));
     expect(r.ok).toBe(false);
     expect(r.error).toContain("bad JSON");
+  });
+});
+
+describe("fetchReadSnapshot", () => {
+  const snapshot = JSON.stringify({ version: 1, chats: [
+    { chat: "+15551234567", unread: 2, oldest: "2026-11-10T10:00:00Z", latest: "2026-11-10T11:00:00Z", aliases: [] },
+    { chat: "chat0123", unread: 0, oldest: "", latest: "2026-11-09T11:00:00Z", aliases: ["chat0456"] },
+  ] });
+  const ok = (stdout: string) => ({ status: 0, stdout, stderr: "" }) as never;
+
+  test("asks the bridge for the snapshot as JSON and parses every row", () => {
+    const calls: string[][] = [];
+    const got = fetchReadSnapshot(((cmd: string, args: string[]) => { calls.push([cmd, ...args]); return ok(snapshot); }) as never);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.slice(1)).toEqual(["--json", "read-state"]);
+    expect(got).toEqual({
+      "+15551234567": { unread: 2, oldest: "2026-11-10T10:00:00Z", latest: "2026-11-10T11:00:00Z", aliases: [] },
+      "chat0123": { unread: 0, oldest: "", latest: "2026-11-09T11:00:00Z", aliases: ["chat0456"] },
+    });
+  });
+
+  test("a serve channel that predates read-state (status 64) is asked again one-shot", () => {
+    let n = 0;
+    const got = fetchReadSnapshot((() => (++n === 1
+      ? { status: 64, stdout: "serve: 'read-state' is not available on this channel\n", stderr: "" }
+      : { status: 0, stdout: snapshot, stderr: "" })) as never);
+    expect(n).toBe(2);
+    expect(Object.keys(got ?? {})).toEqual(["+15551234567", "chat0123"]);
+  });
+
+  test("any other failure is 'unavailable', never a guess and never a retry", () => {
+    for (const status of [1, 69, 255, null]) {
+      let n = 0;
+      expect(fetchReadSnapshot((() => { n++; return { status, stdout: snapshot, stderr: "" }; }) as never)).toBeNull();
+      expect(n).toBe(1);
+    }
+  });
+
+  test("a body that is not a version-1 snapshot is unavailable", () => {
+    for (const body of ["not json", "{}", JSON.stringify({ version: 2, chats: [] }),
+      JSON.stringify({ version: 1, chats: [{ chat: "x", unread: 1, oldest: "", latest: "2026-11-10T11:00:00Z" }] })]) {
+      expect(fetchReadSnapshot((() => ok(body)) as never)).toBeNull();
+    }
   });
 });
 

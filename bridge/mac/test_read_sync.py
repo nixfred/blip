@@ -11,7 +11,8 @@ from pathlib import Path
 from unittest.mock import patch, Mock
 
 sys.path.insert(0, str(Path(__file__).parent))
-from read_state import read_state
+from read_state import read_state, read_state_scan, MAX_CANDIDATE_CHATS
+import random
 
 
 def load_tool(name):
@@ -141,6 +142,104 @@ class ReactionReadBoundary(unittest.TestCase):
             self.assertEqual(kept, [target])
             self.assertEqual(extras[1]['activity_ts'], imsg.fmt_ts(810000000000000000))
             self.assertEqual(len(extras[1].get('tapbacks', [])), 1 if kind == 2004 else 0)
+
+
+class IndexedMatchesScan(unittest.TestCase):
+    """read_state() answers from indexes; read_state_scan() reads every row. They must agree."""
+
+    SCHEMA = """
+        CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, chat_identifier TEXT,
+          is_filtered INTEGER, group_id TEXT, style INTEGER);
+        CREATE TABLE message (ROWID INTEGER PRIMARY KEY, date INTEGER, is_read INTEGER,
+          is_from_me INTEGER, item_type INTEGER, associated_message_type INTEGER);
+        CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER, message_date INTEGER);
+        CREATE TABLE chat_recoverable_message_join (message_id INTEGER);
+        CREATE INDEX cmj_date ON chat_message_join(chat_id, message_date, message_id);
+    """
+
+    @staticmethod
+    def random_db(rng):
+        con = sqlite3.connect(":memory:")
+        con.executescript(IndexedMatchesScan.SCHEMA)
+        n_chats = rng.randint(1, 9)
+        ids = ["+1555000%04d" % rng.randint(0, 6), "a%d@example.com" % rng.randint(0, 3),
+               "chat%d" % rng.randint(100, 104), "%032x" % rng.randint(0, 3)]
+        for rowid in range(1, n_chats + 1):
+            ident = None if rng.random() < 0.08 else rng.choice(ids)
+            style = rng.choice([43, 45, 45, 45])
+            group = rng.choice([None, None, "g1", "g2", " "])
+            con.execute("INSERT INTO chat VALUES (?,?,?,?,?)",
+                        (rowid, ident, rng.choice([0, 0, 1, 2]), group, style))
+        for mid in range(1, rng.randint(0, 40) + 1):
+            date = rng.randint(1, 12)          # a small range, so dates tie and ROWID decides
+            con.execute("INSERT INTO message VALUES (?,?,?,?,?,?)",
+                        (mid, date, rng.choice([0, 0, 1, 1, 1, None, 2, -1]),
+                         rng.choice([0, 0, 0, 1]), rng.choice([0, 0, 0, 0, 1, 3]),
+                         rng.choice([0, 0, 0, 2000, 3001])))
+            for chat in {rng.randint(1, n_chats) for _ in range(rng.choice([1, 1, 1, 2]))}:
+                con.execute("INSERT INTO chat_message_join VALUES (?,?,?)", (chat, mid, date))
+            if rng.random() < 0.1:
+                con.execute("INSERT INTO chat_recoverable_message_join VALUES (?)", (mid,))
+        return con
+
+    def test_random_databases_agree_with_the_scan(self):
+        rng = random.Random(20261110)
+        for case in range(1500):
+            con = self.random_db(rng)
+            for predicate in ("", "c.is_filtered NOT IN (1)", "(c.ROWID IS NULL OR c.is_filtered NOT IN (1, 2))"):
+                for deleted in (False, True):
+                    want = read_state_scan(con, predicate, deleted)
+                    got = read_state(con, predicate, deleted)
+                    self.assertEqual(got, sorted(want, key=lambda r: r["chat"]),
+                                     "case %d predicate=%r include_deleted=%r" % (case, predicate, deleted))
+
+    def test_row_shape_and_key_order_are_the_scans(self):
+        con = self.random_db(random.Random(3))
+        con.execute("INSERT INTO message VALUES (900, 50, 0, 0, 0, 0)")
+        con.execute("INSERT INTO chat_message_join VALUES (1, 900, 50)")
+        got = read_state(con)
+        self.assertTrue(got)
+        self.assertEqual([list(r) for r in got], [["chat", "unread", "oldest", "latest", "aliases"]] * len(got))
+
+    def test_schema_without_message_date_takes_the_scan(self):
+        con = sqlite3.connect(":memory:")
+        con.executescript("""
+            CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, chat_identifier TEXT, is_filtered INTEGER, group_id TEXT, style INTEGER);
+            CREATE TABLE message (ROWID INTEGER PRIMARY KEY, date INTEGER, is_read INTEGER, is_from_me INTEGER, item_type INTEGER);
+            CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
+            INSERT INTO chat VALUES (1,'+15551234567',0,NULL,45);
+            INSERT INTO message VALUES (1,100,0,0,0);
+            INSERT INTO chat_message_join VALUES (1,1);
+        """)
+        self.assertEqual(read_state(con)[0]["unread"], 1)
+
+    def test_a_predicate_on_messages_takes_the_scan(self):
+        # The contract is "alias c"; one that reaches into m must still be honoured.
+        con = self.random_db(random.Random(5))
+        for _ in range(200):
+            con = self.random_db(random.Random(_))
+            self.assertEqual(read_state(con, "m.date > 3"), read_state_scan(con, "m.date > 3"))
+
+    def test_more_candidates_than_the_limit_take_the_scan(self):
+        con = sqlite3.connect(":memory:")
+        con.executescript(self.SCHEMA)
+        for i in range(1, MAX_CANDIDATE_CHATS + 6):
+            con.execute("INSERT INTO chat VALUES (?,?,0,NULL,45)", (i, "+1555%07d" % i))
+            con.execute("INSERT INTO message VALUES (?,?,0,0,0,0)", (i, 10 + i))
+            con.execute("INSERT INTO chat_message_join VALUES (?,?,?)", (i, i, 10 + i))
+        got = read_state(con)
+        self.assertEqual(len(got), MAX_CANDIDATE_CHATS + 5)
+        self.assertEqual(got, sorted(read_state_scan(con), key=lambda r: r["chat"]))
+
+    def test_a_chat_with_nothing_unread_still_reports_its_newest_inbound(self):
+        # reconcileReadIntents needs a row for a read chat, or a mark-read intent never clears.
+        con = sqlite3.connect(":memory:")
+        con.executescript(self.SCHEMA)
+        con.execute("INSERT INTO chat VALUES (1,'+15551234567',0,NULL,45)")
+        for mid, date, mine, read in ((1, 10, 0, 1), (2, 20, 1, 1), (3, 30, 0, 1), (4, 40, 1, 1)):
+            con.execute("INSERT INTO message VALUES (?,?,?,?,0,0)", (mid, date, read, mine))
+            con.execute("INSERT INTO chat_message_join VALUES (1,?,?)", (mid, date))
+        self.assertEqual(read_state(con), [{"chat": "+15551234567", "unread": 0, "oldest": None, "latest": 30, "aliases": []}])
 
 
 class Actions(unittest.TestCase):
