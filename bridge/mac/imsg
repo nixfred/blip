@@ -1118,9 +1118,33 @@ def _edit_flags(date_edited, date_retracted, summary_info) -> dict:
     return {"edited": True} if date_edited else {}
 
 
-def enrich(con, rows, with_names: bool):
+# A reaction is sent after the message it reacts to, so the reactions to a
+# window of messages are searched for from the window's oldest message onward,
+# not through every message ever received: that scan was 93 ms of a 100 ms
+# conversation load on a 282,650-message chat.db, and `message_idx_date` brings
+# it to 2 ms. The margin exists because clocks disagree: on the real database 3
+# of 28,305 reactions are stamped BEFORE their target, the worst by 0.83 days.
+# 90 days is 100 times that. Anything the bound cannot vouch for (no usable
+# date in the window) takes the unbounded query, which is also the test oracle.
+# The rows are sorted by ROWID in Python: that is the order the old table scan
+# returned them in, while the date index returns date order and would reorder the
+# reactions shown on a message. (An ORDER BY in SQL makes the planner prefer the
+# full scan again, which is what the plan test guards.)
+TAPBACK_SKEW_NS = 90 * 86400 * 10**9
+
+
+def _tapback_floor(rows, skew_ns=TAPBACK_SKEW_NS):
+    """Oldest Apple-ns stamp a reaction to any of `rows` can carry, or None."""
+    if skew_ns is None:
+        return None
+    dates = [d for d in (_row_value(r, "date") for r in rows) if isinstance(d, int) and not isinstance(d, bool) and d > 0]
+    return min(dates) - skew_ns if dates else None
+
+
+def enrich(con, rows, with_names: bool, skew_ns=TAPBACK_SKEW_NS):
     """Per-ROWID extras for --rich JSON. Returns (kept_rows, extras) where
-    tapback rows are folded onto their targets and dropped from kept_rows."""
+    tapback rows are folded onto their targets and dropped from kept_rows.
+    `skew_ns=None` reads every reaction in the database (the old behaviour)."""
     rows = list(rows)
     has_emoji = _has_col(con, "associated_message_emoji")
     has_edit = _has_col(con, "date_edited")
@@ -1135,15 +1159,19 @@ def enrich(con, rows, with_names: bool):
     orphan_targets = {_strip_assoc(_row_value(r, "assoc_guid")) for r in orphans.values()}
     legacy_stickers = []
 
-    # Tapbacks: scan every assoc row in the DB (type-filtered), net per sender+target.
+    # Tapbacks: every assoc row from the window's oldest message onward
+    # (type-filtered), net per sender+target. See TAPBACK_SKEW_NS.
     emoji_col = ", m.associated_message_emoji AS emo" if has_emoji else ""
+    floor = _tapback_floor(rows, skew_ns)
     latest: dict[tuple[str, str, int], sqlite3.Row] = {}
-    for r in con.execute(
+    for r in sorted(con.execute(
         f"""SELECT m.ROWID AS mid, m.guid, m.associated_message_guid AS ag, m.associated_message_type AS t,
                    m.is_from_me, m.date, h.id AS handle{emoji_col}
             FROM {MESSAGE_SRC} m LEFT JOIN handle h ON h.ROWID = m.handle_id
-            WHERE m.associated_message_type = 1000 OR m.associated_message_type BETWEEN 2000 AND 3999"""
-    ):
+            WHERE {"m.date >= ? AND " if floor is not None else ""}(m.associated_message_type = 1000
+                  OR m.associated_message_type BETWEEN 2000 AND 3999)""",
+        () if floor is None else (floor,),
+    ), key=lambda r: _row_value(r, "mid", 0)):
         tg = _strip_assoc(r["ag"])
         if tg not in targets and tg not in orphan_targets:
             continue

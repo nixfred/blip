@@ -39,6 +39,8 @@ jobs:
         run: python3 bridge/mac/test_read_verification.py
       - name: read state and action verification (synthetic SQLite, no macOS needed)
         run: python3 bridge/mac/test_read_sync.py
+      - name: reactions are read from the window's oldest message onward, exactly as before (synthetic SQLite, no macOS needed)
+        run: python3 bridge/mac/test_tapback_window.py
       - name: group-photo lookup (no macOS needed)
         run: python3 bridge/mac/test_group_photo.py
       - name: phone matching, the way Contacts does it (no macOS needed)
