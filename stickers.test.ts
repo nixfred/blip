@@ -321,7 +321,7 @@ test("MOV input gate, pixel ceiling, and independent sequence limits", () => {
       if (cmd === "ffprobe") return {status: 0, stdout: JSON.stringify({streams:[{index:0, codec_type:"video", width,height,nb_frames:String(count),duration:String(seconds)}]})};
       decoded = true;
       if (animated) expect(Number(args[args.indexOf("-frames:v") + 1]) * width * height).toBeLessThanOrEqual(64_000_000);
-      return {status:0, stdout:animated ? webp() : png()};
+      return {status:0, stdout:args.includes("libwebp_anim") ? webp() : png()};
     }) as never);
     expect(r?.renderMime === "image/webp").toBe(animated);
     expect(decoded).toBe(width <= 2048);
@@ -346,4 +346,18 @@ test("a failed video decode is not retried on every thread open", () => {
 });
 test("the real MOV demuxer refuses a concat payload", () => {
   expect(stickerSequencePreview(Buffer.from("ffconcat version 1.0\nfile other.png"),"video/quicktime")).toBeUndefined();
+});
+
+test("a non-sticker GIF cached by Open remains a hit above the auto-fetch ceiling", () => {
+  const aid=id(); mkdirSync(CACHE_DIR,{recursive:true,mode:0o700});
+  const path=join(CACHE_DIR,cacheFileName(aid,"large.gif","image/gif"));
+  const bytes=Buffer.alloc(6*1024*1024); bytes.write("GIF89a"); bytes.writeUInt16LE(64,6); bytes.writeUInt16LE(64,8);
+  writeFileSync(path,bytes,{mode:0o600});
+  expect(fetchAttachment(aid,"large.gif","image/gif",(()=>{throw Error("cache miss");}) as never,cap).ok).toBe(true);
+});
+test("static sticker edge checks are independent of animation and mask checks", () => {
+  for (const width of [2048,2049]) {
+    const r=fetchAttachment(id(),"edge.png","image/png",(()=>({status:0,stdout:png(1,width,64)})) as never,cap,true);
+    expect(r.ok).toBe(width === 2048);
+  }
 });
