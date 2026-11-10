@@ -1208,6 +1208,7 @@ def enrich(con, rows, with_names: bool, skew_ns=TAPBACK_SKEW_NS):
         emoji = (r["emo"] if has_emoji and r["emo"] else None) or TAPBACK_EMOJI.get(kind, "⭐")
         extras[targets[tg]].setdefault("tapbacks", []).append({
             "emoji": emoji,
+            **({"kind": "emoji"} if kind == 6 else {}),
             "from_me": bool(r["is_from_me"]),
             "by": None if r["is_from_me"] else (name_for(r["handle"]) if with_names else None) or r["handle"],
             **({"kind": "emoji"} if kind == 6 else {}),

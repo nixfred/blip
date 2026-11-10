@@ -270,7 +270,7 @@ def resolve(con, imsg, guid: str, self_handles: list) -> dict:
     for r in bubbles(con, chats, "m.is_from_me = ? AND (m.date > ? OR (m.date = ? AND m.ROWID > ?))",
                      f"m.date, m.ROWID LIMIT {LATER_SCAN}", (int(from_me), date, date, rowid)):
         scanned += 1
-        if hhmm(r["date"]) == minute and r["guid"] not in guids and norm(imsg.message_text(r)) == text:
+        if hhmm(r["date"]) == minute and r["guid"] not in guids and (norm(imsg.message_text(r)) == text or (norm(imsg.message_text(r)).startswith(text + ", ") and REACTED.fullmatch(norm(imsg.message_text(r))[len(text) + 2:]))):
             ordinal += 1
     # A twin past the scan window would go uncounted and the count would land
     # on a neighbour. Refuse rather than guess.
@@ -452,62 +452,6 @@ function bodyIs(body, want) {
   return /^(\d+ reactions?|(?!I )[^,]+ (loved|liked|disliked|laughed at|emphasized|questioned) this|(?!I )[^,]+ reacted with [^,]+)(, (\d+ reactions?|(?!I )[^,]+ (loved|liked|disliked|laughed at|emphasized|questioned) this|(?!I )[^,]+ reacted with [^,]+))*$/
     .test(body.slice(want.length + 2));
 }
-function attribute(el, name) { return safe(() => el.attributes.byName(name).value(), null); }
-function emojiIdentity(el, emoji) {
-  return String(attribute(el, "AXIdentifier") || "") === emoji ||
-    String(attribute(el, "AXValue") || "") === emoji;
-}
-function pickerTargetMatches(q) {
-  if (!q.text) return false;
-  const els = safe(() => win().entireContents(), []);
-  const descriptions = els.map(e => String(safe(() => e.description(), "")));
-  const labels = descriptions.filter(d => /^Message, /.test(d));
-  return descriptions.filter(d => d === "Tapback Picker").length === 1 && labels.length > 0 &&
-    labels.every(d => bodyIs(norm(d.slice(9)), q.text));
-}
-// No arrow-count or Return fallback. A search result must expose the exact
-// requested sequence, including skin tone, ZWJ and variation selectors.
-// Beeper's platform-imessage documents direct action names and picker ids;
-// detached/inaccessible CharacterPalette windows fail closed here.
-function pressEmoji(els, emoji, q) {
-  const hits = els.filter(e => ["AXButton", "AXCell"].indexOf(safe(() => e.role(), "")) >= 0 && emojiIdentity(e, emoji) &&
-    safe(() => e.enabled(), false) === true &&
-    safe(() => e.actions.name(), []).indexOf("AXPress") >= 0);
-  if (hits.length !== 1) return { ok: false, error: hits.length ? "ambiguous-emoji" : "emoji-not-offered" };
-  const el = hits[0];
-  if (!pickerTargetMatches(q) || !safe(() => proc.frontmost(), false) || !emojiIdentity(el, emoji) || !safe(() => el.enabled(), false))
-    return { ok: false, error: "moved" };
-  try { el.actions.byName("AXPress").perform(); return { ok: true }; }
-  catch (e) { return { ok: false, error: "perform-failed" }; }
-}
-function emojiPicker(q) {
-  if (!pickerTargetMatches(q)) return { ok: false, error: "picker-elsewhere" };
-  let popover = null;
-  for (let n = 0; n < 8 && !popover; n++) {
-    delay(0.2);
-    // Restrict inspection to Messages' own windows and AXPopover elements.
-    // Never search arbitrary app windows or type into the compose field.
-    const windows = safe(() => proc.windows(), []);
-    const pops = [];
-    for (const w of windows) {
-      const els = [w].concat(safe(() => w.entireContents(), []));
-      for (const el of els) if (safe(() => el.role(), "") === "AXPopover" || safe(() => el.roleDescription(), "") === "popover") pops.push(el);
-    }
-    if (pops.length === 1) popover = pops[0];
-    else if (pops.length > 1) return { ok: false, error: "ambiguous-emoji" };
-  }
-  if (!popover) return { ok: false, error: "emoji-picker-unavailable" };
-  let els = safe(() => popover.entireContents(), []);
-  const direct = pressEmoji(els, q.emoji, q);
-  if (direct.ok || direct.error !== "emoji-not-offered") return direct;
-  const fields = els.filter(e => safe(() => e.subrole(), "") === "AXSearchField" && safe(() => e.enabled(), false));
-  if (fields.length !== 1 || !q.name || !pickerTargetMatches(q) || !safe(() => proc.frontmost(), false))
-    return { ok: false, error: "emoji-not-offered" };
-  // The name narrows results, but does not determine what is pressed.
-  try { fields[0].value = q.name; } catch (e) { return { ok: false, error: "emoji-picker-unavailable" }; }
-  delay(0.8);
-  return pressEmoji(safe(() => popover.entireContents(), []), q.emoji, q);
-}
 // The transcript is one group whose child groups are the message rows, each
 // labelled like its bubble; their labels come in bulk reads, since one AX
 // read per element costs ~70 ms. A row holds the live bubble somewhere below
@@ -515,8 +459,7 @@ function emojiPicker(q) {
 // and the menu (see LIVE).
 function collect(q) {
   const all = win().entireContents();
-  // A picture's live bubble is a button below its row (imsg-reply, 27.2).
-  const kinds = q && q.picture ? /\.(groups|uiElements|buttons)\.at\(\d+\)$/ : /\.(groups|uiElements)\.at\(\d+\)$/;
+  const kinds = /\.(groups|uiElements)\.at\(\d+\)$/;
   const paths = all.map(el => Automation.getDisplayString(el));
   const at = {}, kids = {}, fields = [];
   paths.forEach((s, i) => {
@@ -600,58 +543,9 @@ function scan(q) {
   }
   return res;
 }
-// macOS 27: bubbles no longer carry the tapbacks as actions. Edit ▸ "Tapback
-// Last Message…" opens the Tapback Picker on the newest message (the item is
-// named for what it does: "Tapback Message…" with a selection, which nothing
-// from here can make). The picker names its message ("Message, <text>"); it
-// must be the target's text, or nothing is pressed.
-function picker(q) {
-  const out = { ok: false };
-  // The menu click itself is click_picker_item()'s, from Python: a System
-  // Events click on this item can block until the picker closes (27.0.1).
-  let pk = null, label = null;
-  // The picker draws before the label naming its message: wait for both.
-  for (let n = 0; n < 15 && !(pk && label); n++) {
-    delay(0.3);
-    const els = safe(() => win().entireContents(), []);
-    const descs = els.map(e => String(safe(() => e.description(), "") || ""));
-    const at = descs.indexOf("Tapback Picker");
-    if (at < 0) continue;
-    pk = els[at];
-    label = descs.find(d => /^Message, /.test(d)) || null;
-  }
-  if (!pk) { out.error = "no-picker"; return out; }
-  const body = norm(String(label || "").replace(/^Message, /, ""));
-  if (!label || !bodyIs(body, q.text)) {
-    se.keyCode(53);
-    out.error = "picker-elsewhere";
-    return out;
-  }
-  if (q.emoji) {
-    const children = safe(() => pk.entireContents(), []);
-    const direct = pressEmoji(children, q.emoji, q);
-    if (direct.ok || direct.error !== "emoji-not-offered") return direct;
-    if (q.remove) return direct; // removing must select the exact existing reaction
-    const add = children.filter(e => safe(() => e.role(), "") === "AXButton" &&
-      String(safe(() => e.description(), "")) === "Add custom emoji reaction" && safe(() => e.enabled(), false));
-    if (add.length !== 1 || !safe(() => proc.frontmost(), false)) return direct;
-    try { add[0].actions.byName("AXPress").perform(); }
-    catch (e) { return { ok: false, error: "emoji-picker-unavailable" }; }
-    return emojiPicker(q);
-  }
-  const btn = safe(() => pk.entireContents(), []).find(e =>
-    safe(() => e.role(), "") === "AXButton" && String(safe(() => e.description(), "")) === q.action
-      && safe(() => e.enabled(), false));
-  if (!btn) { se.keyCode(53); out.error = "not-offered"; out.offered = []; return out; }
-  // The action's NAME is AXPress; "press" is only its description.
-  try { btn.actions.byName("AXPress").perform(); out.ok = true; }
-  catch (e) { out.error = "perform-failed"; out.detail = String(e).slice(0, 200); }
-  return out;
-}
 function run() {
   const input = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
   const q = JSON.parse(String(ObjC.unwrap($.NSString.alloc.initWithDataEncoding(input, $.NSUTF8StringEncoding))));
-  if (q.mode === "emoji") return JSON.stringify(emojiPicker(q));
   if (q.mode === "page") {
     // Live bubbles carry the transcript's page-scroll actions. No page below
     // means already at the bottom.
@@ -665,7 +559,6 @@ function run() {
     try { c.el.actions()[i].perform(); return JSON.stringify({ ok: true }); }
     catch (e) { return JSON.stringify({ ok: false, error: "page-failed" }); }
   }
-  if (q.mode === "picker") return JSON.stringify(picker(q));
   const r = scan(q);
   if (r.error) return JSON.stringify({ ok: false, error: r.error });
   const out = { ok: false, atBottom: r.atBottom, seen: r.seen };
@@ -754,6 +647,7 @@ class NativeAX:
         self.event = bind(self.ax, "CGEventCreate", P, [P])
         self.location = bind(self.ax, "CGEventGetLocation", Point, [P])
         self.mouse_event = bind(self.ax, "CGEventCreateMouseEvent", P, [P, C.c_uint, Point, C.c_uint])
+        self.preflight_post = bind(self.ax, "CGPreflightPostEventAccess", C.c_bool, [])
         self.post_event = bind(self.ax, "CGEventPost", None, [C.c_uint, P])
         self.button_state = bind(self.ax, "CGEventSourceButtonState", C.c_bool, [C.c_int, C.c_uint])
         self.flags_state = bind(self.ax, "CGEventSourceFlagsState", C.c_ulonglong, [C.c_int])
@@ -848,6 +742,8 @@ class NativeAX:
         identity and bounds immediately before the single down/up gesture.
         """
         self.check()
+        if not self.preflight_post():
+            return {"ok": False, "error": "event-access-denied"}
         before = self.frame(el)
         if not before or not all(abs(v) < 100000 for v in before) or not (4 <= before[2] <= 128 and 4 <= before[3] <= 128):
             return {"ok": False, "error": "moved"}
@@ -971,7 +867,7 @@ class NativeAX:
         self.refs.clear()
 
 
-def native_emoji_picker(q, ax=None, pause=time.sleep, open_picker=None):
+def native_emoji_picker(q, ax=None, pause=time.sleep):
     """One exact custom reaction in the picker already opened by picker_route.
 
     Only identifiers/roles are traversed in the transcript. Message-label
@@ -983,14 +879,6 @@ def native_emoji_picker(q, ax=None, pause=time.sleep, open_picker=None):
     pressed = False
     try:
         matches = ax.pickers()
-        if not matches and open_picker:
-            why = open_picker()
-            if why:
-                return {"ok": False, "error": "no-picker"}
-            # The menu event is deliberately asynchronous. Acting on the old
-            # presentation during its transition can acknowledge AXPress but
-            # do nothing. An existing picker is reused, never toggled closed.
-            pause(0.8)
         for _ in range(15):
             matches = ax.pickers()
             if matches:
@@ -1144,7 +1032,7 @@ def perform(target: dict, action: str, run=jxa, deadline=None) -> dict:
     things repeated, and they stop at `deadline` (time.monotonic())."""
     request = {"text": target["text"], "from_me": target["from_me"], "hhmm": target["hhmm"],
                "ordinal": target["ordinal"], "newest": target["newest"], "actions": ACTIONS + [action],
-               "action": action, "frame": "", "mode": "perform", "picture": bool(target.get("picture"))}
+               "action": action, "frame": "", "mode": "perform"}
     down = up = settles = 0
     looked_again = bottom_seen = False
     while True:
@@ -1314,17 +1202,8 @@ def react(con, target: dict, kind: int, remove: bool, self_handles: list, ui, ru
         # macOS 27 bubbles carry no tapbacks, only the way to their picker.
         r = (picker_route(target, action, run, emoji=emoji, name=name, remove=remove, deadline=deadline) if macos_major() >= 27
              else perform(target, action, run=run, deadline=deadline))
-        if r.get("error") == "not-offered" and PICKER_SIGN in r.get("offered", []):
+        if macos_major() >= 27 and r.get("error") == "not-offered" and PICKER_SIGN in r.get("offered", []):
             r = picker_route(target, action, run, emoji=emoji, name=name, remove=remove, deadline=deadline)
-        elif emoji and not remove and r.get("error") == "not-offered":
-            # Opening the catalogue is not sending. The final choice still
-            # needs exact AX identity; a missing/ambiguous result is refused.
-            if time.monotonic() >= deadline:
-                raise Stop("timeout", EX_TEMPFAIL, "emoji selection deadline reached; nothing was sent")
-            opened = perform(target, "Add Emoji as Tapback", run=run, deadline=deadline)
-            if opened.get("ok") and time.monotonic() >= deadline:
-                raise Stop("timeout", EX_TEMPFAIL, "emoji selection deadline reached; nothing was sent")
-            r = run({"mode": "emoji", "emoji": emoji, "name": name, "text": target["text"]}) if opened.get("ok") else opened
         if not r.get("ok") and r.get("error") not in MAYBE_PERFORMED:
             if macos_major() >= 27 and run is jxa and r.get("error") not in NOT_OPENED:
                 close_picker()
@@ -1359,6 +1238,9 @@ def picker_route(target: dict, action: str, run, emoji="", name="", remove=False
     """macOS 27: open the picker from the target bubble, then choose in it. The
     bubble search finds, settles and re-reads the bubble before that one press."""
     if run is jxa:
+        version = tuple(int(x) for x in platform.mac_ver()[0].split(".")[:2])
+        if version < (27, 2):
+            return {"ok": False, "error": "not-offered", "offered": []}
         clear_stale_picker()
     opened = perform(target, PICKER_SIGN, run=run, deadline=deadline)
     if not opened.get("ok"):
@@ -1376,7 +1258,7 @@ def close_picker() -> None:
     """Escape out of a picker a run left open. Left there it blocks the next run,
     and the JXA scan's entireContents would then walk the whole emoji catalogue,
     pinning Messages' main thread for minutes (27.2). Only ever to Messages."""
-    script = 'tell application "System Events" to if frontmost of process "Messages" then key code 53'
+    script = 'tell application "System Events"\nif frontmost of process "Messages" then\nkey code 53\ndelay 0.2\nkey code 53\nend if\nend tell'
     try:
         subprocess.run(["/usr/bin/osascript", "-e", script], capture_output=True, timeout=10)
     except subprocess.TimeoutExpired:

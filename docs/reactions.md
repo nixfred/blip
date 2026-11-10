@@ -5,7 +5,7 @@ The six classic Tapbacks remain first; 1–6 or the arrow keys choose one.
 The plus button opens a searchable, categorized emoji catalogue. A pasted
 emoji keeps its complete sequence, including skin tone and joined characters.
 Choosing the reaction already on the message requests removal. The same
-catalogue supplies the composer's emoji insertion button.
+catalogue is available to the separate composer emoji PR (#161).
 
 The catalogue contains the 3,963 fully qualified Emoji 18.0 sequences, from
 [Unicode's released data](https://www.unicode.org/Public/emoji/18.0/emoji-test.txt).
@@ -125,3 +125,5 @@ No Swift source is vendored. Beeper's MIT copyright and permission notice
 is retained in [BEEPER-LICENSE.txt](BEEPER-LICENSE.txt) for the referenced
 automation design. Blip deliberately does not adopt its search-result
 keyboard-offset navigation or private emoji-search framework integration.
+
+Picker-based reactions require macOS 27.2 or newer; older versions may use direct bubble actions only. The macOS 26 emoji catalogue is deliberately refused. The shared picker model exposes composer mode for #161; that mode is not wired into this standalone PR.

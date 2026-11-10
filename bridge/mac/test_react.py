@@ -173,6 +173,12 @@ class Resolve(unittest.TestCase):
         self.assertEqual((t["text"], t["from_me"], t["chat"], t["self_thread"]), ("ok", True, FRIEND, False))
         self.assertEqual(t["newest"], {"text": "bye", "from_me": False, "hhmm": react.hhmm(T0 + 2 * MINUTE)})
 
+    def test_reaction_annotation_lookalike_is_counted(self):
+        add(self.con, 1, "LOOKALIKE", "see you, Ann loved this", True, T0 + 1)
+        add(self.con, 1, "TARGET", "see you", True, T0)
+        target = self.resolve("TARGET")
+        self.assertEqual(target["ordinal"], 1)
+
     def test_a_later_day_twin_at_the_same_hhmm_is_counted(self):
         # The transcript labels bubbles with HH:MM only, so yesterday's "ok" at
         # 09:15 and today's "ok" at 09:15 look identical to the scan. Counting
@@ -319,13 +325,11 @@ class React(unittest.TestCase):
     # macOS 27: a bubble offers Tapback Details… and none of the six.
     MACOS27 = {"ok": False, "error": "not-offered", "offered": ["press", "Tapback Details…", "Reply…", "Copy"]}
 
-    def test_macos27_sign_opens_the_picker_from_the_target_bubble(self):
-        result, messages = self.run_react([self.MACOS27, OK, {"ok": True, "lands": 2000}])
-        self.assertEqual((result["result"], result["type"]), ("added", 2000))
-        self.assertEqual(messages.performs[-1]["action"], "Tapback Details…")
-        self.assertEqual(len(messages.pickers), 1)
-        self.assertEqual((messages.pickers[0]["text"], messages.pickers[0]["action"]), ("see you", "Heart"))
-        self.assertEqual(self.ui.restored, ["Previous app"])
+    def test_below27_does_not_open_unproven_picker(self):
+        with patch.object(react, "macos_major", return_value=26):
+            result, messages = self.run_react([self.MACOS27])
+        self.assertEqual(result.exit_code, react.EX_NOT_OFFERED)
+        self.assertEqual(messages.pickers, [])
 
     def test_macos27_an_older_message_takes_a_tapback(self):
         add(self.con, 1, "N", "later", True, T0 + MINUTE)
@@ -333,11 +337,6 @@ class React(unittest.TestCase):
             result, messages = self.run_react([OK, {"ok": True, "lands": 2000}])
         self.assertEqual(result["result"], "added")
         self.assertEqual((len(messages.performs), len(messages.pickers)), (1, 1))
-
-    def test_macos27_a_picker_on_another_message_presses_nothing(self):
-        stop, messages = self.run_react([self.MACOS27, OK, {"ok": False, "error": "picker-elsewhere"}])
-        self.assertEqual((stop.exit_code, stop.result["code"]), (react.EX_TEMPFAIL, "picker-elsewhere"))
-        self.assertEqual(len(messages.pickers), 1)
 
     def test_macos27_the_picker_opens_only_after_the_bubble_settles(self):
         with patch.object(react, "macos_major", return_value=27):
@@ -853,33 +852,23 @@ class NativeEmojiPickerTests(unittest.TestCase):
     def run_picker(self, ax, q):
         return react.native_emoji_picker(q, ax=ax, pause=lambda _: None)
 
+    def test_native_classics_validate_context_and_unique_button(self):
+        for change in ("valid", "label", "duplicate", "focus", "origin"):
+            ax, q, cell, picker, labels, *_ = self.scene(recent=True)
+            q.pop("emoji"); q["action"] = "Heart"
+            cell["AXDescription"] = "Heart"
+            if change == "label": labels[0]["AXDescription"] = "Message, other"
+            if change == "duplicate": picker["AXChildren"].append(dict(cell))
+            if change == "focus": ax.front = False
+            if change == "origin": ax.origin_matches = False
+            self.assertEqual(self.run_picker(ax, q)["ok"], change == "valid")
+            self.assertEqual(ax.pressed, [cell] if change == "valid" else [])
+
     def test_recent_identity_with_matching_duplicate_target_labels(self):
         ax, q, cell, *_ = self.scene(recent=True)
         self.assertEqual(self.run_picker(ax, q), {"ok": True})
         self.assertEqual(ax.pressed, [cell])
 
-
-    def test_existing_picker_is_not_toggled_closed(self):
-        ax, q, cell, *_ = self.scene(recent=True)
-        def must_not_open():
-            raise AssertionError("menu would toggle the existing picker")
-        self.assertEqual(react.native_emoji_picker(q, ax=ax, pause=lambda _: None,
-                                                   open_picker=must_not_open), {"ok": True})
-        self.assertEqual(ax.pressed, [cell])
-
-    def test_absent_picker_is_opened_once_then_validated(self):
-        ax, q, cell, picker, *_ = self.scene(recent=True)
-        container = ax.app["AXChildren"][0]
-        container["AXChildren"].remove(picker)
-        opens = []
-        def open_picker():
-            opens.append(True)
-            container["AXChildren"].insert(0, picker)
-            return ""
-        self.assertEqual(react.native_emoji_picker(q, ax=ax, pause=lambda _: None,
-                                                   open_picker=open_picker), {"ok": True})
-        self.assertEqual(opens, [True])
-        self.assertEqual(ax.pressed, [cell])
 
     def test_search_native_popover_then_press_exact_result(self):
         ax, q, cell, picker, labels, more, popover = self.scene()
@@ -973,6 +962,7 @@ class NativeGlyphClickTests(unittest.TestCase):
         ax = react.NativeAX.__new__(react.NativeAX)
         ax.C, ax.Point, ax.app, ax.system = C, Point, 1, 2
         ax.check = lambda: None
+        ax.preflight_post = lambda: True
         ax.own = lambda value: value
         ax.frame = lambda _: (10, 20, 40, 40)
         ax.children = lambda _: [99]
