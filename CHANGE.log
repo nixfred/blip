@@ -42,6 +42,7 @@ PEOPLE (verified handles)
   edmooredop        github.com/edmooredop   X: none found (checked 2026-10-21; asked Fred)
   Mark B            github.com/Fail-Safe    X https://x.com/_FailSafe (he said so himself on #148, 2026-10-25; checked 2026-10-28: GitHub profile twitter_username AND social accounts now publish it, `x user @_FailSafe` shows name "Mark B", 78 followers. The earlier @Fail_Safe is "Bob Boberson", NOT him)
   Colton Fitzgerald github.com/coltonfitzgerald X: none found (checked 2026-10-28: GitHub profile and social accounts empty, coltonfitzgerald.me did not load, @coltonfitzgerald does not resolve on X; asked him on #146 and Fred)
+  Gerald LaMontagne github.com/lama7        X: none found (checked 2026-11-09: GitHub profile and social accounts empty, his site sahd.lamafam.org lists none, the one X account with his login is named "Lama" with 2 followers and is not guessed; asked him on #157)
   Fred Nix          github.com/nixfred      X https://x.com/nixfred
 
 Earlier contributors and their handles: CONTRIBUTORS-X-POST.md.
@@ -51,6 +52,30 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-11-09  #155 A tapback failure names its real reason instead of "tapback: Mac unreachable": exit 69 is two failures (the shim's
+                 translation of ssh's 255, and imsg-react's own EX_UNAVAILABLE for a locked screen or a Messages with no window), and
+                 tapbackFailure now calls a 69 unreachable only when the shim's marker is on stderr or no imsg-react line ran; 255 stays
+                 ssh. Gerald LaMontagne, github.com/lama7, X: none found (checked 2026-11-09; asked him on #157). Second PR, same day as #157.
+                 Checked by Larry 9 Nov: marker string equals blip-shim line 132, TapbackActions.mjs equals a fresh bun build, 807 bun
+                 tests and 24 Python suites pass. Door classifier said one-way on a code comment containing "ssh "; Fred approved the diff.
+2026-11-09  #157 A tapback that has to start Messages lands on the first try: imsg-read's gate treated "the Messages process exists" as ready,
+                 but a background launch registers its menu bar seconds later, so the next probe answered -1719 and the tapback failed with
+                 exit 77, then worked a minute later. The gate now polls the menu-bar probe (20 x 0.5 s); a denial or a locked screen neither
+                 launches Messages nor waits, and exit codes are unchanged. Gerald LaMontagne, github.com/lama7, X: none found (checked
+                 2026-11-09; asked him on #157). First PR. He found the cause in the unified log (open and the dying osascript 0.7 s apart,
+                 twice) and ran his tests on the Mac's stock Python 3.9.6. Checked by Larry 9 Nov: whole diff read; the four new tests fail
+                 against the old imsg-read; all four Mac suites pass on the gateway's Python 3.9.6. Not checked: the cold-launch tapback itself
+                 (the author reports 5.8 s on the incident Mac).
+2026-11-09  #154 Pin pages a far-down conversation's sidebar row into view on macOS 27 (the rest of #132): Messages builds only ~15 sidebar
+                 rows and `open imessage:` does not scroll a far-down chat's row into view, so nothing was selected and Pin stopped. The
+                 helper now pages the Conversations group from the top with AXScrollDownByPage until the selected row exists, acts on it, and
+                 pages back to the top; it still acts only on the row Messages reports selected. Ian Swope, github.com/ianswope, X
+                 https://x.com/ianfs: found the gap in his own #150 by testing a DM 48th by recency on his 27.0.1 mini. Checked by Larry 9 Nov:
+                 whole diff read, five SidebarScroll tests run the real JS under bun (3 fail on the old code, 2 with the page action disabled).
+                 LIVE ON FRED'S 27.2 GATEWAY (9 Nov, self-thread only): the chat is 58th of 496 and paging reached it, the helper fired
+                 Pin, and Messages answered with its own alert "You can pin up to 9 conversations", because the pin list was already
+                 full, so no pin landed (pin list unchanged, alert dismissed). Reaching and firing on 27.2 is shown; a pin actually
+                 landing there is NOT, and #132 stays open until it is.
 2026-11-08  #152 A friend's Find My shared city shows under their name in the panel and the app (`shared_city=on`, off by
                  default): `contacts shared-city` on the Mac reads Find My's People list through the Accessibility API and
                  returns only a coarse city and two timestamps; older locations carry their age, over 24 h are hidden, a

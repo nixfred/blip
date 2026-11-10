@@ -25,6 +25,56 @@ reconstructed on Sunday from memory.
 
 ---
 
+## 2026-W46 (Mon 9 Nov to Sun 15 Nov): OPEN, post due Sun 15 Nov
+
+### What people said this week (quote with attribution in the post)
+
+- **Ian Swope (https://x.com/ianfs) on #132, Mon 9 Nov**, answering Fred's question about the Pin gap: "the claim in
+  #150 was mine to check. My round trips used a chat whose row was already on screen, so "`open imessage:` brings a
+  row into view" was never actually tested." Then he tested it and sent the fix (#154).
+- **Matt (https://x.com/MattDbrow) on #152, Sun 8 Nov 23:11Z**: "Thanks — my X handle is @MattDbrow."
+- **Marcus Vorwaller (github.com/marcus, no X found 9 Nov) on #156, Mon 9 Nov**: "I'm opening it to start a
+  conversation, not expecting a merge as-is. Happy to split it, drop parts, or keep the UI in my fork and send only the features you want."
+- Comment sweep Mon 9 Nov (since 8 Nov): the three notes above, nothing else from outside.
+
+### Mon 9 Nov: #154, #157 and #155 merged, #156 asked to split
+
+- **#157 a tapback that has to start Messages lands on the first try.** Gerald LaMontagne (github.com/lama7; X: none
+  found 9 Nov, asked on the PR; first PR). Every first tapback after Messages had quit failed with exit 77 and worked a
+  minute later: the tool called Messages ready once its process existed, but a background launch registers its menu bar
+  seconds later, so the next probe answered -1719. He found it in the Mac's unified log (the tool's own `open` and the
+  dying `osascript` 0.7 s apart, twice). The gate now waits for the menus; a denial or locked screen never waits. He ran
+  the Mac suite on the Mac's own Python 3.9.6, which is where the last two PRs broke. Verified by Larry: whole diff read,
+  the four new tests all fail on the old code, the four Mac suites pass on the gateway's 3.9.6. NOT verified: the
+  cold-launch tapback itself (author: landed in 5.8 s).
+- **#155 a tapback failure names its real reason.** Gerald LaMontagne, second PR the same day. "tapback: Mac
+  unreachable" was shown for days on a reachable Mac with a locked screen, because exit 69 is two failures (the shim's
+  255 translation and imsg-react's own unavailable) and the code treated both as transport. Now only the shim's own
+  marker, or no imsg-react line at all, counts as unreachable. Verified by Larry: the marker equals blip-shim line 132
+  byte for byte, the built .mjs equals a fresh build. The classifier called it one-way on a code comment containing
+  "ssh "; Fred approved from the literal diff.
+- **#154 Pin works on a conversation far down the list.** Ian Swope. Messages builds only the ~15 sidebar rows near the
+  viewport, so for a chat 58th of 496 nothing was selected and Pin stopped. The helper pages the sidebar down with its
+  own scroll action until the selected row exists, acts on it, and pages back. Ian found this gap in his own #150.
+  Verified by Larry: five tests run the real JS under bun; mutations fail them. LIVE ON FRED'S 27.2 GATEWAY (self-thread
+  only): paging reached the chat and Pin fired, then Messages answered "You can pin up to 9 conversations", because the
+  pin list was already full, so nothing was pinned. So the fix reaches the row on 27.2; a pin landing there is still
+  unproven, and #132 stays open. The tool reports this as "clicked but the conversation is not pinned" and leaves the
+  alert open on the Mac: a message naming the 9-pin limit is a follow-up. Lesson for the post, twice now: a fix is not
+  done until the thing it is for has happened on the machine it is for.
+- **#156 a Messages-style restyle plus features, Marcus Vorwaller, 17,403 lines, NOT merged.** He asked "interested?"
+  first. Fred decided: the restyle and per-conversation backgrounds stay in his fork (Blip is one opinionated look);
+  the features are welcome as separate PRs in this order: Delivered, tapbacks on any message on macOS 27, native
+  replies (`imsg-reply`, `replies=on`), then the emoji picker, stickers and voice messages. The PR stays open until the
+  first split PR arrives. Larry checked CI, gitleaks and that it merges cleanly on today's main; he did NOT read all
+  17k lines. Say nothing in the post until a split PR lands.
+
+### Handles Fred still needs to answer (9 Nov)
+- **Gerald LaMontagne** (github.com/lama7, #155 and #157): nothing published. Asked him on #157. If Fred knows him, ask.
+- **Marcus Vorwaller** (github.com/marcus, #156): no X on his GitHub; not a contributor until a split PR merges.
+
+---
+
 ## 2026-W45 (Mon 2 Nov to Sun 8 Nov): OPEN, post due Sun 8 Nov (this one also covers W44)
 
 ### What people said this week (quote with attribution in the post)

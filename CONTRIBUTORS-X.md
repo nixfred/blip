@@ -13,7 +13,7 @@ tags are at the bottom.
 
 | Person | GitHub | X | PRs | How verified |
 |---|---|---|---|---|
-| Ian Swope | ianswope | https://x.com/ianfs | 22 | GitHub profile + social accounts; replies to @NixFred about Omarchy. NOT @IanSwope |
+| Ian Swope | ianswope | https://x.com/ianfs | 24 | GitHub profile + social accounts; replies to @NixFred about Omarchy. NOT @IanSwope |
 | Jon Kinney | jondkinney | https://x.com/jondkinney | 12 | GitHub profile |
 | Danny Cecil | jefehoser | https://x.com/jefehoser | 8 | same login on X, posts Omarchy; confirmed by Fred 2026-09-16 |
 | Adam Gamble | adamgamble | https://x.com/adamgamble | 5 | GitHub profile |
@@ -51,6 +51,7 @@ Nobody right now.
 | David Reinecke | dreinecke | 1 (+ issues) | nothing published, 2026-09-25 |
 | cw228 | cw228 | 1 | nothing published; asked on the PR 2026-09-18 |
 | David Benedic | daveyb | 1 (cherry-picked) | nothing published; asked on #131 2026-10-04 |
+| Gerald LaMontagne | lama7 | 2 | nothing on his GitHub profile or social accounts, his site sahd.lamafam.org lists no X, the one X account with his login is named "Lama" with 2 followers and is not guessed, 2026-11-09; asked on #157 |
 | Colton Fitzgerald | coltonfitzgerald | 1 | nothing on his GitHub profile or social accounts, coltonfitzgerald.me did not load, @coltonfitzgerald does not resolve on X, 2026-10-28; asked on #146 |
 | "Unhook Dev" | tolewis | 1 | nothing published, 2026-09-25 |
 
