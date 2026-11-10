@@ -36,6 +36,10 @@ export function analyzeAudio(path: string, runner = spawnSync): AudioMetadata {
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const st = fstatSync(fd);
     if (!st.isFile() || st.uid !== process.getuid() || st.size <= 0 || st.size > MAX_INPUT) return empty;
+    const header = Buffer.alloc(16); const length = readSync(fd, header, 0, header.length, 0);
+    const format = audioDemuxer(header.subarray(0, length));
+    if (!format) return empty;
+    empty.externalDemuxer = format;
     // Generated PCM WAV is the only file ever handed to Qt. The source
     // fingerprint invalidates both waveform and normalized audio together.
     const hash = createHash("sha256"), chunk = Buffer.alloc(65536);
@@ -53,15 +57,11 @@ export function analyzeAudio(path: string, runner = spawnSync): AudioMetadata {
           const data = Buffer.alloc(cs.size);
           if (readSync(cached, data, 0, data.length, 0) === data.length && data.toString("ascii", 0, 4) === "RIFF" && data.toString("ascii", 8, 16) === "WAVEfmt ") {
             const now = new Date(); utimesSync(playbackPath, now, now);
-            return {externalDemuxer: audioDemuxer(chunk.subarray(0, Math.min(16, st.size))), durationMs: Math.round((data.length - PCM_OFFSET) * 1000 / (2 * AUDIO_SAMPLE_RATE)), waveform: waveformFromPcm16(data.subarray(PCM_OFFSET)), unavailable:false, playable:true, playbackUrl:pathToFileURL(playbackPath).href};
+            return {externalDemuxer: format, durationMs: Math.round((data.length - PCM_OFFSET) * 1000 / (2 * AUDIO_SAMPLE_RATE)), waveform: waveformFromPcm16(data.subarray(PCM_OFFSET)), unavailable:false, playable:true, playbackUrl:pathToFileURL(playbackPath).href};
           }
         }
       } finally { closeSync(cached); }
     } catch { /* no normalized cache entry */ }
-    const header = Buffer.alloc(16); const length = readSync(fd, header, 0, header.length, 0);
-    const format = audioDemuxer(header.subarray(0, length));
-    if (!format) return empty;
-    empty.externalDemuxer = format;
     const input = ["-protocol_whitelist", "file,pipe", "-f", format, "-i", path];
     const probe = runner("ffprobe", ["-v", "error", ...input, "-select_streams", "a:0",
       "-show_entries", "format=duration:stream=codec_type", "-of", "json"],
