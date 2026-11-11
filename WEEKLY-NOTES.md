@@ -40,8 +40,17 @@ reconstructed on Sunday from memory.
   The extractions keep your theme, controls, banner and mark-all-read link... I'll handle the follow-on rebases as earlier PRs
   merge rather than leaving those conflicts for you."
 
-### Wed 11 Nov: #163 merged, voice messages play inside Blip
+### Wed 11 Nov: #163 and #159 merged, voice messages play inside Blip and any message takes any emoji
 
+- **#159 react to any message, with any emoji (merged the same afternoon).** Marcus Vorwaller (github.com/marcus; X: none
+  found, asked Fred; fifth merged PR this week). macOS 27 had left Blip able to react to the newest message only; now any
+  message, and any emoji, because he found the picker that "Tapback Details…" opens on a bubble and a way to choose in it
+  that works on 27.2. I tried it on the real 27.2 Mac, in the self-thread only: a Heart on a month-old message, a fox, a
+  reaction on an already-reacted bubble, removal; each confirmed in the Mac's own database. Two things I found on the way
+  were Blip's, not his: the permission check before any reaction hung forever over ssh on 27.2 (fixed on main, 33aab7b and
+  ef9a1ab), and a message whose own text reads like a reaction label needed a test. One thing for the post: the custom
+  emoji is chosen with one real mouse click, because the picker ignores the accessibility press, and it refuses if a
+  button or modifier is held.
 - **#163 voice messages play inline.** Marcus Vorwaller (github.com/marcus; X: none found, asked Fred; his fourth merged PR
   this week). Play, pause, a waveform drawn from the actual recording, seeking, and a message arriving mid-listen no longer
   cuts it off. It took three rounds and he answered each within hours. The one that mattered: Blip wrapped a stranger's

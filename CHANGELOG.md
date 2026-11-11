@@ -1,9 +1,18 @@
 # Changelog
 
-Picker reactions require macOS 27.2 or newer; 27.0/27.1 refuse before opening Messages. Missing event-posting permission refuses custom emoji before opening a picker.
-
 ## Unreleased
 
+- **React to any message, with any emoji, on macOS 27.2 (#159, Marcus Vorwaller).** macOS 27 took the tapback actions off
+  message bubbles, so Blip could only react to the newest message. It now opens the Tapback Picker on the bubble you chose,
+  whichever it is, and presses the classic button there; a custom emoji is chosen through a searchable picker (a smiley in
+  the bubble's menu) and confirmed against chat.db, which stores the exact emoji, so a 🦊 is never mistaken for a 😀. A
+  reacted bubble reads "ok, Ann loved this" on the Mac, which Blip now understands, and a message whose own text looks like
+  that is refused rather than guessed. Opt-in as before (`tapbacks=on`). Needs macOS 27.2 or newer for the picker; 27.0
+  and 27.1 refuse before Messages opens, and a Mac without the event-posting permission refuses a custom emoji before any
+  picker opens. The custom-emoji press is one mouse click at the emoji's verified position (the picker ignores an AX
+  press on 27.2): it is refused if a button or modifier is held, never retried, and the pointer is put back. Proven on the
+  real 27.2 gateway in the self-thread only: a Heart on a month-old message, a 🦊, a reaction on an already-reacted bubble,
+  and removal, each confirmed in chat.db.
 - **Tapbacks no longer hang on a macOS 27.2 gateway.** Before every reaction the Mac asks macOS, without ever
   prompting, whether the bridge may automate System Events. Over ssh on 27.2 that question never came back: it named
   System Events by bundle id, a lookup ssh sessions on 27.2 cannot make, and Apple's call has no timeout, so the

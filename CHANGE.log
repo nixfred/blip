@@ -52,6 +52,16 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-11-11  #159 React to any message with any emoji on macOS 27.2: the Tapback Picker that "Tapback Details..." opens on the chosen bubble
+                 (not only the newest message), classic buttons pressed there, custom emoji chosen through native AX and one hit-tested click,
+                 confirmed against associated_message_emoji (type 2006/3006) in chat.db; a searchable ReactionPicker.qml; a reacted bubble's
+                 "<text>, Ann loved this" label understood, a target whose own text looks like it refused. Marcus Vorwaller, github.com/marcus,
+                 X: none found (rechecked 2026-11-11; asked Fred). Second split of his #156. Checked by Larry: sent back twice (a CI step that
+                 ran zero tests, a look-alike bubble could take the press, the 27.2 gate and permission preflight untested and misworded), all
+                 fixed; proven on the real 27.2 gateway in the self-thread only (Heart on an older message, custom emoji, a reaction on an
+                 already-reacted bubble, removal; the first custom-emoji try refused with "moved" while the Mac was in use and pressed nothing).
+                 877 bun, 7 Qt/Python suites, 92 bridge tests, CI green. Door one-way (ci.yml, imsg-react); Fred approved the literal diff.
+                 Larry added: the ci.yml conflict resolved, one test for the resolve() prefix guard (two mutants killed).
 2026-11-11  (this commit) The first tapback after a Mac reboot no longer refuses: a just-launched System Events has a pid at
                  once but answers -600 for about a second; 33aab7b asked once, the old code had retried. _ask_until_ready()
                  asks again while it answers -600, still bounded per call. Fred Nix / Larry, github.com/nixfred, X
