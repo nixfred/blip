@@ -50,6 +50,12 @@ reconstructed on Sunday from memory.
   guess sees only Blip's header; I ran the same attack on the merged code and FFmpeg calls it plain WAV. I added two tests
   for guards his suite did not catch being removed. Left in the queue: #159 reactions and #160 native replies, which need
   the real 27.2 gateway before they land.
+- **Reactions no longer hang on the macOS 27.2 Mac (Larry, nixfred; 33aab7b, 1a51bbe).** Testing #159 on the real gateway
+  (my own thread only, with Fred's OK) showed that every reaction, on main too, stopped for minutes before touching
+  Messages: a permission question to macOS never came back over ssh on 27.2. It now asks by process id, gives up after 5
+  seconds, and waits for a just-started helper. The test also proved #159's headline feature live: a Heart on a month-old
+  message landed in 13 seconds. And it found what #159 still lacks: once a message carries a reaction, a second one cannot
+  be added or removed. #159 refuses safely there; sent back with the details.
 
 ### Tue 10 Nov: #158, #161 and #162 merged, #159 #160 #163 sent back with specifics, and a poll that is 4x faster
 
