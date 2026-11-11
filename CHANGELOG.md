@@ -1,5 +1,7 @@
 # Changelog
 
+Picker reactions require macOS 27.2 or newer; 27.0/27.1 refuse before opening Messages. Missing event-posting permission refuses custom emoji before opening a picker.
+
 ## Unreleased
 
 - **Tapbacks no longer hang on a macOS 27.2 gateway.** Before every reaction the Mac asks macOS, without ever

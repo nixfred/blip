@@ -30,6 +30,10 @@ jobs:
           python3 scripts/test-audio-ui.py
           python3 scripts/test-audio-session-ui.py
           python3 scripts/test-audio-loader.py
+      - name: Searchable reaction picker (synthetic QtTest)
+        run: |
+          sudo apt-get install -y -q qml6-module-qtquick-controls qml6-module-qtquick-templates
+          python3 scripts/test-reaction-ui.py
       - name: OTP desktop adapter (no desktop needed)
         run: |
           python3 -m py_compile otp-desktop.py
@@ -68,7 +72,9 @@ jobs:
       - name: read pushes address groups and restore focus (no macOS needed)
         run: python3 bridge/mac/test_read.py
       - name: tapbacks are verified by chat.db, pressed once and never mid-scroll (no macOS needed)
-        run: python3 bridge/mac/test_react.py
+        run: |
+          python3 bridge/mac/test_react.py
+          python3 bridge/mac/test_reaction_kind.py
       - name: hide Spam / unknown senders (no macOS needed)
         run: python3 bridge/mac/test_filtered.py
       - name: contact review across sources (no macOS needed)
