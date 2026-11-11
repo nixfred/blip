@@ -558,7 +558,32 @@ class Consent(unittest.TestCase):
         body = source[source.index("def ae_permission"):source.index("def system_events_consent")]
         self.assertIn('four("kpid")', body)
         self.assertNotIn('four("bund")', body)
-        self.assertIn("_bounded(ask, seconds)", body)
+        self.assertIn("_ask_until_ready(lambda: pid_of(process), ask, seconds)", body)
+
+    def test_a_freshly_launched_system_events_is_asked_again(self):
+        # After a reboot: no pid yet, then a pid that answers -600 until it has checked in.
+        pids = iter([None, None, 4242, 4242, 4242])
+        answers = iter([react.AE_NOT_RUNNING, react.AE_NOT_RUNNING, react.AE_GRANTED])
+        asked = []
+        def ask(pid):
+            asked.append(pid)
+            return next(answers)
+        status = react._ask_until_ready(lambda: next(pids), ask, 5, sleep=lambda _: None)
+        self.assertEqual(status, react.AE_GRANTED)
+        self.assertEqual(asked, [4242, 4242, 4242])
+
+    def test_never_running_is_not_running_and_a_hang_stops_at_once(self):
+        never = react._ask_until_ready(lambda: None, lambda pid: react.AE_GRANTED, 5, sleep=lambda _: None)
+        self.assertEqual(never, react.AE_NOT_RUNNING)
+        import time
+        calls = []
+        def hang(pid):
+            calls.append(pid)
+            time.sleep(30)
+        started = time.monotonic()
+        self.assertIsNone(react._ask_until_ready(lambda: 7, hang, 0.2, sleep=lambda _: None))
+        self.assertEqual(calls, [7])
+        self.assertLess(time.monotonic() - started, 5)
 
 
 class Paging(unittest.TestCase):

@@ -52,7 +52,13 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
-2026-11-11  (this commit) Tapbacks no longer hang on a macOS 27.2 gateway: imsg-react's prompt-free permission probe
+2026-11-11  (this commit) The first tapback after a Mac reboot no longer refuses: a just-launched System Events has a pid at
+                 once but answers -600 for about a second; 33aab7b asked once, the old code had retried. _ask_until_ready()
+                 asks again while it answers -600, still bounded per call. Fred Nix / Larry, github.com/nixfred, X
+                 https://x.com/nixfred. Caught on fnix right after its 15:12 reboot (refused cleanly, nothing pressed); proven
+                 with System Events stopped: granted 0.41 s cold, 0.09 s warm. 65 bridge tests (2 new; removing the retry
+                 fails one). Door one-way; Fred approved the literal diff.
+2026-11-11  33aab7b Tapbacks no longer hang on a macOS 27.2 gateway: imsg-react's prompt-free permission probe
                  (AEDeterminePermissionToAutomateTarget) addressed System Events by bundle id and never returned over ssh on
                  27.2; it now uses the PID (pgrep) and a 5 s bound that refuses. Fred Nix / Larry, github.com/nixfred, X
                  https://x.com/nixfred. Found during the #159 live test (self-thread only, Fred approved): faulthandler put

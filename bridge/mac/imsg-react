@@ -671,6 +671,22 @@ def _pid_of(name: str):
         return None
 
 
+def _ask_until_ready(pid_of, ask, seconds: float, tries: int = 20, pause: float = 0.25, sleep=time.sleep):
+    """Ask once there is a pid, again while macOS answers -600. A process that
+    has just been launched has a pid at once but answers -600 until it has
+    checked in (measured 2026-11-11 after a reboot: one call, one -600, a
+    refusal). A call that does not answer in `seconds` ends it: None."""
+    status = AE_NOT_RUNNING
+    for _ in range(tries):   # launching takes about a second
+        pid = pid_of()
+        if pid:
+            status = _bounded(lambda: ask(pid), seconds)
+            if status != AE_NOT_RUNNING:
+                return status
+        sleep(pause)
+    return status
+
+
 def ae_permission(bundle: str = "com.apple.systemevents", process: str = "System Events",
                   pid_of=_pid_of, seconds: float = AE_PROBE_SECONDS):
     """Ask macOS whether this process may send Apple events to `bundle`,
@@ -703,16 +719,8 @@ def ae_permission(bundle: str = "com.apple.systemevents", process: str = "System
         cs.AEDisposeDesc.argtypes = [ctypes.POINTER(AEDesc)]
 
         subprocess.run(["open", "-g", "-j", "-b", bundle], capture_output=True, timeout=10)
-        pid = None
-        for _ in range(20):   # launching takes about a second
-            pid = pid_of(process)
-            if pid:
-                break
-            time.sleep(0.25)
-        if not pid:
-            return AE_NOT_RUNNING
 
-        def ask():
+        def ask(pid):
             target = ctypes.c_int32(pid)
             desc = AEDesc()
             if cs.AECreateDesc(four("kpid"), ctypes.byref(target), ctypes.sizeof(target), ctypes.byref(desc)) != 0:
@@ -723,7 +731,7 @@ def ae_permission(bundle: str = "com.apple.systemevents", process: str = "System
             finally:
                 cs.AEDisposeDesc(ctypes.byref(desc))
 
-        return _bounded(ask, seconds)
+        return _ask_until_ready(lambda: pid_of(process), ask, seconds)
     except Exception:
         return None
 
