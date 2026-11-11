@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Tapbacks no longer hang on a macOS 27.2 gateway.** Before every reaction the Mac asks macOS, without ever
+  prompting, whether the bridge may automate System Events. Over ssh on 27.2 that question never came back: it named
+  System Events by bundle id, a lookup ssh sessions on 27.2 cannot make, and Apple's call has no timeout, so the
+  reaction sat in the Messages lock for minutes before touching anything. It now names System Events by process id and
+  gives up after 5 seconds, which refuses ("cannot confirm"), as any other unknown answer does. Measured on the gateway:
+  blocked past 15 s before, granted in 0.15 s after. Nothing was ever pressed while it hung.
 - **Voice messages play inline, with a real waveform and seeking (#163, Marcus Vorwaller).** An audio attachment gets
   play/pause, a waveform measured from the recording itself, remaining time, click and keyboard seeking, and only one voice
   plays at a time. Playback belongs to the view, so a new message arriving no longer cuts off the one you are hearing, and

@@ -91,6 +91,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 
 APPLE_EPOCH = 978307200
@@ -640,9 +641,38 @@ def perform(target: dict, action: str, run=jxa, deadline=None) -> dict:
 
 # OSStatus answers of AEDeterminePermissionToAutomateTarget.
 AE_GRANTED, AE_DENIED, AE_WOULD_ASK, AE_NOT_RUNNING = 0, -1743, -1744, -600
+# Apple's call has no timeout of its own. Over ssh on macOS 27.2 it NEVER
+# returns for a target addressed by bundle id, the LaunchServices lookup that
+# ssh sessions on 27.2 no longer get (measured 2026-11-11 on the gateway:
+# blocked past 15 s by bundle id, answered 0 in 0.04 s by PID). Every tapback
+# then hung inside the Messages UI lock, before Messages was touched, until the
+# caller gave up. Addressed by PID and bounded, an answer that does not come
+# is "cannot confirm", which refuses, exactly like any other unknown answer.
+AE_PROBE_SECONDS = 5.0
 
 
-def ae_permission(bundle: str = "com.apple.systemevents"):
+def _bounded(fn, seconds: float):
+    """fn() on a daemon thread; None if it has not answered within `seconds`
+    or raised. The thread is left behind: the run refuses and exits."""
+    box = []
+    worker = threading.Thread(target=lambda: box.append(fn()), daemon=True)
+    worker.start()
+    worker.join(seconds)
+    return box[0] if box else None
+
+
+def _pid_of(name: str):
+    """PID of the running process with exactly this name, or None (pgrep: no
+    LaunchServices, which ssh sessions on 27.2 cannot use)."""
+    try:
+        out = subprocess.run(["/usr/bin/pgrep", "-x", name], capture_output=True, text=True, timeout=2).stdout.split()
+        return int(out[0]) if out else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def ae_permission(bundle: str = "com.apple.systemevents", process: str = "System Events",
+                  pid_of=_pid_of, seconds: float = AE_PROBE_SECONDS):
     """Ask macOS whether this process may send Apple events to `bundle`,
     with askUserIfNeeded=false: it answers and NEVER prompts. Needed on
     macOS 27, which no longer keeps a per-user TCC.db where
@@ -651,7 +681,8 @@ def ae_permission(bundle: str = "com.apple.systemevents"):
     while imsg-read's System Events calls succeed). The target must be
     running or the answer is -600, so System Events is launched first,
     hidden, through LaunchServices -- a launch is not an Apple event and
-    needs no consent. None when the call cannot be made at all."""
+    needs no consent; it is then addressed by PID (see AE_PROBE_SECONDS).
+    None when the call cannot be made at all or does not answer in time."""
     try:
         import ctypes
         import struct
@@ -672,21 +703,27 @@ def ae_permission(bundle: str = "com.apple.systemevents"):
         cs.AEDisposeDesc.argtypes = [ctypes.POINTER(AEDesc)]
 
         subprocess.run(["open", "-g", "-j", "-b", bundle], capture_output=True, timeout=10)
-        raw = bundle.encode()
-        status = AE_NOT_RUNNING
+        pid = None
         for _ in range(20):   # launching takes about a second
+            pid = pid_of(process)
+            if pid:
+                break
+            time.sleep(0.25)
+        if not pid:
+            return AE_NOT_RUNNING
+
+        def ask():
+            target = ctypes.c_int32(pid)
             desc = AEDesc()
-            if cs.AECreateDesc(four("bund"), raw, len(raw), ctypes.byref(desc)) != 0:
+            if cs.AECreateDesc(four("kpid"), ctypes.byref(target), ctypes.sizeof(target), ctypes.byref(desc)) != 0:
                 return None
             try:
-                status = cs.AEDeterminePermissionToAutomateTarget(
+                return cs.AEDeterminePermissionToAutomateTarget(
                     ctypes.byref(desc), four("****"), four("****"), False)
             finally:
                 cs.AEDisposeDesc(ctypes.byref(desc))
-            if status != AE_NOT_RUNNING:
-                break
-            time.sleep(0.25)
-        return status
+
+        return _bounded(ask, seconds)
     except Exception:
         return None
 

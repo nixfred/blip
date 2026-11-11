@@ -52,6 +52,13 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-11-11  (this commit) Tapbacks no longer hang on a macOS 27.2 gateway: imsg-react's prompt-free permission probe
+                 (AEDeterminePermissionToAutomateTarget) addressed System Events by bundle id and never returned over ssh on
+                 27.2; it now uses the PID (pgrep) and a 5 s bound that refuses. Fred Nix / Larry, github.com/nixfred, X
+                 https://x.com/nixfred. Found during the #159 live test (self-thread only, Fred approved): faulthandler put
+                 both hung runs in ae_permission before any UI action. Gateway: bundle id still blocked at 15 s, PID answered
+                 0 in 0.04 s; fixed probe granted in 0.15 s x3. On main since 5658760 (2026-10-07). 63 bridge tests (3 new),
+                 28 CI Python/Qt suites, bun 872 pass. Door one-way (bridge/mac/imsg-react); Fred approved the literal diff.
 2026-11-11  #163 Voice messages play inline: play/pause, a measured waveform, remaining time, seeking, one voice at a time, owned
                  by the view so a rebuild or a new message does not cut it off. Marcus Vorwaller, github.com/marcus, X: none found
                  (rechecked 2026-11-11; asked Fred). Sixth split of his #156. Checked by Larry: sent back twice (Qt played bytes the

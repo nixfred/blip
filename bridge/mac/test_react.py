@@ -536,6 +536,30 @@ class Consent(unittest.TestCase):
             raise AssertionError("probe must not run when TCC.db is there")
         self.assertEqual(react.system_events_consent(self.tcc([self.grant(2)]), probe=never), "")
 
+    def test_a_probe_that_never_answers_refuses_quickly(self):
+        # macOS 27.2 over ssh: AEDeterminePermissionToAutomateTarget addressed by
+        # bundle id never returned, and the tapback sat in the UI lock for minutes.
+        import time
+        started = time.monotonic()
+        stuck = lambda: react._bounded(lambda: time.sleep(30), 0.2)
+        self.assertIn("cannot confirm", react.system_events_consent("/nonexistent/TCC.db", probe=stuck))
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_bounded_returns_the_answer_and_none_for_errors(self):
+        self.assertEqual(react._bounded(lambda: react.AE_GRANTED, 5), react.AE_GRANTED)
+        self.assertEqual(react._bounded(lambda: react.AE_DENIED, 5), react.AE_DENIED)
+        def broken():
+            raise OSError("no CoreServices")
+        self.assertIsNone(react._bounded(broken, 5))
+
+    def test_system_events_is_addressed_by_pid_not_bundle_id(self):
+        # By bundle id needs LaunchServices, which ssh sessions on 27.2 cannot use.
+        source = Path(react.__file__).read_text()
+        body = source[source.index("def ae_permission"):source.index("def system_events_consent")]
+        self.assertIn('four("kpid")', body)
+        self.assertNotIn('four("bund")', body)
+        self.assertIn("_bounded(ask, seconds)", body)
+
 
 class Paging(unittest.TestCase):
     TARGET = {"text": "x", "from_me": True, "hhmm": "10:00", "ordinal": 0,
