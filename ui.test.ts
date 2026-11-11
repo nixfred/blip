@@ -523,6 +523,10 @@ describe("QML safety invariants", () => {
     expect(panel).toContain('root.settleAudioFetch(id, d.ok === true, d.error || "")');
     expect(panel).toContain("resetToken: root.audioResetToken");
     expect(panel).not.toContain("exec mpv");
+    // The mpv fallback plays the SENDER's file, so its demuxer is named, never
+    // guessed (a guessed one opens playlists and smuggled streams), and the path
+    // follows "--" so a name cannot become an option.
+    expect(panel).toContain('externalAudio.command = ["mpv", "--no-video", "--demuxer=lavf", "--demuxer-lavf-format=" + format, "--", path]');
     expect(panel).toContain('root.settleAudioFetch(root.fetchingId, false, "fetch process ended")');
     expect(panel).toContain("if (!surfaceOpen) root.stopAudio()");
     expect(panel).toContain("root.stopAudio() // another conversation");

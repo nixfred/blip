@@ -40,6 +40,17 @@ reconstructed on Sunday from memory.
   The extractions keep your theme, controls, banner and mark-all-read link... I'll handle the follow-on rebases as earlier PRs
   merge rather than leaving those conflicts for you."
 
+### Wed 11 Nov: #163 merged, voice messages play inside Blip
+
+- **#163 voice messages play inline.** Marcus Vorwaller (github.com/marcus; X: none found, asked Fred; his fourth merged PR
+  this week). Play, pause, a waveform drawn from the actual recording, seeking, and a message arriving mid-listen no longer
+  cuts it off. It took three rounds and he answered each within hours. The one that mattered: Blip wrapped a stranger's
+  audio in its own small WAV header and Qt then guessed the format from the stranger's bytes, so a video stream hidden in a
+  "voice message" reached the decoders after one click (reproduced). Now the stranger's bytes start at byte 4096 and the
+  guess sees only Blip's header; I ran the same attack on the merged code and FFmpeg calls it plain WAV. I added two tests
+  for guards his suite did not catch being removed. Left in the queue: #159 reactions and #160 native replies, which need
+  the real 27.2 gateway before they land.
+
 ### Tue 10 Nov: #158, #161 and #162 merged, #159 #160 #163 sent back with specifics, and a poll that is 4x faster
 
 - **#158 a sent message shows Delivered until it is Read.** Marcus Vorwaller (github.com/marcus; X: none found 10 Nov, asked

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Voice messages play inline, with a real waveform and seeking (#163, Marcus Vorwaller).** An audio attachment gets
+  play/pause, a waveform measured from the recording itself, remaining time, click and keyboard seeking, and only one voice
+  plays at a time. Playback belongs to the view, so a new message arriving no longer cuts off the one you are hearing, and
+  closing the panel or switching conversations stops it. Qt only ever opens a WAV Blip generated: ffmpeg decodes with the
+  container format named, and the audio starts at byte 4096 behind Blip's own header, so FFmpeg's format guess sees only
+  Blip's bytes (my review reproduced an MPEG-TS video hidden in a genuine WAV reaching Qt; on the merged code FFmpeg reads
+  that file as plain WAV). Recordings over ten minutes, or ones whose length cannot be confirmed, play through mpv with the
+  format forced, and mpv now stops when you leave. Needs `ffmpeg`, plus `qt6-multimedia` and `qt6-multimedia-ffmpeg` for
+  inline playback (without them a voice message is a chip, as before); `blip-setup` says what is missing.
 - **Stickers render as stickers (#162, Marcus Vorwaller).** A sticker used to be an empty bubble or a made-up star
   tapback. Now it is drawn on the message it was dragged onto, at the position, size and angle Messages recorded, or on
   its own when it stands alone; Memoji, Genmoji and app stickers say what they are to a screen reader. GIF, APNG and

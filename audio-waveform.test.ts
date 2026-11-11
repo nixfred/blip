@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { AUDIO_ANALYSIS_SECONDS, AUDIO_SAMPLE_RATE, durationLabel, fitWaveform, normalizeWaveform,
   playbackFraction, seekPosition, waveformFromPcm16 } from "./audio-waveform";
 import { analyzeAudio, audioDemuxer } from "./audio-metadata";
@@ -133,4 +133,26 @@ test("normalized sender PCM cannot override WAV format probing", () => {
     expect(meta.format.format_name).toBe("wav");
     expect(meta.streams.map((s:any)=>s.codec_type)).toEqual(["audio"]);
   } finally { rmSync(dir,{recursive:true,force:true}); }
+});
+
+test("a cache hit hands Qt the WAV Blip generated, never the received file, and runs nothing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "blip-audio-cachehit-"));
+  try {
+    const input = join(dir, "voice.wav"); writeFileSync(input, wavHeader());
+    const samples = pcm(Array(AUDIO_SAMPLE_RATE).fill(100));
+    const first = analyzeAudio(input, ((cmd: string) => cmd === "ffprobe"
+      ? {status:0, stdout:JSON.stringify({streams:[{codec_type:"audio"}],format:{duration:"1"}})}
+      : {status:0, stdout:samples}) as never);
+    expect(first.playable).toBe(true);
+    const calls: string[] = [];
+    const again = analyzeAudio(input, ((cmd: string) => { calls.push(cmd); return {status:1, stdout:""}; }) as never);
+    expect(calls).toEqual([]);
+    expect(again.playable).toBe(true);
+    expect(again.playbackUrl).toBe(first.playbackUrl);
+    const served = fileURLToPath(again.playbackUrl!);
+    expect(served).not.toBe(input);
+    expect(basename(served).startsWith(".pcm2-")).toBe(true);
+    expect(again.durationMs).toBe(1000);
+    expect(again.waveform).toEqual(first.waveform);
+  } finally { rmSync(dir, {recursive:true, force:true}); }
 });
