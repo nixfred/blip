@@ -81,7 +81,8 @@ FocusScope {
   readonly property color dim: appearance.muted
   /** An editor owns the keyboard — the host's key catcher must stand down. */
   readonly property bool editorActive:
-    emojiPopup.visible || messageMenu.visible || contactMenu.visible || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused
+    emojiPopup.visible || messageMenu.visible || contactMenu.visible || contactReview.opened || composeField.activeFocus || searchField.activeFocus || newField.activeFocus || bubbleFocused || focusedAudio !== null
+  property var focusedAudio: null
   readonly property alias composeEditor: composeField
   readonly property real contentHeightHint: listContent.implicitHeight
   /** The view wants keyboard navigation focus back (list mode). */
@@ -878,7 +879,7 @@ FocusScope {
 
   /** Chip icon for an attachment's mime type. */
   function attachmentIcon(mime) {
-    var m = String(mime || "")
+    var m = String(mime || "").toLowerCase()
     if (m.indexOf("image/") === 0) return "📷"
     if (m.indexOf("video/") === 0) return "🎬"
     if (m.indexOf("audio/") === 0) return "🎤"
@@ -1084,38 +1085,96 @@ FocusScope {
       Qt.callLater(root.pumpAvatar)
     }
   }
-  /** Voice messages play WITHOUT a window. xdg-open handed audio to mpv,
-   *  which opens an empty black video window for a sound file (Fred,
-   *  2026-09-26). mpv runs with --no-video --force-window=no; the chip toggles:
-   *  a second click on the same file stops it, a click on another stops the
-   *  first. The path is an argument, never interpolated; without mpv the file
-   *  still goes to xdg-open. */
+  // Exactly one inline audio message plays. A paused source keeps its
+  // position; leaving the conversation resets every player and pending intent.
+  property bool audioMuted: false // synthetic demo/test playback only
   property string playingAudio: ""
-  function toggleAudio(path) {
-    if (path === "") return
-    var same = audioPlayer.running && root.playingAudio === path
-    if (audioPlayer.running) audioPlayer.running = false
-    if (same) {
-      root.playingAudio = ""
-      root.note = "stopped"
-      noteTimer.restart()
+  property bool audioPlaying: false
+  property int audioResetToken: 0
+  property string pendingAudioId: ""
+  property string pendingAudioChat: ""
+  Loader {
+    id: audioPlayback
+    active: root.playingAudio !== ""
+    source: "AudioPlayback.qml"
+    onStatusChanged: {
+      if (status === Loader.Error && root.playingAudio !== "") {
+        var id = root.playingAudio
+        var metadata = (root.attMetrics[id] || {}).audio
+        if (metadata && metadata.externalDemuxer) root.playExternalAudio(metadata.externalDemuxer, String(root.attFiles[id] || ""))
+        else { root.stopAudio(); root.note = "Audio preview unavailable — right-click to save" }
+      }
+    }
+    onLoaded: {
+      item.source = Qt.binding(function() { return ((root.attMetrics[root.playingAudio] || {}).audio || {}).playbackUrl || "" })
+      item.playing = Qt.binding(function() { return root.audioPlaying })
+      item.muted = Qt.binding(function() { return root.audioMuted })
+      item.resetToken = Qt.binding(function() { return root.audioResetToken })
+    }
+  }
+  Connections {
+    target: audioPlayback.item
+    function onPlaybackEnded() { root.audioPlaying = false }
+    function onPlaybackFailed() { root.failAudio(root.playingAudio) }
+  }
+  function toggleAudio(att) {
+    var id = String(att.id || "")
+    if (id === "" || !root.inThread || !root.surfaceOpen) return
+    if (root.pendingAudioId === id) { root.stopAudio(); return }
+    if (root.playingAudio === id && root.attFiles[id]) {
+      root.audioPlaying = !root.audioPlaying
       return
     }
-    root.playingAudio = path
-    audioPlayer.command = ["sh", "-c",
-      'if command -v mpv >/dev/null 2>&1; then exec mpv --no-video --force-window=no --no-terminal --really-quiet -- "$1"; else exec xdg-open "$1"; fi',
-      "sh", path]
-    audioPlayer.running = true
-    root.note = "playing, click again to stop"
-    noteTimer.restart()
+    root.stopAudio()
+    root.pendingAudioId = id
+    root.pendingAudioChat = String(root.active.chat)
+    // Fetch again before a fresh play: the cache may have been evicted.
+    // An in-flight auto-fetch also satisfies this captured play intent.
+    root.enqueueFetch(att, "audio-play", false)
   }
-  Process {
-    id: audioPlayer
-    onExited: function(code, status) { root.playingAudio = "" }
+  function settleAudioFetch(id, ok, error) {
+    if (root.pendingAudioId !== id) return
+    var belongsHere = root.surfaceOpen && root.inThread
+      && String(root.active.chat) === root.pendingAudioChat
+    root.pendingAudioId = ""
+    root.pendingAudioChat = ""
+    if (ok && belongsHere && root.attFiles[id]) {
+      var metadata = (root.attMetrics[id] || {}).audio
+      if (metadata && metadata.playable === true) {
+        root.playingAudio = id
+        root.audioPlaying = true
+      } else if (metadata && metadata.externalDemuxer) {
+        root.playExternalAudio(metadata.externalDemuxer, String(root.attFiles[id]))
+        root.note = "Opened audio externally"
+      } else root.note = "Audio preview unavailable — right-click to save the file"
+    } else if (!ok && belongsHere) {
+      // Play can attach to an automatic fetch whose action remains empty.
+      // Its captured intent still deserves the failure reason before clearing.
+      root.note = "fetch failed — " + String(error || "could not load audio message").replace(/^error:\s*/, "")
+    }
   }
+  function failAudio(id) {
+    var requested = root.playingAudio === id || root.pendingAudioId === id
+    if (requested) root.stopAudio()
+    // Clear the source so retry reloads even when the cache URL is unchanged.
+    var files = Object.assign({}, root.attFiles)
+    files[id] = ""
+    root.attFiles = files
+    if (requested) root.note = "Could not play this audio message — try again or save the file"
+  }
+  function playExternalAudio(format, path) {
+    root.stopAudio()
+    externalAudio.command = ["mpv", "--no-video", "--demuxer=lavf", "--demuxer-lavf-format=" + format, "--", path]
+    externalAudio.running = true
+  }
+  Process { id: externalAudio }
   function stopAudio() {
-    if (audioPlayer.running) audioPlayer.running = false
+    externalAudio.running = false
+    root.audioPlaying = false
     root.playingAudio = ""
+    root.pendingAudioId = ""
+    root.pendingAudioChat = ""
+    root.audioResetToken++
   }
   Component.onDestruction: root.stopAudio()
 
@@ -1123,7 +1182,7 @@ FocusScope {
    *  make executable (scripts, .desktop, unknown blobs) is saved and named,
    *  never launched (Codex audit #10). */
   function openableMime(m) {
-    m = String(m || "")
+    m = String(m || "").toLowerCase()
     return m.indexOf("image/") === 0 || m.indexOf("video/") === 0 || m.indexOf("audio/") === 0 ||
            m === "application/pdf" || m === "text/plain" || m === "text/vcard" || m === "text/calendar"
   }
@@ -1205,6 +1264,7 @@ FocusScope {
     else root.openAttachment(att)
   }
   function openAttachment(att) {
+    if (String(att.mime || "").toLowerCase().indexOf("audio/") === 0 && audioPlayback.status !== Loader.Error) { root.toggleAudio(att); return }
     var id = String(att.id || "")
     if (id === "") return
     if (attFiles[id] === "") {   // failed marker — clear it so a retry runs
@@ -1995,9 +2055,10 @@ FocusScope {
           if (!isFinite(pixelHeight) || pixelHeight < 1 || pixelHeight > 100000) pixelHeight = 0
           if (!keepInline) {
             var metrics = Object.assign({}, root.attMetrics)
-            metrics[id] = { pixelRatio: ratio, pixelWidth: pixelWidth, pixelHeight: pixelHeight, animated: d.animated === true, renderMime: String(d.renderMime || ""), animationUnavailable: d.animationUnavailable === true }
+            metrics[id] = { pixelRatio: ratio, pixelWidth: pixelWidth, pixelHeight: pixelHeight, animated: d.animated === true, renderMime: String(d.renderMime || ""), animationUnavailable: d.animationUnavailable === true, audio: d.audio || null }
             root.attMetrics = metrics
           }
+          root.settleAudioFetch(id, d.ok === true, d.error || "")
           if (d.ok === true && root.fetchJobAction === "copy") {
             // The Mac converts HEIC/HEIF to JPEG on the way (fetch.ts wantsJpeg),
             // so the clipboard type must say what the bytes are. Path and type
@@ -2014,8 +2075,11 @@ FocusScope {
               saveProc.running = true
             } else root.note = "a save dialog is already open"
           } else if (d.ok === true && root.fetchJobAction === "open") {
-            if (String(root.fetchJobMime || "").indexOf("audio/") === 0) {
-              root.toggleAudio(String(d.path || ""))
+            // The ordinary Open route remains the fallback when QtMultimedia cannot load.
+            if (String(root.fetchJobMime || "").toLowerCase().indexOf("audio/") === 0) {
+              if (d.audio && d.audio.externalDemuxer)
+                root.playExternalAudio(d.audio.externalDemuxer, String(d.path || ""))
+              else root.note = "Audio format unavailable — right-click to save"
             } else if (root.openableMime(root.fetchJobMime)) {
               Quickshell.execDetached(["xdg-open", String(d.url || "")])
             } else {
@@ -2029,6 +2093,7 @@ FocusScope {
           else if (d.ok !== true && root.fetchJobAction !== "")
             root.note = "fetch failed — " + String(d.error || "unknown error").replace(/^error:\s*/, "")
         } catch (e) {
+          root.settleAudioFetch(id, false, "invalid fetch response")
           var m2 = Object.assign({}, root.attFiles)
           m2[id] = ""
           root.attFiles = m2
@@ -2036,6 +2101,7 @@ FocusScope {
       }
     }
     onExited: function(code, status) {
+      root.settleAudioFetch(root.fetchingId, false, "fetch process ended")
       root.fetchingId = ""
       Qt.callLater(root.pumpFetch)
     }
@@ -2398,7 +2464,7 @@ FocusScope {
       || text === "u" || text === "U"
       || (text >= "1" && text <= "9")
     if (!jump) return false
-    if (searchField.activeFocus || newField.activeFocus || bubbleFocused) return false
+    if (searchField.activeFocus || newField.activeFocus || bubbleFocused || focusedAudio !== null) return false
     if (composeField.activeFocus && (composeField.text.length > 0 || root.attachCount > 0))
       return false
     return handleTextKey(text) === true
@@ -3564,6 +3630,7 @@ FocusScope {
                     readonly property bool failed: chipRow.fileUrl === ""
                     readonly property var imageMetrics: root.attMetrics[chipRow.attId] || ({})
                     readonly property bool isSticker: !!modelData.sticker
+                    readonly property bool isAudio: String(modelData.mime || "").toLowerCase().indexOf("audio/") === 0
                     readonly property bool showImage: !isSticker &&
                       root.isImageMime(chipRow.modelData.mime) &&
                       chipRow.fileUrl !== undefined && chipRow.fileUrl !== ""
@@ -3706,9 +3773,47 @@ FocusScope {
                       }
                       TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks }
                     }
+                    Loader {
+                      id: audioCardLoader
+                      active: chipRow.isAudio && audioPlayback.status !== Loader.Error
+                      visible: active
+                      Layout.preferredWidth: Math.min(Style.space(270), content.width * 0.80)
+                      Layout.preferredHeight: Style.space(64)
+                      sourceComponent: Component { AudioMessage {
+                      anchors.fill: parent
+                      objectName: chipRow.isAudio ? "blipAudio:" + chipRow.attId : ""
+                      Layout.preferredWidth: Math.min(Style.space(270), content.width * 0.80)
+                      Layout.preferredHeight: Style.space(64)
+                      // Only recognized audio containers reach the media
+                      // decoder; an audio MIME alone could conceal a playlist.
+                      playback: root.playingAudio === chipRow.attId ? audioPlayback.item : null
+                      waveform: (chipRow.imageMetrics.audio || {}).waveform || []
+                      durationMs: Number((chipRow.imageMetrics.audio || {}).durationMs || 0)
+                      playing: root.playingAudio === chipRow.attId && root.audioPlaying
+                      muted: root.audioMuted
+                      resetToken: root.audioResetToken
+                      loading: root.fetchingId === chipRow.attId || root.fetchQueue.some(function(job) { return job.id === chipRow.attId })
+                      failed: chipRow.attId === "" || chipRow.failed || (!!chipRow.fileUrl && (chipRow.imageMetrics.audio || {}).playable !== true)
+                      fillColor: bubbleRow.mine ? root.mineFill : root.theirsFill
+                      textColor: bubbleRow.mine ? root.mineText : root.theirsText
+                      fontFamily: root.fontFamily
+                      fontSize: root.fontCaption
+                      id: audioMessage
+                      onControlsFocusedChanged: {
+                        if (controlsFocused) root.focusedAudio = audioMessage
+                        else if (root.focusedAudio === audioMessage) root.focusedAudio = null
+                      }
+                      Component.onDestruction: {
+                        if (root.focusedAudio === audioMessage) root.focusedAudio = null
+                      }
+                      onEscapeRequested: { root.focusedAudio = null; composeField.forceActiveFocus() }
+                      onToggleRequested: root.toggleAudio(chipRow.modelData)
+                      onContextRequested: root.openAttachmentMenu(bubbleRow.modelData, chipRow.modelData)
+                      TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.shownTapbacks }
+                    } } }
                     Rectangle {
                       TapbackPill { visible: chipRow.pillHere; mine: bubbleRow.mine; tapbacks: bubbleRow.modelData.tapbacks }
-                      visible: !chipRow.showImage && !chipRow.isSticker
+                      visible: !chipRow.showImage && !chipRow.isSticker && (!chipRow.isAudio || audioPlayback.status === Loader.Error)
                       Layout.preferredWidth: Math.ceil(chipText.implicitWidth) + Style.space(18)
                       Layout.preferredHeight: Math.ceil(chipText.implicitHeight) + Style.space(12)
                       radius: Style.space(14)

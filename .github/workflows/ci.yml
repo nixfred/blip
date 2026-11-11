@@ -11,6 +11,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Audio probe regression dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -q ffmpeg
       - name: unit tests (collector, thread, tier2, ui invariants)
         run: bun test
       - name: QML badge regression (synthetic data, no desktop needed)
@@ -22,6 +24,12 @@ jobs:
         run: |
           sudo apt-get install -y -q qml6-module-qtquick-controls qml6-module-qtquick-templates
           python3 scripts/test-composer-emoji-ui.py
+      - name: Inline audio playback and captured play intent
+        run: |
+          sudo apt-get install -y -q ffmpeg qml6-module-qtmultimedia qml6-module-qtquick-controls qml6-module-qtquick-templates
+          python3 scripts/test-audio-ui.py
+          python3 scripts/test-audio-session-ui.py
+          python3 scripts/test-audio-loader.py
       - name: OTP desktop adapter (no desktop needed)
         run: |
           python3 -m py_compile otp-desktop.py

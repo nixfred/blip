@@ -1185,3 +1185,19 @@ describe("bridgeRun keeps source routing", () => {
     }
   });
 });
+
+
+test("mixed-case audio MIME is analysed on download and cache hit", () => {
+  const bytes = Buffer.alloc(44);
+  bytes.write("RIFF", 0); bytes.write("WAVE", 8);
+  let probes = 0, downloads = 0;
+  const runner = ((cmd: string) => {
+    if (cmd === "ffprobe") { probes++; return {status: 1, stdout: ""}; }
+    downloads++; return {status: 0, stdout: bytes, stderr: ""};
+  }) as never;
+  const first = fetchAttachment("73310001", "voice.wav", "Audio/WAV", runner);
+  const cached = fetchAttachment("73310001", "voice.wav", "Audio/WAV", runner);
+  expect(first.ok).toBe(true); expect(cached.ok).toBe(true);
+  expect(first.audio?.unavailable).toBe(true); expect(cached.audio?.unavailable).toBe(true);
+  expect(probes).toBe(2); expect(downloads).toBe(1);
+});
