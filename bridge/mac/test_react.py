@@ -161,6 +161,18 @@ class Resolve(unittest.TestCase):
         self.assertIn("not a message bubble", self.refused(row))
         self.assertIn("no message", self.refused("NOPE"))
 
+    def test_a_later_bubble_that_reads_like_the_target_reacted_to_is_counted_a_neighbour_is_not(self):
+        # In the transcript a reacted "ok" reads "ok, Ann loved this", so a later bubble with
+        # exactly that text from the same side in the same minute is indistinguishable from it
+        # and takes an ordinal. A bubble that merely STARTS with "ok, " ("ok, see you then")
+        # is another message and must not: counting it pointed the press at the wrong bubble.
+        add(self.con, 1, "T", "ok", True, T0)
+        add(self.con, 1, "NEIGHBOUR", "ok, see you then", True, T0 + 1_000_000_000)
+        add(self.con, 1, "NEWEST", "bye", False, T0 + 2 * MINUTE)
+        self.assertEqual(self.resolve("T")["ordinal"], 0)
+        add(self.con, 1, "LOOKALIKE", "ok, Ann loved this", True, T0 + 2_000_000_000)
+        self.assertEqual(self.resolve("T")["ordinal"], 1)
+
     def test_identical_bubbles_below_are_counted(self):
         # Three "ok" from me in one minute, one in the next, one from them.
         for i, g in enumerate(["O1", "O2", "O3"]):
