@@ -182,6 +182,21 @@ def container(*, people=True, heading="People", rows=None):
         node("AXButton", ident="MapPlace", desc=row("Wrong Person"))])
 
 
+def comma_row(name="Alex Rivera", distance="1 mi", place="Boston, MA", age="Now"):
+    """The macOS 27.2 People row: commas for the first three fields."""
+    return f"{name}, {distance}, {place}\u00a0· {age}"
+
+
+def container_272(*, rows=None, people=True):
+    """macOS 27.2: rows are static text with a repeated identifier, no buttons."""
+    return node(ident="CardContainerView", children=[
+        node("AXHeading", desc="People"),
+        node("AXRadioButton", desc="People", selected=people),
+        *[node("AXStaticText", ident="ListEntityRow-ListEntityRow-ListEntityRow", desc=value)
+          for value in (rows if rows is not None else [comma_row()])],
+        node("AXStaticText", ident="MapPlace", desc=comma_row("Wrong Person"))])
+
+
 class FakeAX(city.AccessibilityReader):
     def __init__(self, containers=None):
         self.clock, self.deadline, self.nodes = lambda: 0, 10, 0
@@ -243,6 +258,50 @@ class AXTests(unittest.TestCase):
             with reader.attribute(1, "AXRole"):
                 self.fail("transport errors must not yield partial values")
         self.assertEqual(releases, [22, 11])
+
+
+class Layout272Tests(unittest.TestCase):
+    def test_comma_row_reads_like_the_dotted_one(self):
+        self.assertEqual(city.legacy_row(comma_row()), row())
+        self.assertEqual(city.parse_row(city.legacy_row(comma_row()), NOW)["city"], "Boston, MA")
+        self.assertEqual(city.row_identity(city.legacy_row(comma_row())), "Alex Rivera")
+        self.assertEqual(city.parse_row(city.legacy_row(comma_row(distance="1,200 mi", age="5 min. ago")), NOW)["city"],
+                         "Boston, MA")
+
+    def test_a_comma_in_the_name_does_not_move_the_split(self):
+        fixed = city.legacy_row(comma_row(name="Rivera, Alex Jr."))
+        self.assertEqual(city.row_identity(fixed), "Rivera, Alex Jr.")
+        self.assertEqual(city.parse_row(fixed, NOW)["city"], "Boston, MA")
+
+    def test_the_privacy_rules_still_apply_through_the_comma_layout(self):
+        for place in ("Home", "123 Main Street, MA", "Boston", "Home, MA"):
+            with self.subTest(place=place):
+                self.assertIsNone(city.parse_row(city.legacy_row(comma_row(place=place)), NOW))
+        self.assertIsNone(city.parse_row(city.legacy_row(comma_row(age="Paused")), NOW))
+
+    def test_other_rows_are_left_exactly_as_they_were(self):
+        for value in (row(), "Alex Rivera · No location found", "Alex Rivera, nearby, Boston, MA · Now",
+                      "Alex Rivera, 1 mi, Boston, MA", "Alex Rivera, 1 mi, Boston, MA · Now · extra",
+                      None, 7, "x" * 513 + " · Now"):
+            with self.subTest(value=value):
+                self.assertEqual(city.legacy_row(value), value)
+
+    def test_static_text_rows_are_read_and_rewritten(self):
+        reader = FakeAX([container_272(rows=[comma_row(), comma_row("Sam Lee", place="Home")])])
+        self.assertEqual(reader.snapshot(123), [row(), city.legacy_row(comma_row("Sam Lee", place="Home"))])
+
+    def test_row_buttons_win_over_static_text_so_old_layouts_never_double_count(self):
+        mixed = container()
+        mixed["children"].append(node("AXStaticText", ident="ListEntityRow-ListEntityRow", desc=comma_row("Extra")))
+        self.assertEqual(FakeAX([mixed]).snapshot(123), [row()])
+
+    def test_the_people_gate_still_decides_in_the_272_layout(self):
+        with self.assertRaises(city.Unavailable):
+            FakeAX([container_272(people=False)]).snapshot(123)
+
+    def test_static_text_rows_count_toward_the_row_limit(self):
+        with self.assertRaises(city.Unavailable):
+            FakeAX([container_272(rows=[comma_row(f"P{i}") for i in range(city.MAX_ROWS + 1)])]).snapshot(123)
 
 
 class BoundaryTests(unittest.TestCase):

@@ -42,6 +42,10 @@ reconstructed on Sunday from memory.
 
 ### Wed 11 Nov: #163 and #159 merged, voice messages play inside Blip and any message takes any emoji
 
+- **Shared city (Matt's #152) now reads macOS 27.2 (Larry, nixfred).** On the real gateway it showed nothing, for two
+  reasons found with counts only, never a name or place: Find My was sitting on its Devices tab (Blip never switches tabs,
+  by Matt's design), and 27.2 writes the People list as plain text with commas instead of buttons with dots. Fixed on
+  our side with eight new tests; Matt gets the findings and two 27.2 follow-ups that are his to take.
 - **#159 react to any message, with any emoji (merged the same afternoon).** Marcus Vorwaller (github.com/marcus; X: none
   found, asked Fred; fifth merged PR this week). macOS 27 had left Blip able to react to the newest message only; now any
   message, and any emoji, because he found the picker that "Tapback Details…" opens on a bubble and a way to choose in it

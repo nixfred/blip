@@ -69,6 +69,26 @@ def row_identity(description: object) -> str:
     return description.split("·", 1)[0].strip()
 
 
+# macOS 27.2 writes a People row with commas where 27.0 and 27.1 used dots:
+# "Name, 1 mi, Boston, MA · Now" for "Name · 1 mi · Boston, MA · Now"
+# (measured on the gateway 2026-11-11, row text never printed). The distance is
+# the anchor, so a comma inside a name cannot move the split.
+_COMMA_ROW = re.compile(r"(.+?), ([0-9]+(?:[,.][0-9]+)*\s+(?:mi|ft|km|m)), (.+)")
+
+
+def legacy_row(description: object) -> object:
+    """27.2's comma layout rewritten to the dotted one every check here reads.
+    Anything else, including a dotted row, is returned unchanged."""
+    if (not isinstance(description, str) or len(description) > MAX_DESCRIPTION
+            or description.count("·") != 1):
+        return description
+    first, rest = description.split("·", 1)
+    match = _COMMA_ROW.fullmatch(first.strip())
+    if not match:
+        return description
+    return f"{match[1]}\u00a0· {match[2]}\u00a0· {match[3]}\u00a0·{rest}"
+
+
 def age_seconds(age: str) -> int | None:
     """Conservatively preserve the old edge of Find My's rounded ages."""
     if age in {"Now", "Live"}:
@@ -318,7 +338,7 @@ class AccessibilityReader:
                 for element in self.walk(window):
                     if self.text(element, "AXIdentifier") != "CardContainerView":
                         continue
-                    rows, heading, selected = [], False, False
+                    rows, labels, heading, selected = [], [], False, False
                     for item in self.walk(element):
                         role = self.text(item, "AXRole")
                         if role == "AXHeading":
@@ -328,8 +348,14 @@ class AccessibilityReader:
                             selected = self.selected(item)
                         elif role == "AXButton" and self.text(item, "AXIdentifier") == "ListEntityRow":
                             rows.append(self.text(item, "AXDescription"))
-                            if len(rows) > MAX_ROWS:
-                                raise Unavailable()
+                        elif (role == "AXStaticText"
+                              and self.text(item, "AXIdentifier").startswith("ListEntityRow")):
+                            # macOS 27.2: the row is static text whose identifier
+                            # repeats "ListEntityRow", and there is no row button.
+                            labels.append(self.text(item, "AXDescription"))
+                        if len(rows) + len(labels) > MAX_ROWS:
+                            raise Unavailable()
+                    rows = [legacy_row(value) for value in (rows or labels)]
                     # A user can change tabs during the walk. Recheck the
                     # People gate before accepting the collected rows.
                     if heading and selected and self.people_gate(element):

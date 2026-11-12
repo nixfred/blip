@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Shared city works on a macOS 27.2 gateway (#152 follow-up).** Find My on 27.2 writes a People row as plain text with
+  commas ("Name, 1 mi, Boston, MA · Now") where 27.0 and 27.1 used a button with dots, so the reader found no rows and
+  every header kept the phone number. It now reads both layouts and rewrites the new one to the old shape before any
+  check runs, so every privacy rule is unchanged: no Home, no street, no Paused, a unique contact match, a 24-hour limit.
+  Proven on the gateway with no name or place printed: two people read, one yields a city. One more thing it needs from
+  you: Find My has to be on its People tab, and Blip never switches tabs for you (press People once; it remembers).
 - **React to any message, with any emoji, on macOS 27.2 (#159, Marcus Vorwaller).** macOS 27 took the tapback actions off
   message bubbles, so Blip could only react to the newest message. It now opens the Tapback Picker on the bubble you chose,
   whichever it is, and presses the classic button there; a custom emoji is chosen through a searchable picker (a smiley in

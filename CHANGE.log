@@ -62,6 +62,14 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
                  already-reacted bubble, removal; the first custom-emoji try refused with "moved" while the Mac was in use and pressed nothing).
                  877 bun, 7 Qt/Python suites, 92 bridge tests, CI green. Door one-way (ci.yml, imsg-react); Fred approved the literal diff.
                  Larry added: the ci.yml conflict resolved, one test for the resolve() prefix guard (two mutants killed).
+2026-11-11  (this commit) Shared city works on a macOS 27.2 gateway: Find My's People rows are static text with commas
+                 ("Name, 1 mi, Boston, MA · Now"), not buttons with dots, so #152's reader found zero rows. snapshot() now
+                 also collects ListEntityRow* static text (buttons still win, so old layouts never double count) and
+                 legacy_row() rewrites the comma layout to the dotted one before parse_row and every privacy rule. Fred Nix /
+                 Larry, github.com/nixfred, X https://x.com/nixfred. Built on #152 by Matt (mmdisbrow, https://x.com/MattDbrow).
+                 Found testing #152 on the real 27.2 gateway: Find My was on Devices (Fred approved pressing People once), then
+                 zero rows. Live, counts only: 2 rows read, 1 city. 49 tests (8 new) on gus and on the Mac's Python 3.9; 5
+                 mutations, each fails a test. Door one-way (bridge/mac/findmy_city.py); Fred approved.
 2026-11-11  (this commit) The first tapback after a Mac reboot no longer refuses: a just-launched System Events has a pid at
                  once but answers -600 for about a second; 33aab7b asked once, the old code had retried. _ask_until_ready()
                  asks again while it answers -600, still bounded per call. Fred Nix / Larry, github.com/nixfred, X
