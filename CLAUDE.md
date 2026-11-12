@@ -645,6 +645,15 @@ cp -r *.qml *.ts *.mjs otp-desktop.py manifest.json icons ~/.config/omarchy/plug
 # Back up to ~/.local/state/omarchy/plugin-backups/ instead, and after a deploy verify a field
 # the new code emits (e.g. `status` → scroll_gain=), not just "healthy=true".
 omarchy-restart-shell                      # ALWAYS restart (hot-reload leaves IPC on a zombie)
+# The plugin files are only HALF of a deploy. The Linux shims and the channel daemon live in ~/bin and are
+# installed by scripts/blip-setup, so a plugin-only copy leaves them at whatever was last set up. On 2026-11-12
+# gus's were from 12 Oct and vic's from 4 Oct (no IdentityAgent=none, and on vic no argument quoting). After a
+# change under bridge/linux/, on EVERY host: install -m 0755 bridge/linux/blip-shim ~/bin/{imsg,imsg-send,imsg-read,
+# imsg-react,contacts,contact-save} and bridge/linux/blip-bridged ~/bin/, then restart the shell once. A shell
+# restart can ORPHAN the old blip-bridged (parent systemd, same socket, old code); find it with
+# `ps -eo pid,ppid,args | awk '$2=="python3" && $3 ~ /blip-bridged$/'` (its name is python3, so pgrep -x finds
+# nothing) and SIGTERM that pid; the widget starts the new one within ~10 s (its parent must be quickshell).
+# Verify with sha256sum against `git show origin/main:bridge/linux/<file>`, not with "healthy=true".
 # MANDATORY after every deploy — a QML syntax error kills BOTH surfaces silently (2.1.4 shipped one):
 qs log /run/user/1000/quickshell/by-id/$(basename $(readlink /run/user/1000/quickshell/by-pid/$(pgrep -x quickshell)))/log.qslog -t 400 | grep -iE 'nixfred.blip.*(error|warn|unavailable|token)'
 qs -p /usr/share/omarchy/shell ipc call nixfred.blip open   # and LOOK at it (grim)
