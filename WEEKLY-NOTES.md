@@ -147,7 +147,7 @@ reconstructed on Sunday from memory.
 
 ### Handles Fred still needs to answer (9 Nov)
 - **Gerald LaMontagne** (github.com/lama7, #155 and #157): nothing published. Asked him on #157. If Fred knows him, ask.
-- **Marcus Vorwaller** (github.com/marcus, #158 and #161 merged 10 Nov): nothing on his GitHub profile or social accounts, and his site marcus.pictures lists no X. Four more PRs under review. If Fred knows him, ask.
+- **Marcus Vorwaller** (github.com/marcus): ANSWERED 12 Nov on #163, no X account. He asked to be credited by his GitHub handle and said we may point to haplab.com. Write "Marcus Vorwaller (github.com/marcus)" in the posts. Nothing for Fred to answer.
 
 ---
 
