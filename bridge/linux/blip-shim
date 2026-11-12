@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # blip-shim — the Linux side of Blip's Mac bridge. blip-setup installs it as
-# imsg, imsg-send, imsg-read, imsg-react, contacts, and contact-save. It
+# imsg, imsg-send, imsg-read, imsg-react, imsg-reply, contacts, and contact-save. It
 # dispatches on its own basename and execs the matching Mac tool over ssh.
 #
 # iMessage is macOS-only: chat.db is TCC-protected and AppleScript send needs
@@ -14,7 +14,8 @@
 # holding the tools; default ~/.blip/bin), python (default python3),
 # automation (on|off — read by the plugin, not the shim), hide_spam /
 # hide_unknown (on|off — injected as imsg flags; default off), tapbacks
-# (on|off — imsg-react is refused unless on; default off).
+# (on|off — imsg-react is refused unless on; default off), replies
+# (on|off — imsg-reply is refused unless on; default off).
 #
 # There is deliberately NO connectivity probe — see the note above the ssh
 # call at the bottom. The old one cost 41 ms on every call and had to be
@@ -25,7 +26,7 @@ CONF="${BLIP_BRIDGE_CONF:-$HOME/.config/blip/bridge.conf}"
 # remote_bin is expanded by the MAC's shell, so keep it literal here — a bare
 # ~ or $HOME in bridge.conf would expand to the Linux home (it did).
 host=""; remote_bin='$HOME/.blip/bin'; python="python3"; key="$HOME/.ssh/blip_ed25519"
-hide_spam=""; hide_unknown=""; tapbacks=""
+hide_spam=""; hide_unknown=""; tapbacks=""; replies=""
 # Parsed, not sourced: the file is data. Known keys only, quotes stripped.
 if [[ -r "$CONF" ]]; then
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -41,6 +42,7 @@ if [[ -r "$CONF" ]]; then
       hide_spam) hide_spam="$v" ;;
       hide_unknown) hide_unknown="$v" ;;
       tapbacks) tapbacks="$v" ;;
+      replies) replies="$v" ;;
     esac
   done < "$CONF"
 fi
@@ -58,8 +60,8 @@ fi
 
 tool="$(basename "$0")"
 case "$tool" in
-  imsg|imsg-send|imsg-read|imsg-react|contacts|contact-save|tcc-check|blip-check) ;;
-  *) echo "blip-shim: unknown tool name '$tool' (install as imsg, imsg-send, imsg-read, imsg-react, contacts, or contact-save)" >&2; exit 64 ;;
+  imsg|imsg-send|imsg-read|imsg-react|imsg-reply|contacts|contact-save|tcc-check|blip-check) ;;
+  *) echo "blip-shim: unknown tool name '$tool' (install as imsg, imsg-send, imsg-read, imsg-react, imsg-reply, contacts, or contact-save)" >&2; exit 64 ;;
 esac
 # Tapbacks drive Messages' own buttons through Accessibility, by names Apple
 # localizes and may rename: opt-in, refused before anything reaches the Mac.
@@ -67,6 +69,12 @@ if [[ "$tool" == imsg-react ]]; then
   case "${tapbacks,,}" in
     on|yes|true|1) ;;
     *) echo "imsg-react: tapbacks are off — set tapbacks=on in $CONF to enable" >&2; exit 78 ;;
+  esac
+fi
+if [[ "$tool" == imsg-reply ]]; then
+  case "${replies,,}" in
+    on|yes|true|1) ;;
+    *) echo "imsg-reply: replies are off — set replies=on in $CONF to enable" >&2; exit 78 ;;
   esac
 fi
 

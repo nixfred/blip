@@ -24,3 +24,13 @@ export function friendlySendError(raw: string): string {
     ? "Messages can't start on the Mac: nobody is logged in there. Log in on the Mac, then send again."
     : raw;
 }
+
+/** Transport errors cannot prove whether Return reached the Mac. */
+export function replyFailure(code: number, detail: string): string {
+  return ![1, 64, 65, 75, 77].includes(code)
+    ? "Check Messages before sending again"
+    : (detail.trim().slice(0, 240) || "Reply was not sent");
+}
+
+/** Only explicit pre-send refusals prove the text is safe to hand back. */
+export function replyCanRestore(code: number): boolean { return [1, 64, 65, 75, 77].includes(code); }

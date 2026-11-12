@@ -1,0 +1,462 @@
+#!/usr/bin/env python3
+"""imsg-reply: send one native inline reply through Messages. Dry run unless --yes.
+
+    imsg-reply --guid GUID --text-stdin [--yes]
+
+AppleScript cannot reply, so this drives the bubble's "Reply…" action through
+Accessibility, the way imsg-react drives "Tapback Details…". Measured on macOS
+27.2; see docs/replies.md for what was tried, what was refused and why.
+
+How one run goes:
+  1. chat.db alone decides the target and refuses what is not proven: groups,
+     links and cards, captions, several attachments, anything but one picture,
+     and two pictures on one side in the same minute (their labels are identical).
+  2. A draft in the Mac's composer stops the run. "Reply…" moves the draft into the
+     reply field, so sending would take it along or overwrite it.
+  3. Press "Reply…" once on the target. The reply view must name that target.
+  4. Fill the field through AX, never the clipboard: the clipboard would carry the
+     text to other machines. Read it back, recheck focus, press Return.
+  5. chat.db decides. A row of yours with this text must name the target's thread.
+
+The text arrives on stdin and is never in argv or a log.
+
+Exit codes: 0 sent and confirmed; 75 nothing sent, try again; 76 Return was pressed
+but chat.db did not confirm it, so the caller must NOT resend; others as imsg-react.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import sqlite3
+import subprocess
+import sys
+import time
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+
+
+def _load(name: str):
+    loader = SourceFileLoader(name.replace("-", "_"), os.path.join(HERE, name))
+    spec = spec_from_loader(loader.name, loader)
+    module = module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+rx = _load("imsg-react")
+Stop = rx.Stop
+EX_USAGE, EX_UNSUPPORTED, EX_UNAVAILABLE, EX_SOFTWARE, EX_TEMPFAIL, EX_NOPERM = (
+    rx.EX_USAGE, rx.EX_UNSUPPORTED, rx.EX_UNAVAILABLE, rx.EX_SOFTWARE, rx.EX_TEMPFAIL, rx.EX_NOPERM)
+EX_UNCONFIRMED = 76
+
+REPLY_ACTION = "Reply…"
+PICTURE_LABEL = "Includes picture"   # a picture bubble's whole body, measured on 27.2
+MAX_CHARS = 4000
+MAX_BYTES = 16000
+CONFIRM_SECONDS = 15
+OPEN_POLLS = 10
+LOG = os.path.expanduser("~/.blip/reply.log")
+
+# Answers with no message text in them. The request (text included) is on stdin.
+JXA = r"""
+ObjC.import("Foundation");
+const se = Application("System Events");
+const proc = se.processes.byName("Messages");
+const REACTED = new RegExp(REACTED_SOURCE);
+function safe(f, d) { try { const v = f(); return v === undefined ? d : v; } catch (e) { return d; } }
+function norm(s) { return String(s || "").replace(/￼/g, "").replace(/\s+/g, " ").trim(); }
+function focused() { return safe(() => proc.attributes.byName("AXFocusedUIElement").value(), null); }
+function attr(el, name) { return safe(() => el.attributes.byName(name).value(), null); }
+function info(el) {
+  if (!el) return { id: "", placeholder: "", length: 0 };
+  return { id: String(attr(el, "AXIdentifier") || ""), placeholder: String(attr(el, "AXPlaceholderValue") || ""),
+           length: String(safe(() => el.value(), "") || "").length };
+}
+function front() { return safe(() => proc.frontmost(), false) === true; }
+function parseLabel(d) {
+  const m = String(d).match(/^([\s\S]*), (\d{1,2})[:.](\d{2})(?:\s*([AP]M))?$/);
+  if (!m) return null;
+  let h = parseInt(m[2], 10);
+  if (m[4] === "PM" && h < 12) h += 12;
+  if (m[4] === "AM" && h === 12) h = 0;
+  return { time: (h < 10 ? "0" : "") + h + ":" + m[3], body: norm(m[1].replace(/^[^,]*, /, "").replace(/^Reply…, /, "")) };
+}
+function bodyIs(body, want) {
+  if (body === want) return true;
+  return body.startsWith(want + ", ") && REACTED.test(body.slice(want.length + 2));
+}
+// The reply view opens over the conversation, with its own transcript of the thread.
+function viewNames(q) {
+  const all = safe(() => proc.windows[0].entireContents(), []);
+  const paths = all.map(e => Automation.getDisplayString(e));
+  const at = all.findIndex(e => String(safe(() => e.description(), "")) === "Reply transcript");
+  if (at < 0) return false;
+  const under = paths[at] + ".";
+  return all.some((e, i) => {
+    if (!paths[i].startsWith(under)) return false;
+    const label = parseLabel(String(safe(() => e.description(), "") || ""));
+    return !!label && label.time === q.hhmm && bodyIs(label.body, q.text);
+  });
+}
+function composer() {
+  let el = focused(), i = info(el);
+  if (i.id === "messageBodyField") return i;
+  for (const e of safe(() => proc.windows[0].entireContents(), [])) {
+    if (!/\.textFields\.at\(\d+\)$/.test(Automation.getDisplayString(e))) continue;
+    i = info(e);
+    if (i.id === "messageBodyField") return i;
+  }
+  return null;
+}
+function identity(q) {
+  const w = safe(() => proc.windows[0], null);
+  if (!w || safe(() => w.sheets.length, 1) !== 0) return false;
+  const title = norm(safe(() => w.name(), ""));
+  return (q.chatNames || []).some(n => norm(n) === title);
+}
+function send(q) {
+  let el = null, i = null;
+  for (let n = 0; n < q.polls; n++) {
+    el = focused(); i = info(el);
+    if (i.id === "messageBodyField" && i.placeholder === "Reply") break;
+    i = null;
+    delay(0.3);
+  }
+  if (!i) return { ok: false, error: "no-reply-view" };
+  if (!front()) return { ok: false, error: "not-front" };
+  if (i.length > 0) return { ok: false, error: "draft" };
+  if (!identity(q)) return { ok: false, error: "wrong-conversation" };
+  if (!viewNames(q)) return { ok: false, error: "reply-elsewhere" };
+  try { el.value = q.body; } catch (e) { return { ok: false, error: "fill-failed" }; }
+  delay(0.3);
+  if (String(safe(() => el.value(), "")) !== q.body) { safe(() => { el.value = ""; }); return { ok: false, error: "fill-failed" }; }
+  const now = info(focused());
+  if (!identity(q) || !viewNames(q) || !front() || now.id !== "messageBodyField" || now.placeholder !== "Reply") {
+    safe(() => { el.value = ""; });
+    return { ok: false, error: "focus-moved" };
+  }
+  se.keyCode(36);
+  delay(0.8);
+  const left = info(focused());
+  if (left.length > 0) return { ok: false, error: "unconfirmed" };
+  return { ok: true };
+}
+function run() {
+  const input = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+  const q = JSON.parse(String(ObjC.unwrap($.NSString.alloc.initWithDataEncoding(input, $.NSUTF8StringEncoding))));
+  if (q.mode === "composer") {
+    const c = composer();
+    return JSON.stringify(c ? { ok: true, length: c.length, inReply: c.placeholder === "Reply" } : { ok: false, error: "no-conversation" });
+  }
+  if (q.mode === "send") return JSON.stringify(send(q));
+  if (q.mode === "close") {
+    const i = info(focused());
+    if (front() && i.id === "messageBodyField" && i.placeholder === "Reply") { se.keyCode(53); return JSON.stringify({ ok: true, closed: true }); }
+    return JSON.stringify({ ok: true, closed: false });
+  }
+  return JSON.stringify({ ok: false, error: "bad-mode" });
+}
+""".replace("REACTED_SOURCE", json.dumps("^" + rx._REACTION + "(, " + rx._REACTION + ")*$"))
+
+
+def jxa(request: dict) -> dict:
+    try:
+        r = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", "-e", JXA],
+                           input=json.dumps(request, ensure_ascii=False).encode(),
+                           capture_output=True, timeout=rx.JXA_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "timeout"}
+    if r.returncode != 0:
+        return {"ok": False, "error": "osascript"}
+    try:
+        answer = json.loads(r.stdout)
+    except ValueError:
+        return {"ok": False, "error": "osascript"}
+    return answer if isinstance(answer, dict) else {"ok": False, "error": "osascript"}
+
+
+def read_text(stream) -> str:
+    raw = stream.buffer.read(MAX_BYTES + 1)
+    if len(raw) > MAX_BYTES:
+        raise Stop("too-long", EX_USAGE, f"replies are limited to {MAX_CHARS} characters; nothing was sent")
+    try:
+        text = raw.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        raise Stop("usage", EX_USAGE, "the reply is not valid UTF-8; nothing was sent")
+    if not text:
+        raise Stop("usage", EX_USAGE, "the reply is empty; nothing was sent")
+    if len(text) > MAX_CHARS:
+        raise Stop("too-long", EX_USAGE, f"replies are limited to {MAX_CHARS} characters; nothing was sent")
+    return text
+
+
+def _attachments(con, rowid: int) -> list:
+    cols = {r[1] for r in con.execute("PRAGMA table_info(attachment)")}
+    sticker = "a.is_sticker" if "is_sticker" in cols else "0"
+    rows = con.execute(
+        f"""SELECT a.mime_type, a.transfer_name, {sticker} AS sticker
+              FROM message_attachment_join j JOIN attachment a ON a.ROWID = j.attachment_id
+             WHERE j.message_id = ?""", (rowid,)).fetchall()
+    return [r for r in rows if not str(r["transfer_name"] or "").endswith(".pluginPayloadAttachment")]
+
+
+def resolve_picture(con, imsg, row, self_handles: list) -> dict:
+    """A message of exactly one picture and no text. Its label is only "Includes
+    picture" and a time, and the reply view can name nothing more, so a run
+    refuses whenever that does not pick out one bubble."""
+    if rx.norm(imsg.message_text(row)):
+        raise Stop("unsupported", EX_UNSUPPORTED, "replying to a picture with a caption is not supported yet")
+    if row["style"] == 43:
+        raise Stop("unsupported", EX_UNSUPPORTED, "groups are not supported")
+    files = _attachments(con, row["ROWID"])
+    if len(files) != 1:
+        raise Stop("unsupported", EX_UNSUPPORTED, "replying to a message with several attachments is not supported yet")
+    if files[0]["sticker"] or not str(files[0]["mime_type"] or "").lower().startswith("image/"):
+        raise Stop("unsupported", EX_UNSUPPORTED, "only pictures can be replied to, not other attachments")
+    ids = imsg.chat_cluster_ids(con, row["chat_identifier"])
+    chats = [r[0] for r in con.execute(
+        f"SELECT ROWID FROM chat WHERE chat_identifier IN ({','.join('?' * len(ids))})", ids)]
+    guids = [row["guid"]]
+    from_me = bool(row["is_from_me"])
+    date, rowid = row["date"], row["ROWID"]
+    self_thread = row["chat_identifier"] in self_handles
+    def picture(r):
+        files = _attachments(con, r["ROWID"])
+        return not rx.norm(imsg.message_text(r)) and len(files) == 1 and not files[0]["sticker"] and str(files[0]["mime_type"] or "").lower().startswith("image/")
+    if self_thread:
+        twins = [t for t in rx.bubbles(con, chats, "m.cache_has_attachments AND ABS(m.date - ?) < ?",
+                                       "m.is_from_me DESC, m.date, m.ROWID", (date, rx.SELF_TWIN_NS)) if picture(t)]
+        guids = list(dict.fromkeys([row["guid"]] + [t["guid"] for t in twins]))
+        sent = next((t for t in twins if t["is_from_me"]), None)
+        if sent:
+            from_me, date, rowid = True, sent["date"], sent["ROWID"]
+    minute = rx.hhmm(date)
+    day = 86400 * 10**9
+    ordinal = scanned = 0
+    for r in rx.bubbles(con, chats, "m.is_from_me = ? AND m.cache_has_attachments", f"m.date, m.ROWID LIMIT {rx.LATER_SCAN}", (int(from_me),)):
+        scanned += 1
+        if r["guid"] in guids or rx.hhmm(r["date"]) != minute or not picture(r):
+            continue
+        if abs(r["date"] - date) < day:
+            raise Stop("ambiguous", EX_TEMPFAIL, "two pictures were sent in that minute and Messages labels them alike; nothing was sent")
+        if (r["date"], r["ROWID"]) > (date, rowid):
+            ordinal += 1
+    if scanned >= rx.LATER_SCAN:
+        raise Stop("ambiguous", EX_TEMPFAIL, "too many pictures on this side to rule out a look-alike; nothing was sent")
+    newest = None
+    for r in rx.bubbles(con, chats, "NOT m.cache_has_attachments AND m.balloon_bundle_id IS NULL",
+                        "m.date DESC, m.ROWID DESC LIMIT 50"):
+        body = rx.norm(imsg.message_text(r))
+        if body and not rx.LINK.search(body):
+            newest = {"text": body, "from_me": bool(r["is_from_me"]), "hhmm": rx.hhmm(r["date"])}
+            break
+    return {"guids": guids, "chats": chats, "text": PICTURE_LABEL, "from_me": from_me, "hhmm": minute,
+            "ordinal": ordinal, "chat": row["chat_identifier"], "self_thread": self_thread, "picture": True,
+            "newest": newest or {"text": PICTURE_LABEL, "from_me": from_me, "hhmm": minute}}
+
+
+def resolve(con, imsg, guid: str, self_handles: list) -> dict:
+    row = con.execute(
+        f"""SELECT {rx.MSG_COLS}, c.chat_identifier, c.style FROM message m
+              JOIN chat_message_join j ON j.message_id = m.ROWID
+              JOIN chat c ON c.ROWID = j.chat_id WHERE m.guid = ?""", (guid,)).fetchone()
+    if not row:
+        raise Stop("no-such-message", EX_UNSUPPORTED, "no message with that GUID")
+    if row["style"] == 43:
+        raise Stop("unsupported", EX_UNSUPPORTED, "replying in a group is not supported yet")
+    if row["item_type"] != 0 or (row["associated_message_type"] or 0) in range(2000, 4000):
+        raise Stop("unsupported", EX_UNSUPPORTED, "that row is not a message bubble")
+    if row["balloon_bundle_id"]:
+        raise Stop("unsupported", EX_UNSUPPORTED, "replying to a link or app card is not supported yet")
+    if row["cache_has_attachments"]:
+        return resolve_picture(con, imsg, row, self_handles)
+    return rx.resolve(con, imsg, guid, self_handles)
+
+
+def threads(con, target: dict) -> set:
+    """What a reply to this target may name. A reply to a reply names the thread's
+    first message, so the target's own originator counts too (measured on 27.2)."""
+    guids = list(target["guids"])
+    marks = ",".join("?" * len(guids))
+    roots = [r[0] for r in con.execute(f"SELECT thread_originator_guid FROM message WHERE guid IN ({marks})", guids) if r[0]]
+    return set(guids) | set(roots)
+
+
+def find_reply(con, imsg, expected: set, text: str, since: int):
+    """Your row with this text in the target's thread. Not filtered by chat: a reply
+    can land under another address of the same person (seen in a self-thread)."""
+    marks = ",".join("?" * len(expected))
+    want = rx.norm(text)
+    for row in con.execute(
+            f"""SELECT m.ROWID, m.guid, m.text, m.attributedBody, m.error FROM message m
+                 WHERE m.is_from_me = 1 AND m.date >= ? AND m.thread_originator_guid IN ({marks})
+                 ORDER BY m.ROWID DESC""", (since, *expected)):
+        if rx.norm(imsg.message_text(row)) == want:
+            return row
+    return None
+
+
+def confirm(con, imsg, expected: set, text: str, since: int, pause=time.sleep) -> dict:
+    for _ in range(int(CONFIRM_SECONDS * 2)):
+        row = find_reply(con, imsg, expected, text, since)
+        if row is not None:
+            if row["error"]:
+                raise Stop("failed", EX_UNCONFIRMED, "Messages could not deliver the reply; check it in Messages", error=row["error"])
+            return {"ok": True, "result": "sent"}
+        pause(0.5)
+    raise Stop("unconfirmed", EX_UNCONFIRMED,
+               "the reply was submitted but Messages did not record it yet; check before sending it again")
+
+
+def confirm_safely(*args):
+    try:
+        return confirm(*args)
+    except Stop:
+        raise
+    except Exception:
+        raise Stop("unconfirmed", EX_UNCONFIRMED, "Return may have been pressed; check Messages before sending again")
+
+
+NOT_SENT = {
+    "draft": "this chat has a draft in Messages on the Mac; send or clear it first. Nothing was sent",
+    "no-reply-view": "the reply view did not open; nothing was sent",
+    "not-front": "Messages was not in front; nothing was sent",
+    "reply-elsewhere": "the reply view opened on a different message; nothing was sent",
+    "fill-failed": "the reply could not be filled in; nothing was sent",
+    "focus-moved": "focus moved away from the reply; nothing was sent",
+    "wrong-conversation": "Messages did not verify the recipient; nothing was sent",
+}
+
+
+def reply(con, imsg, target: dict, text: str, ui, run=jxa, perform=None, pause=time.sleep) -> dict:
+    perform = perform or rx.perform
+    why = rx.system_events_consent()
+    if why:
+        raise Stop("consent", EX_NOPERM, why)
+    why = ui.ensure_messages()
+    if why:
+        raise Stop("unavailable", EX_UNAVAILABLE, why)
+    why = ui.accessibility()
+    if why:
+        raise Stop("accessibility", EX_NOPERM, why)
+    prev = ui.frontmost()
+    started = time.monotonic()
+    opened = False
+    try:
+        why = ui.select_chat(target["chat"])
+        if why:
+            raise Stop("unavailable", EX_TEMPFAIL, why)
+        if run is jxa:
+            rx.clear_stale_picker()
+        state = run({"mode": "composer"})
+        if state.get("inReply"):   # left open by a run that died
+            run({"mode": "close"})
+            pause(0.8)
+            state = run({"mode": "composer"})
+        if not state.get("ok"):
+            raise Stop("unavailable", EX_TEMPFAIL, "the conversation did not open in Messages; nothing was sent")
+        if state.get("length", 0) > 0 or state.get("inReply"):
+            raise Stop("draft", EX_TEMPFAIL, NOT_SENT["draft"])
+        expected = threads(con, target)
+        since = rx.apple_now()
+        pressed = perform(target, REPLY_ACTION, deadline=started + rx.RUN_LIMIT)
+        if not pressed.get("ok") and pressed.get("error") not in rx.MAYBE_PERFORMED:
+            if pressed.get("error") in ("not-rendered", "unsettled"):
+                raise Stop(pressed["error"], EX_TEMPFAIL, "Messages could not find that message on screen; nothing was sent")
+            raise rx.failure(pressed, REPLY_ACTION)
+        opened = True
+        chat_names = [target["chat"]]
+        name = imsg.name_for(target["chat"]) if hasattr(imsg, "name_for") else None
+        if name: chat_names.append(name)
+        try:
+            sent = run({"chatNames": chat_names, "mode": "send", "body": text, "text": target["text"], "hhmm": target["hhmm"], "polls": OPEN_POLLS})
+        except Exception:
+            return confirm_safely(con, imsg, expected, text, since, pause)
+        if not sent.get("ok"):
+            code = sent.get("error", "error")
+            if code not in NOT_SENT:
+                # osascript died or timed out, possibly after Return. Never resend.
+                return confirm_safely(con, imsg, expected, text, since, pause)
+            raise Stop(code, EX_TEMPFAIL, NOT_SENT.get(code, "the reply could not be sent; nothing was sent"))
+        result = confirm_safely(con, imsg, expected, text, since, pause)
+        result["seconds"] = round(time.monotonic() - started, 1)
+        return result
+    finally:
+        try:
+            if opened:
+                run({"mode": "close"})
+                pause(0.4)
+            ui.restore_front(prev)
+        except Exception:
+            pass  # Cleanup cannot change a confirmed or uncertain send outcome.
+
+
+def log_outcome(code: str, exit_code: int, seconds=None) -> None:
+    """When, the outcome code and the exit status. Never a GUID or any text."""
+    try:
+        if os.path.exists(LOG) and os.path.getsize(LOG) > 65536:
+            os.replace(LOG, LOG + ".1")
+        line = f"{dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')} {code} exit={exit_code}"
+        if seconds is not None:
+            line += f" {seconds}s"
+        with open(LOG, "a") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def emit(result) -> int:
+    if isinstance(result, Stop):
+        log_outcome(str(result.result.get("code", "?")), result.exit_code)
+        if result.why:
+            sys.stderr.write(f"imsg-reply: {result.why}\n")
+        print(json.dumps(result.result, ensure_ascii=False))
+        return result.exit_code
+    log_outcome(str(result.get("result", "ok")), 0, result.get("seconds"))
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(prog="imsg-reply", description="Send one native reply. Dry run unless --yes.")
+    p.add_argument("--guid", required=True, help="the message's GUID (message.guid)")
+    p.add_argument("--text-stdin", action="store_true", required=True, help="read the reply from stdin")
+    p.add_argument("--yes", action="store_true", help="act; without it nothing on the Mac changes")
+    try:
+        a = p.parse_args(argv)
+    except SystemExit as e:
+        return EX_USAGE if e.code else 0
+    if not re.fullmatch(r"[A-Za-z0-9:/_-]{1,128}", a.guid):
+        return emit(Stop("usage", EX_USAGE, "that is not a message GUID"))
+    try:
+        text = read_text(sys.stdin)
+        imsg = rx.sibling("imsg")
+        try:
+            self_handles = rx.sibling("imsg-send").detect_self_handles()
+        except Exception:
+            self_handles = []
+        con = sqlite3.connect(f"file:{imsg.DB_PATH}?mode=ro", uri=True, timeout=5)
+        con.row_factory = sqlite3.Row
+        target = resolve(con, imsg, a.guid, self_handles)
+        if not a.yes:
+            return emit({"ok": True, "result": "dry-run", "target": "picture" if target.get("picture") else "text"})
+        ui = rx.sibling("imsg-read")
+        with ui.messages_ui_lock():
+            return emit(reply(con, imsg, target, text, ui))
+    except Stop as stop:
+        return emit(stop)
+    except TimeoutError as exc:
+        return emit(Stop("busy", EX_TEMPFAIL, str(exc)))
+    except (sqlite3.Error, OSError) as exc:
+        return emit(Stop("unavailable", EX_UNAVAILABLE, str(exc)))
+    except Exception as exc:
+        return emit(Stop("error", EX_SOFTWARE, f"{type(exc).__name__}: {exc}"))
+
+
+if __name__ == "__main__":
+    sys.exit(main())
