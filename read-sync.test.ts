@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { expandFailedMarkAll } from "./collector";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -94,6 +95,8 @@ import json,os,sys
 home=os.environ['HOME']; args=sys.argv[1:]
 with open(home+'/actions.jsonl','a') as f: f.write(json.dumps(args)+'\\n')
 ctl=json.load(open(home+'/control.json'))
+if ctl.get('inspect_attempt'):
+ with open(home+'/attempt.json','w') as f: json.dump(json.load(open(home+'/.local/state/blip/state.json'))['pendingReads'],f)
 if ctl.get('fail'):
  print('imsg-read: Accessibility is not granted',file=sys.stderr); sys.exit(77)
 data=json.load(open(home+'/remote.json'))
@@ -303,4 +306,124 @@ test("a due retry cannot jump ahead of a fresh action for another chat", () => {
   } });
   f.run();
   expect(f.actions()[0]).toEqual(["--chat", other, "--through", old]);
+});
+
+
+describe("failed mark-all recovery", () => {
+  test("failed bulk reads survive polls and retry only bounded conversations", () => {
+    const f = fixture(); f.run(); f.put("control.json", { fail: true });
+    expect(f.run("--mark-read").unread).toBe(0);
+    expect(f.state().pendingReads["*"].attempts).toBe(1);
+    expect(f.run().unread).toBe(0);
+    expect(f.state().pendingReads[chat].seen).toBe(old);
+    expect(f.state().pendingReads["*"]).toBeUndefined();
+    expect(f.actions()).toEqual([["--all"]]);
+    let st = f.state(); st.pendingReads[chat].retryAt = 0; f.save(st);
+    expect(f.run().unread).toBe(0);
+    expect(f.actions()).toEqual([["--all"], ["--chat", chat, "--through", old]]);
+    f.put("control.json", {});
+    st = f.state(); st.pendingReads[chat].retryAt = 0; f.save(st);
+    expect(f.run().unread).toBe(0);
+    expect(f.state().pendingReads).toEqual({});
+    expect(f.run().unread).toBe(0);
+  }, 15000);
+
+  test("messages arriving after a failed bulk read stay unread", () => {
+    const f = fixture(); f.run(); f.put("control.json", { fail: true });
+    f.run("--mark-read");
+    const later = new Date(Date.now() + 60000).toISOString().replace(/\.\d{3}Z$/, "Z");
+    f.put("remote.json", snapshot(1, later));
+    expect(f.run().unread).toBe(1);
+    expect(f.state().pendingReads).toEqual({});
+    expect(f.actions()).toEqual([["--all"]]);
+  });
+
+  test("without a snapshot a failed bulk action is retained but never repeated", () => {
+    const f = fixture(); f.run();
+    f.put("control.json", { fail: true, snapshot_fail: true });
+    f.run("--mark-read");
+    const st = f.state(); st.pendingReads["*"].retryAt = 0; f.save(st);
+    f.run();
+    expect(f.state().pendingReads["*"].attempts).toBe(1);
+    expect(f.actions()).toEqual([["--all"]]);
+    f.put("control.json", {}); f.run();
+    expect(f.actions()).toEqual([["--all"], ["--chat", chat, "--through", old]]);
+    expect(f.run().unread).toBe(0);
+  });
+
+  test("bounded fallback preserves newer explicit gestures and skips new activity", () => {
+    const other = "+15557654321", alias = "reader@example.com", newer = "chat12345";
+    const all = retryReadIntent(queueReadIntent({}, "*", false, recent)["*"]!, 1000, "locked");
+    const pending = { "*": all, [alias]: { unread: true, seen: "", attempts: 0, retryAt: 0 } };
+    const expanded = expandFailedMarkAll(pending, {
+      [chat]: { unread: 2, oldest: old, latest: old },
+      [other]: { unread: 1, oldest: old, latest: old, aliases: [alias] },
+      [newer]: { unread: 1, oldest: recent, latest: "2026-09-01T12:00:00Z" },
+    });
+    expect(expanded).toEqual({ [chat]: { ...all, seen: old }, [alias]: pending[alias] });
+    expect(pending["*"]).toBe(all);
+  });
+});
+
+
+test("a business-thread bulk marker neither resurfaces nor blocks later gestures", () => {
+  const f = fixture();
+  const business = "urn:biz:00000000-0000-0000-0000-000000000000";
+  const data = snapshot(1);
+  data.chats.push({ chat: business, unread: 1, oldest: old, latest: old });
+  f.put("remote.json", data); f.run();
+  f.put("control.json", { fail: true }); f.run("--mark-read");
+  expect(f.run().unread).toBe(0);
+  expect(f.state().pendingReads["*"].attempts).toBe(1);
+  expect(f.state().pendingReads[business]).toBeUndefined();
+  const alreadyRead = snapshot(0);
+  alreadyRead.chats.push({ chat: business, unread: 1, oldest: old, latest: old });
+  f.put("remote.json", alreadyRead);
+  f.put("control.json", {});
+  expect(f.run("--mark-unread", chat).unread).toBe(1);
+  expect(f.actions()).toEqual([["--all"], ["--unread", chat]]);
+  expect(f.run().unread).toBe(1);
+  const later = new Date(Date.now() + 60000).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const fresh = snapshot(1); fresh.chats.push({ chat: business, unread: 1, oldest: old, latest: later });
+  f.put("remote.json", fresh);
+  expect(f.run().unread).toBe(2);
+  expect(f.state().pendingReads["*"]).toBeUndefined();
+});
+
+
+test("a scoped bulk marker survives reload and cannot override other chats", () => {
+  const business = "urn:biz:00000000-0000-0000-0000-000000000000";
+  const marker = { unread: false, seen: recent, attempts: 1, retryAt: 0, chats: [business] };
+  const parsed = parseReadIntents({ "*": marker });
+  expect(parsed["*"]).toEqual(marker);
+  expect(parseReadIntents({ "*": { ...marker, chats: ["bad\nidentifier"] } })).toEqual({});
+  expect(parseReadIntents({ [chat]: marker })).toEqual({});
+  expect(reconcileReadIntents(parsed, {
+    [business]: { unread: 0, oldest: "", latest: old },
+    [chat]: { unread: 1, oldest: old, latest: old },
+  })).toEqual({});
+  expect(expandFailedMarkAll(parsed, {
+    [business]: { unread: 1, oldest: old, latest: old },
+    [chat]: { unread: 1, oldest: old, latest: old },
+  })).toEqual(parsed);
+});
+
+
+test("the bulk attempt is durable before the Mac action starts", () => {
+  const f = fixture(); f.run();
+  f.put("control.json", { inspect_attempt: true, fail: true });
+  f.run("--mark-read");
+  const atAction = JSON.parse(readFileSync(join(f.home, "attempt.json"), "utf8"));
+  expect(atAction["*"].attempts).toBe(1);
+  expect(atAction["*"].seen).not.toBe("");
+});
+
+test("an interrupted bulk action resumes with a bounded read, never another all", () => {
+  const f = fixture(); f.run();
+  const st = f.state();
+  st.pendingReads = { "*": { unread: false, seen: recent, attempts: 1, retryAt: 0 } };
+  f.save(st);
+  expect(f.run().unread).toBe(0);
+  expect(f.actions()).toEqual([["--chat", chat, "--through", old]]);
+  expect(f.state().pendingReads).toEqual({});
 });
