@@ -456,6 +456,12 @@ FocusScope {
   // root.active can change under a multi-part send, and a later part must not
   // go out on a different service from the first (war room #2).
   property string sendService: ""
+  // What the open conversation's own rows say to send on (thread.ts `service`)
+  // and the chat they were loaded for. SendState.sendServiceArg prefers it over
+  // the list row's service, which is the Mac's chat label and goes stale when a
+  // contact moves to Android.
+  property string threadSendService: ""
+  property string threadSendServiceChat: ""
   // Sends the Mac has not written a row for yet, {chat, text, ts}. Every
   // thread reload carries them to thread.ts (--pending-stdin, never argv),
   // which keeps their bubbles until the real row lands. Memory only.
@@ -1704,8 +1710,8 @@ FocusScope {
       // strictly one at a time — pumpFileSend() starts the next as each lands.
       root.fileQueue = root.attachDrafts.map(function(d) { return d.path })
       root.sendCaption = trimmed
-      var svc = String(root.active.service || "")
-      root.sendService = /^(SMS|RCS)$/i.test(svc) ? svc.toUpperCase() : ""
+      root.sendService = SendState.sendServiceArg(root.sendChat, root.activeIsGroup,
+        String(root.active.service || ""), root.threadSendServiceChat, root.threadSendService)
       pumpFileSend()
       return
     }
@@ -1718,9 +1724,11 @@ FocusScope {
     var target = root.activeIsGroup
       ? ["--chat-id", String(root.active.guid)]
       : ["--to", chat]
-    // green-bubble (SMS/RCS) threads send on their own service (war room #2)
-    var svc = String(root.active.service || "")
-    if (!root.activeIsGroup && /^(SMS|RCS)$/i.test(svc)) target = target.concat(["--service", svc.toUpperCase()])
+    // green-bubble (SMS/RCS) threads send on their own service (war room #2),
+    // read from the conversation's own rows once they have loaded
+    var svc = SendState.sendServiceArg(chat, root.activeIsGroup,
+      String(root.active.service || ""), root.threadSendServiceChat, root.threadSendService)
+    if (svc !== "") target = target.concat(["--service", svc])
     var localId = String(++root.nextSendId)
     root.pendingRevision++
     root.pendingSends = root.pendingSends.concat([{ chat: chat, text: text, ts: stamp, localId: localId }])
@@ -1901,6 +1909,8 @@ FocusScope {
           var d = JSON.parse(text.trim())
           if (d.ok === true) {
             var list = Array.isArray(d.bubbles) ? d.bubbles : []
+            root.threadSendServiceChat = root.threadRunningChat
+            root.threadSendService = String(d.service || "")
             root.pendingTapback = TapbackActions.pendingAfterLoad(root.pendingTapback, root.threadRunningChat, list, root.threadTapbackDone)
             // the tool is done but chat.db does not show it yet (a self-thread's echo lags): look again
             if (root.threadTapbackDone && root.pendingTapback && root.pendingTapback.chat === root.threadRunningChat) {

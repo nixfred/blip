@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { markSendFailed, friendlySendError } from "./send-state";
+import { markSendFailed, friendlySendError, sendServiceArg } from "./send-state";
 import { pendingBubble, withPendingSends, DEFAULT_FORMATS } from "./thread";
 
 test("failure targets one of two sends in the same second and keeps the original immutable", () => {
@@ -110,4 +110,31 @@ test("a failed attempt of OTHER words is untouched by a delivered retry of diffe
   const out = withPendingSends([sentRow("hello", "2026-11-10 12:49:52")],
     [failedSend("1", "hello", "2026-11-10 12:40:00"), keep], "2026-11-10", DEFAULT_FORMATS, Date.parse("2026-11-10T12:50:00"));
   expect(out.pending).toEqual([keep]);
+});
+
+// 2026-11-12: a contact texting on RCS whose chat row was still labelled iMessage. Every send left as
+// iMessage and failed with error 22, because the send read the list row's service (the Mac's label).
+test("a send uses the opened conversation's own service over the list label", () => {
+  const chat = "+15551234567";
+  expect(sendServiceArg(chat, false, "iMessage", chat, "RCS")).toBe("RCS");
+  expect(sendServiceArg(chat, false, "SMS", chat, "RCS")).toBe("RCS");
+  expect(sendServiceArg(chat, false, "RCS", chat, "iMessage")).toBe("");
+  // rows loaded for ANOTHER conversation never decide this one
+  expect(sendServiceArg(chat, false, "SMS", "+15550000000", "RCS")).toBe("SMS");
+  // before the rows load, the list row is all there is
+  expect(sendServiceArg(chat, false, "sms", chat, "")).toBe("SMS");
+  expect(sendServiceArg(chat, false, "iMessage", "", "")).toBe("");
+});
+
+test("a group never carries --service: it sends by chat id", () => {
+  const id = "abcdef0123456789abcdef0123456789";
+  expect(sendServiceArg(id, true, "RCS", id, "RCS")).toBe("");
+});
+
+test("the deployed QML module picks the same service as the TypeScript", async () => {
+  const runtime = await import("./SendState.mjs");
+  for (const args of [
+    ["+1", false, "iMessage", "+1", "RCS"], ["+1", false, "SMS", "+2", "RCS"],
+    ["+1", true, "SMS", "+1", "SMS"], ["+1", false, "rcs", "", ""],
+  ] as const) expect(runtime.sendServiceArg(...args)).toBe(sendServiceArg(...args));
 });
