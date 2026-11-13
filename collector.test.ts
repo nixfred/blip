@@ -1280,6 +1280,11 @@ describe("failed-delivery detection", () => {
     expect(selectFailures([mine({ error: 25, ts: "2026-08-31T19:00:00Z" })], [], now).length).toBe(0);
   });
 
+  test("a row the recipient has read is no failure, whatever error the Mac logged", () => {
+    expect(selectFailures([mine({ service: "SMS", error: 4, read_at: "2026-08-31T20:25:06Z" })], [], now).length).toBe(0);
+    expect(selectFailures([mine({ service: "SMS", error: 4 })], [], now).length).toBe(1);
+  });
+
   test("dedupes through the toasted ring — interrupts exactly once", () => {
     const first = selectFailures([mine({ error: 25 })], [], now);
     const again = selectFailures([mine({ error: 25 })], first.map((f) => f.key), now);
@@ -1517,9 +1522,32 @@ describe("complete conversation list (mergeChats)", () => {
     expect(mergeChats([green], [chats[2]!], {}, {})[0]!.service).toBe("SMS");
   });
 
-  test("the list may still move a DM the other way, onto iMessage", () => {
+  // Live shapes (2026-11-12, a macOS 27.2 gateway). Two Android contacts, both
+  // texting on RCS, so the window says RCS. One chat row's label said
+  // iMessage, so with their reply the newest row, every send went out as
+  // iMessage and failed with error 22. The other's label said SMS, so every
+  // send went out as plain SMS, which the Mac logged as error 4. The label
+  // follows the Mac's own last send, so it never corrected itself.
+  test("an RCS contact whose chat row still says iMessage is sent RCS", () => {
+    const rcs = { ...windowThread, service: "RCS" };
+    const label = { ...chats[0]!, service: "iMessage", last_from_me: false };
+    expect(mergeChats([rcs], [label], {}, {})[0]!.service).toBe("RCS");
+  });
+
+  test("an RCS contact whose chat row says SMS is sent RCS", () => {
+    const rcs = { ...windowThread, service: "RCS" };
+    const label = { ...chats[0]!, service: "SMS" };
+    expect(mergeChats([rcs], [label], {}, {})[0]!.service).toBe("RCS");
+  });
+
+  test("the label cannot move a DM with rows onto iMessage either", () => {
     const green = { ...windowThread, service: "SMS" };
-    expect(mergeChats([green], [chats[0]!], {}, {})[0]!.service).toBe("iMessage");
+    expect(mergeChats([green], [chats[0]!], {}, {})[0]!.service).toBe("SMS");
+  });
+
+  test("a quiet DM the window has no rows for still takes the list's service", () => {
+    const out = mergeChats([windowThread], chats, {}, {});
+    expect(out.find((t) => t.chat === "+15559990000")!.service).toBe("SMS");
   });
 
   // Live shape: a contact who moved from iPhone to Android, every recent
@@ -1822,6 +1850,32 @@ describe("which service a DM sends on (@lukejmorrison, PR #4)", () => {
     expect(sendServiceForMessages([
       at(0, { from_me: false, service: "SMS" }),
       at(1, { from_me: false, service: "iMessage" }),
+    ])).toBe("iMessage");
+  });
+
+  test("after a failed iMessage, a contact who texts us on RCS is sent RCS, not SMS", () => {
+    // SMS to an RCS contact is what the Mac logged error 4 on (2026-11-12)
+    expect(sendServiceForMessages([
+      at(0, { from_me: false, service: "RCS" }),
+      at(1, { from_me: true, service: "iMessage", error: 22 }),
+    ])).toBe("RCS");
+    expect(sendServiceForMessages([
+      at(0, { from_me: false, service: "SMS" }),
+      at(1, { from_me: true, service: "iMessage", error: 22 }),
+    ])).toBe("SMS");
+  });
+
+  test("a sent row with a read receipt is not a failure, whatever error the Mac logged", () => {
+    const { sendFailed } = require("./collector") as typeof import("./collector");
+    expect(sendFailed(at(0, { from_me: true, service: "SMS", error: 4 }))).toBe(true);
+    expect(sendFailed(at(0, { from_me: true, service: "SMS", error: 4, read_at: "2026-09-03T10:00:06Z" }))).toBe(false);
+    expect(sendFailed(at(0, { from_me: true, service: "SMS", error: 0 }))).toBe(false);
+    expect(sendFailed(at(0, { from_me: true, service: "SMS" }))).toBe(false);
+    expect(sendFailed(at(0, { from_me: false, service: "SMS", error: 4 }))).toBe(false);
+    // a read iMessage was delivered, so it is no sign they left iMessage
+    expect(sendServiceForMessages([
+      at(0, { from_me: false, service: "iMessage" }),
+      at(1, { from_me: true, service: "iMessage", error: 22, read_at: "2026-09-03T11:00:05Z" }),
     ])).toBe("iMessage");
   });
 

@@ -4,10 +4,17 @@ function markSendFailed(items, id, reason, fallback) {
   const current = fallback && !items.some((item) => item.localId === id) ? items.concat([fallback]) : items;
   return current.map((item) => item.localId === id ? Object.assign({}, item, { failed: true, failureReason: safeReason }) : item);
 }
+function sendServiceArg(chat, group, listService, loadedChat, loadedService) {
+  if (group)
+    return "";
+  const svc = loadedChat === chat && loadedService !== "" ? loadedService : listService;
+  return /^(SMS|RCS)$/i.test(svc) ? svc.toUpperCase() : "";
+}
 function friendlySendError(raw) {
   return /(^|[^\d])-10810(\D|$)/.test(raw) ? "Messages can't start on the Mac: nobody is logged in there. Log in on the Mac, then send again." : raw;
 }
 export {
   friendlySendError,
-  markSendFailed
+  markSendFailed,
+  sendServiceArg
 };

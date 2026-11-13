@@ -1162,6 +1162,26 @@ describe("a message can carry several files (multi-file drafts)", () => {
   });
 });
 
+describe("a DM sends on its own rows, not the Mac's chat label", () => {
+  // 2026-11-12: root.active.service is the list row's service, the Mac's label
+  // for the chat. It stayed "iMessage" for a contact texting on RCS.
+  test("the loader keeps thread.ts's service with the chat it was loaded for", () => {
+    const load = panel.slice(panel.indexOf("id: threadProc"), panel.indexOf("onExited", panel.indexOf("id: threadProc")));
+    expect(load).toContain("root.threadSendServiceChat = root.threadRunningChat");
+    expect(load).toContain('root.threadSendService = String(d.service || "")');
+    // set before the unchanged-snapshot early return, which skips the rest
+    expect(load.indexOf("root.threadSendService =")).toBeLessThan(load.indexOf("if (j === root.bubblesJson)"));
+  });
+
+  test("text and file sends both ask SendState.sendServiceArg", () => {
+    const send = panel.slice(panel.indexOf("function send()"), panel.indexOf("function wireStamp"));
+    expect(send.match(/SendState\.sendServiceArg\(/g)?.length).toBe(2);
+    // ...and both hand it the rows' service, or the label decides again
+    expect(send.match(/root\.threadSendServiceChat, root\.threadSendService\)/g)?.length).toBe(2);
+    expect(send).not.toMatch(/test\(svc\)/);
+  });
+});
+
 describe("a multi-part send is pinned to the thread it started in", () => {
   test("the service is captured once, not re-read per part", () => {
     // root.active can change under a batch; a later part must not go out on a

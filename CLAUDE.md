@@ -118,6 +118,16 @@ what it is handed. Keep it that way.
   bubble until a real from-me row with the same text lands, resolving one
   send per row. The read watermark (`--seen`) skips pending bubbles: their ts
   is THIS machine's clock. A failed send retains its bubble with a failure reason in memory. Never go back to "wait 1.5 s, then reload".
+- **A DM sends on what its own messages say, never on the Mac's chat label.** `imsg chats` reports the
+  chat row's `service_name`. On macOS 26 and later, one row holds the whole conversation, and that label
+  follows the Mac's OWN last send, Blip's included, so trusting it loops. On 2026-11-12, a contact
+  texting on RCS stayed labelled iMessage and every send failed with error 22. Another stayed labelled SMS
+  and got plain SMS. `sendServiceForMessages` decides from rows in two places. In the collector it reads
+  the preview window: `mergeChats` keeps that answer for every DM the window has rows for, and the label
+  names only quiet ones. In `thread.ts` it reads the opened conversation and reports it as `service`,
+  which BlipView prefers through `SendState.sendServiceArg`. #97, #147 and #151 each guarded one
+  direction of this same loop. A read receipt outranks `error` (`sendFailed`). The Mac logs error 4 on
+  plain SMS it relays to an RCS contact, and the iPhone delivers it anyway.
 - **A Mac that is signed out READS fine and cannot SEND.** Reads are sqlite over ssh and need no login; a send
   needs Messages, and Launch Services starts an app only inside a GUI session, so at the login window every send
   dies with -10810 (`friendlySendError` says it in plain words). `imsg session` is the read-only probe

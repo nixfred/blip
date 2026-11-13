@@ -14,6 +14,24 @@ export function markSendFailed<T extends LocalSend>(items: T[], id: string, reas
     ? Object.assign({}, item, { failed: true, failureReason: safeReason }) : item);
 }
 
+/** The `--service` a send in this conversation carries, or "" for none: iMessage
+ *  is imsg-send's default, and a group sends by chat id and never carries one.
+ *  The opened conversation's own rows (thread.ts `service`, kept with the chat
+ *  they were loaded for) outrank the list row's service. That is the Mac's chat
+ *  label, which follows the Mac's own last send and stayed "iMessage" for a
+ *  contact texting on RCS, so every send failed with error 22 (2026-11-12). */
+export function sendServiceArg(
+  chat: string,
+  group: boolean,
+  listService: string,
+  loadedChat: string,
+  loadedService: string,
+): string {
+  if (group) return "";
+  const svc = loadedChat === chat && loadedService !== "" ? loadedService : listService;
+  return /^(SMS|RCS)$/i.test(svc) ? svc.toUpperCase() : "";
+}
+
 /** Say what a send failure MEANS when the Mac's own words are only a number.
  *  -10810 is Launch Services failing to start Messages for `tell application "Messages"`; seen
  *  2026-11-10 when the gateway's WindowServer died and loginwindow logged the user out, which leaves no
