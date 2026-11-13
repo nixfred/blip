@@ -2,7 +2,7 @@
 /** Read synchronization metadata. No message bodies or contact names. */
 export interface RemoteRead { unread: number; oldest: string; latest: string; aliases?: string[] }
 export type ReadSnapshot = Record<string, RemoteRead>;
-export interface ReadIntent { unread: boolean; seen: string; attempts: number; retryAt: number; error?: string }
+export interface ReadIntent { unread: boolean; seen: string; attempts: number; retryAt: number; error?: string; chats?: string[] }
 export type ReadIntents = Record<string, ReadIntent>;
 
 export function parseReadSnapshot(value: unknown): ReadSnapshot | null {
@@ -31,7 +31,10 @@ export function parseReadIntents(value: unknown): ReadIntents {
         !Number.isFinite(r.retryAt) || r.retryAt < 0) continue;
     if (chat !== "*" && !/^\+?[0-9]{3,15}$/.test(chat) && !/^[^@\s]+@[^@\s]+$/.test(chat)
         && !/^(?:chat[0-9]{1,40}|[a-fA-F0-9]{32})$/.test(chat)) continue;
+    if (r.chats !== undefined && (chat !== "*" || !Array.isArray(r.chats) || r.chats.length > 32768 ||
+        r.chats.some(id => typeof id !== "string" || !id || id.length > 512 || /[\x00-\x1f\x7f]/.test(id)))) continue;
     out[chat] = { unread: r.unread, seen: r.seen, attempts: r.attempts, retryAt: r.retryAt,
+      ...(r.chats ? { chats: r.chats } : {}),
       ...(typeof r.error === "string" ? { error: r.error.slice(0, 240).replace(/[\x00-\x1f\x7f]/g, " ") } : {}) };
   }
   return out;
@@ -57,11 +60,12 @@ export function reconcileReadIntents(pending: ReadIntents, snapshot: ReadSnapsho
   const next = { ...pending };
   for (const [chat, intent] of Object.entries(next)) {
     if (chat === "*") {
-      const covered = Object.values(snapshot).filter(r => !intent.seen || r.latest <= intent.seen);
+      const covered = Object.entries(snapshot).filter(([id, r]) =>
+        (!intent.chats || intent.chats.includes(id)) && (!intent.seen || r.latest <= intent.seen)).map(([, r]) => r);
       if (covered.every(r => r.unread === 0)) delete next[chat];
       continue;
     }
-    if (next["*"]) continue; // a preceding mark-all must land before this gesture
+    if (next["*"]?.attempts === 0) continue; // an unattempted mark-all precedes this gesture
     const remote = snapshot[chat] ?? Object.values(snapshot).find(r => r.aliases?.includes(chat));
     if (remote && ((remote.unread > 0) === intent.unread ||
         (!intent.unread && intent.seen && remote.latest > intent.seen))) delete next[chat];

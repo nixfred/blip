@@ -36,6 +36,16 @@ def year_one_props(props: dict) -> bytes:
 
 
 class ReadTests(unittest.TestCase):
+    def test_locked_screen_refuses_before_waiting_for_ui_lock_or_calling_automation(self):
+        with patch.object(read, "screen_locked", return_value=True), \
+                patch.object(read.os, "makedirs") as mkdir, \
+                patch.object(read, "osa") as osa:
+            with self.assertRaisesRegex(OSError, "screen is locked"):
+                with read.messages_ui_lock():
+                    self.fail("locked screen admitted a UI operation")
+        mkdir.assert_not_called()
+        osa.assert_not_called()
+
     def test_group_and_direct_urls(self):
         for identifier, key in [("chat12345", "groupid"), ("a" * 32, "groupid"),
                                 ("+15551234567", "address"), ("12345", "address"),
@@ -44,7 +54,9 @@ class ReadTests(unittest.TestCase):
             self.assertTrue(read.chat_url(identifier).startswith("imessage:open?"))
 
     def test_private_lock_refuses_symlinks(self):
-        with tempfile.TemporaryDirectory() as folder, patch.object(read.os.path, "expanduser", return_value=folder):
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(read.os.path, "expanduser", return_value=folder), \
+                patch.object(read, "screen_locked", return_value=False):
             with read.messages_ui_lock():
                 self.assertEqual(os.stat(Path(folder) / "messages-ui.lock").st_mode & 0o777, 0o600)
             (Path(folder) / "messages-ui.lock").unlink()

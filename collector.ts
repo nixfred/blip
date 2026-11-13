@@ -2377,6 +2377,29 @@ export function checkMacSession(runner = spawnSync, path = MAC_SESSION_PATH, now
   return state;
 }
 
+/** A failed bulk read may only retry the conversations and timestamps the
+ * original click covered. Later explicit gestures win, including aliases. */
+export function expandFailedMarkAll(pending: ReadIntents, snapshot: ReadSnapshot): ReadIntents {
+  const all = pending["*"];
+  if (!all || all.attempts === 0 || !all.seen) return pending;
+  const next = { ...pending };
+  delete next["*"];
+  const unaddressable: string[] = [];
+  for (const [chat, row] of Object.entries(snapshot)) {
+    if ((all.chats && !all.chats.includes(chat)) || !row.unread || row.latest > all.seen ||
+        [chat, ...(row.aliases ?? [])].some(id => next[id])) continue;
+    if (!canPushChat(chat)) {
+      // Business/service identifiers cannot be opened by --chat. Keep the
+      // original bounded suppression until the Mac confirms they are read.
+      unaddressable.push(chat);
+      continue;
+    }
+    next[chat] = { ...all, seen: row.latest };
+  }
+  if (unaddressable.length) next["*"] = { ...all, chats: unaddressable };
+  return next;
+}
+
 export function collect(deep: boolean, markRead = false, readChat = "", seenTs = "", unreadChat = "", explicitRead = false): BlipOutput {
   // When this POLL ran — the output's own metadata, not a message stamp.
   // Distinct from nowTs() below, which is the clock message stamps are
@@ -2388,9 +2411,8 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   // Persist explicit intent before any network call. An offline click survives
   // the collector exiting and is retried after reconnection.
   if (readPush !== "off") {
-    // Stamp the click. A later --all retry is not safe (it would mark new
-    // arrivals read on the phone), so this intent is attempted once and only
-    // hides rows that already existed.
+    // Stamp the click. Attempt --all once; failed/interrupted attempts become
+    // timestamp-bounded per-chat retries, so newer arrivals stay unread.
     if (markRead) pendingReads = queueReadIntent(pendingReads, "*", false, nowTs());
     if (unreadChat && pushUnreadArgs(unreadChat)) pendingReads = queueReadIntent(pendingReads, unreadChat, true);
     if ((explicitRead || (readPush === "thread" && (state.unreadCounts[readChat] ?? 0) > 0)) && readChat && readChat !== unreadChat && canPushChat(readChat)) pendingReads = queueReadIntent(pendingReads, readChat, false, seenTs);
@@ -2400,7 +2422,10 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
     throw new Error("state write failed; read action was not queued");
   }
   const remoteReads = fetchReadSnapshot();
-  if (remoteReads) pendingReads = reconcileReadIntents(pendingReads, remoteReads);
+  if (remoteReads) {
+    pendingReads = expandFailedMarkAll(pendingReads, remoteReads);
+    pendingReads = reconcileReadIntents(pendingReads, remoteReads);
+  }
   // Per-chat catch-up. A single global oldest-unread cutoff made every poll
   // walk the whole history; windowCutoff stays at the watermark and stale
   // chats are fetched on their own below.
@@ -2604,7 +2629,9 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
       if (reading && readPush === "thread" && row.unread > 0 && seenTs && row.latest <= seenTs && canPushChat(readChat)) {
         pendingReads = queueReadIntent(pendingReads, readChat, false, seenTs);
       }
-      const intent = pendingReads[canonical] ?? pendingReads["*"];
+      const bulk = pendingReads["*"];
+      const intent = pendingReads[canonical] ?? pendingReads[chat] ??
+        (bulk && (!bulk.chats || bulk.chats.includes(chat)) ? bulk : undefined);
       const localMark = readMarks[chat] || readMarks[canonical] || "";
       if (markRead || (reading && seenTs && row.latest <= seenTs) ||
           // Outside per-thread sync, the global mark is what mark-all and the
@@ -2689,28 +2716,31 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   // Process one due intent per run so a failed chat cannot starve the rest.
   let syncError = "";
   if (persisted && readPush !== "off") {
-    const candidates = pendingReads["*"] ? [["*", pendingReads["*"]] as const] : Object.entries(pendingReads);
+    // An attempted bulk action needs a complete snapshot before it can be
+    // expanded safely. Never repeat an unbounded --all, even after a restart.
+    const all = pendingReads["*"];
+    const candidates = all && all.attempts === 0 ? [["*", all] as const]
+      : Object.entries(pendingReads).filter(([chat]) => chat !== "*");
     const due = candidates.filter(([, r]) => r.retryAt <= Date.now())
       .sort((a, b) => a[1].retryAt - b[1].retryAt)[0];
     if (due) {
       const [chat, intent] = due;
-      const result = chat === "*" ? runReadAction(["--all"])
-        : runReadAction([intent.unread ? "--unread" : "--chat", chat,
-          ...(!intent.unread && intent.seen ? ["--through", intent.seen] : [])]);
-      if (result.ok) delete pendingReads[chat];
-      else if (chat === "*") {
-        // --all cannot be bounded, so it is never retried. Per-chat intents
-        // remain durable through an outage: dropping one resurrects the
-        // unread dot even though the user already read through intent.seen.
-        // Retries back off to once per minute, and both the
-        // snapshot and --through guard against consuming a newer inbound.
-        delete pendingReads[chat];
-        syncError = result.error || "read sync stopped";
+      // Persist the attempt before touching Messages. An interrupted --all
+      // must also resume as bounded per-chat work, never another --all.
+      pendingReads[chat] = retryReadIntent(intent, Date.now());
+      if (!saveState({ ...nextState, pendingReads })) {
+        syncError = "read attempt could not be saved; action was not started";
       } else {
-        pendingReads[chat] = retryReadIntent(intent, Date.now(), result.error);
-        syncError = result.error;
+        const result = chat === "*" ? runReadAction(["--all"])
+          : runReadAction([intent.unread ? "--unread" : "--chat", chat,
+            ...(!intent.unread && intent.seen ? ["--through", intent.seen] : [])]);
+        if (result.ok) delete pendingReads[chat];
+        else {
+          pendingReads[chat] = retryReadIntent(intent, Date.now(), result.error);
+          syncError = result.error;
+        }
+        if (!saveState({ ...nextState, pendingReads })) syncError = "read acknowledgement could not be saved; will verify again";
       }
-      if (!saveState({ ...nextState, pendingReads })) syncError = "read acknowledgement could not be saved; will verify again";
     }
   }
   const remaining = Object.keys(pendingReads).length;
