@@ -23,6 +23,7 @@ no pomp, no em dashes. Plain text below the marker; X renders no markdown.
 | 7 | DRAFT 2026-10-28 (was due Sun 25 Oct) | 2026-W43 | Mon 19 Oct to Sun 25 Oct: #145, #147, #143, #148, and #146 (merged 28 Oct), incl. quotes |
 | W44 | ROLLED INTO W45 (Larry, 2026-11-04): nothing outside merged after Post 7's PRs, only the #132 half fix | 2026-W44 | notes in WEEKLY-NOTES.md |
 | W45 | DRAFT 2026-11-08 (due Sun 8 Nov; covers W44 + W45) | 2026-W45 | #132 half fix, #149 (Ian Swope), #150 (Ian Swope), #151 (Dima Grigorchuk), #152 (Matt), #153 (Jason Meller); text below, notes in WEEKLY-NOTES.md |
+| 8 | READY 2026-11-14 (on vic's clipboard; Fred posts) | 2026-09-26 to 2026-11-14 | One big thank-you post replacing the unsent drafts 5, 6, 7 and W45: 40 PRs from 18 outside people, 1 cherry-pick, 1 reporter, plus what is in review. Text docs/x-post-2026-11-14.txt, image docs/img/x-post-2026-11-14.png (source .html) |
 
 ---
 

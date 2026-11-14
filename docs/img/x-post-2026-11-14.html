@@ -1,0 +1,80 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Blip thank you</title>
+<style>
+:root{--bg:#07090f;--ink:#e8edf6;--dim:#7c8699;--blue:#0a84ff;--blue2:#5ac8fa;--card:#0f1422;--edge:#1c2436;--c:12px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1600px;height:900px;background:var(--bg);color:var(--ink);font-family:"JetBrainsMono Nerd Font",monospace;overflow:hidden;position:relative}
+.grid{position:absolute;inset:0;background-image:linear-gradient(#ffffff08 1px,transparent 1px),linear-gradient(90deg,#ffffff08 1px,transparent 1px);background-size:40px 40px}
+.glow{position:absolute;width:800px;height:800px;left:-260px;top:-300px;background:radial-gradient(circle,#0a84ff55,transparent 65%);filter:blur(20px)}
+.glow2{position:absolute;width:700px;height:700px;right:-200px;bottom:-350px;background:radial-gradient(circle,#5ac8fa30,transparent 65%)}
+.left{position:absolute;left:64px;top:60px;width:400px}
+.tag{display:inline-block;padding:8px 14px;background:var(--blue);color:#fff;font-weight:700;font-size:17px;letter-spacing:3px;clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
+h1{font-size:128px;line-height:.9;font-weight:800;letter-spacing:-5px;margin-top:26px}
+h1 span{color:var(--blue)}
+.sub{font-size:21px;color:var(--dim);margin-top:22px;line-height:1.45}
+.sub b{color:var(--ink);font-weight:600}
+.bubbles{margin-top:34px;display:flex;flex-direction:column;gap:12px;width:360px}
+.b{padding:13px 18px;font-size:19px;border-radius:22px;max-width:90%}
+.in{background:#1e2433;align-self:flex-start;border-bottom-left-radius:6px}
+.out{background:var(--blue);color:#fff;align-self:flex-end;border-bottom-right-radius:6px}
+.stats{position:absolute;left:64px;bottom:56px;display:flex;gap:10px}
+.stat{background:var(--card);border:1px solid var(--edge);padding:12px 14px;clip-path:polygon(var(--c) 0,100% 0,100% calc(100% - var(--c)),calc(100% - var(--c)) 100%,0 100%,0 var(--c))}
+.stat .n{font-size:38px;font-weight:800;color:var(--blue)}
+.stat .l{font-size:11px;color:var(--dim);letter-spacing:1px;margin-top:2px}
+.right{position:absolute;left:500px;right:50px;top:50px}
+.rh{font-size:16px;letter-spacing:5px;color:var(--dim);margin-bottom:16px}
+.rh b{color:var(--blue2)}
+.people{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.p{background:linear-gradient(135deg,#121a2c,#0c111d);border:1px solid var(--edge);padding:13px 14px 12px 17px;position:relative;height:140px;clip-path:polygon(var(--c) 0,100% 0,100% calc(100% - var(--c)),calc(100% - var(--c)) 100%,0 100%,0 var(--c))}
+.p::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--blue)}
+.p.top{background:linear-gradient(135deg,#0a84ff33,#0c111d 70%);border-color:#0a84ff66}
+.h{font-size:19px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:18px}
+.h.gh{color:#b9c2d3}
+.nm{font-size:13.5px;color:var(--dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.k{position:absolute;right:12px;top:11px;font-size:13px;font-weight:700;color:var(--blue2)}
+.what{font-size:13.5px;color:#9aa6bb;margin-top:7px;line-height:1.3}
+.foot{position:absolute;right:50px;bottom:30px;font-size:17px;color:var(--dim)}
+.foot b{color:var(--ink)}
+</style></head><body>
+<div class="grid"></div><div class="glow"></div><div class="glow2"></div>
+<div class="left">
+  <div class="tag">THANK YOU</div>
+  <h1>Bl<span>i</span>p</h1>
+  <div class="sub"><b>iMessage on Omarchy.</b><br>Your Mac is the gateway.<br>Your Linux desk is the phone.</div>
+  <div class="bubbles">
+    <div class="b in">who built this since September?</div>
+    <div class="b out">twenty people &rarr;</div>
+  </div>
+</div>
+<div class="stats">
+  <div class="stat"><div class="n">40</div><div class="l">PRS MERGED</div></div>
+  <div class="stat"><div class="n">20</div><div class="l">CONTRIBUTORS</div></div>
+  <div class="stat"><div class="n">894</div><div class="l">TESTS GREEN</div></div>
+</div>
+<div class="right">
+  <div class="rh">SINCE 26 SEP &middot; <b>EVERY ONE OF YOU</b></div>
+  <div class="people">
+<div class="p top"><div class="k">10 PRs</div><div class="h">@ianfs</div><div class="nm">Ian Swope</div><div class="what">macOS 27: tapbacks, pins, mutes</div></div>
+<div class="p top"><div class="k">6 PRs</div><div class="h gh">marcus</div><div class="nm">Marcus Vorwaller</div><div class="what">stickers, voice, replies, emoji</div></div>
+<div class="p"><div class="k">4 PRs</div><div class="h gh">Fileri</div><div class="nm">Erik Fillipsveen</div><div class="what">send tapbacks from Blip</div></div>
+<div class="p"><div class="k">3 PRs</div><div class="h">@damonjanis</div><div class="nm">Damon Janis</div><div class="what">durable read sync, unread, pins</div></div>
+<div class="p"><div class="k">2 PRs</div><div class="h gh">lama7</div><div class="nm">Gerald LaMontagne</div><div class="what">honest offline, menu wait</div></div>
+<div class="p"><div class="k">1</div><div class="h">@zachwilke_1</div><div class="nm">Zach Wilke</div><div class="what">warm channel: 18 ms polls</div></div>
+<div class="p"><div class="k">1</div><div class="h">@followbl</div><div class="nm">Brad Larson</div><div class="what">monitor sleep, no crash</div></div>
+<div class="p"><div class="k">1</div><div class="h">@GreyforgeLabs</div><div class="nm">Greyforge Labs</div><div class="what">search keeps your replies</div></div>
+<div class="p"><div class="k">1</div><div class="h">@bndnsmth</div><div class="nm">Brandon Smith</div><div class="what">sidebar selection stays put</div></div>
+<div class="p"><div class="k">1</div><div class="h">@chadstovern</div><div class="nm">Chad Stovern</div><div class="what">blip-setup config fix</div></div>
+<div class="p"><div class="k">1</div><div class="h">@jzetterman</div><div class="nm">John Zetterman</div><div class="what">survives the ssh agent</div></div>
+<div class="p"><div class="k">1</div><div class="h">@jaredmoody</div><div class="nm">Jared Moody</div><div class="what">fish setup, minimized window</div></div>
+<div class="p"><div class="k">1</div><div class="h">@brightball</div><div class="nm">Barry Jones</div><div class="what">DM stays blue guard</div></div>
+<div class="p"><div class="k">1</div><div class="h">@_FailSafe</div><div class="nm">Mark B</div><div class="what">notification allowlist menu</div></div>
+<div class="p"><div class="k">1</div><div class="h gh">coltonfitzgerald</div><div class="nm">Colton Fitzgerald</div><div class="what">photo open, copy, save</div></div>
+<div class="p"><div class="k">1</div><div class="h gh">dimagrigorchuk</div><div class="nm">Dima Grigorchuk</div><div class="what">Android DM stays green</div></div>
+<div class="p"><div class="k">1</div><div class="h">@jmeller</div><div class="nm">Jason Meller</div><div class="what">bar icon sized like stock</div></div>
+<div class="p"><div class="k">1</div><div class="h">@MattDbrow</div><div class="nm">Matt</div><div class="what">Find My city in headers</div></div>
+<div class="p"><div class="k">pick</div><div class="h gh">daveyb</div><div class="nm">David Benedic</div><div class="what">wait for the Automation prompt</div></div>
+<div class="p"><div class="k">issue</div><div class="h gh">edmooredop</div><div class="nm">edmooredop</div><div class="what">code toast for odd senders</div></div>
+  </div>
+</div>
+<div class="foot"><b>github.com/nixfred/blip</b></div>
+</body></html>

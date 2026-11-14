@@ -1,0 +1,72 @@
+Blip update, 14 Nov. Blip puts iMessage on the Omarchy desktop, using a Mac you already own as the gateway.
+
+It has been a while since my last post (26 Sep, Blip 2.6.2), and a lot of people have shown up since. 40 pull requests merged: 38 from 18 outside contributors, 2 of mine. One more change was cherry-picked from a 19th person, and an issue from a 20th changed the code. 894 unit tests pass, plus the Mac bridge and Qt suites. This is who did what, and thank you to every one of you.
+
+Ian Swope @ianfs, 10 PRs
+Blip is open on his desk every day and it shows. Tapbacks on macOS 27, where every one had failed. Pin and Unpin on macOS 27, including a conversation far down the list that Messages had not even drawn. Hide Alerts read from where macOS 27 really keeps a mute. A read push that survives a locked Mac. Clicking a toast opens its conversation. He tested my PRs on a real 27 gateway and found what I could not see from Linux.
+
+Marcus Vorwaller (github.com/marcus, haplab.com), 6 PRs
+He split one big idea into six PRs and carried each through review. Delivered and Read under your last sent message. A searchable emoji picker. Native stickers, including GIF and animated ones. Voice messages that play inside Blip with a real waveform and seeking. Reactions on older messages and with any emoji on macOS 27. And opt-in native replies. Several took rounds of review and he answered every round within hours.
+
+Erik Fillipsveen (github.com/Fileri), 4 PRs
+Blip can now send tapbacks. Pick one in the message menu and the Mac performs it on that exact bubble through Accessibility, with SIP on. Off unless tapbacks=on, groups refused, no new permission prompt. He also kept the selected bubble when you press Up or Down in the compose field.
+
+Damon Janis @damonjanis, 3 PRs
+Read state syncs through a durable queue: saved before any Mac call, retried, and retired only when chat.db confirms it. Plus Mark as Unread, and Pin and Hide Alerts in the conversation menu.
+
+Gerald LaMontagne (github.com/lama7), 2 PRs
+A locked Mac used to say "Mac unreachable" while sends through the same bridge worked. Offline now means offline. And the read push waits for Messages' menus, not just its process.
+
+Zach Wilke @zachwilke_1
+A warm channel to the Mac: a helper keeps the ssh link open, and a poll query took a median 18 ms against 166 ms one-shot.
+
+Brad Larson @followbl
+A second fix for a sleeping monitor crashing Hyprland: Blip no longer moves its window home while the only monitor is gone.
+
+Greyforge Labs @GreyforgeLabs
+Search keeps a reply that matches your own. Your "yes" and another member's "yes" in the same second used to show as one hit.
+
+Brandon Smith @bndnsmth
+The sidebar highlight could sit on a different chat than the one shown. The open chat's tile now stays selected.
+
+Chad Stovern @chadstovern
+blip-setup deleted every 2, 7 and x from bridge.conf values, so a host name with one came back mangled. He found it and fixed it.
+
+John Zetterman @jzetterman
+A host's ssh agent could defeat the confined key Blip uses on the Mac. It now survives the agent and the bar's PATH.
+
+Jared Moody @jaredmoody
+Reported and fixed blip-setup stopping on a fish login shell, then found that Mark All as Read fails when Messages' window is minimized, with a repro table that made the fix easy.
+
+Barry Jones @brightball
+A test that locks the guard stopping a unified SMS row from turning an iMessage DM green.
+
+Mark B @_FailSafe
+Allow or stop Blip notifications from a conversation's menu, instead of hand-editing a JSON file. He builds Omarchy plugins himself and tested the two-monitor bar I could not.
+
+Colton Fitzgerald (github.com/coltonfitzgerald)
+Right-click a photo to open, copy or save it. Save fetches the full original and never replaces a file.
+
+Dima Grigorchuk (github.com/dimagrigorchuk)
+When a contact moves from iPhone to Android, one failed send made every later send fail the same way. The chat list can no longer move a green chat back to iMessage.
+
+Jason Meller @jmeller
+The bar icon now sits the way stock Omarchy icons do.
+
+Matt @MattDbrow, his first PR
+Blip can show the city a friend shares with you through Find My, under their name. Off unless you turn it on, and refreshing is rate-limited so a friend with their phone off never makes Find My jump forward every minute.
+
+David Benedic (github.com/daveyb), cherry-picked: a send now waits 150 seconds for the Automation prompt instead of 15.
+edmooredop (github), reported that security-code toasts never fired for alphanumeric senders. Fixed.
+
+Mine: opening a conversation now costs the Mac about 7 ms instead of 100. A poll went from 0.77 s to 0.2 s. Blip says when the Mac is signed out. Reactions no longer hang on macOS 27.2, shared city reads 27.2's Find My layout, and Mark All as Read works with Messages minimized. Seven fixes from a whole-project review.
+
+Honest notes: tapbacks and native replies are opt-in and off by default, and native replies have not yet had a live send on macOS 27.2.
+
+In review right now: Jason Alexander @jasona (#165, sends on the service a conversation's own messages show, which matters for RCS contacts) and Curtis Chambers (github.com/curtisc, #167, a failed Mark All as Read no longer brings old unread counts back). Thank you for those too.
+
+What people said
+Ian Swope: "Blip is open on my desk every single day, it's how I do iMessage now."
+Marcus Vorwaller, when I thanked him: "totally unnecessary but appreciated."
+
+github.com/nixfred/blip
