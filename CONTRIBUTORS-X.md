@@ -32,7 +32,7 @@ tags are at the bottom.
 | Brandon Smith | bndnsmth | https://x.com/bndnsmth | 1 | he said so himself on #134, 2026-10-07 |
 | Baden | badenpiland | https://x.com/badenpiland | 1 | GitHub profile + social accounts (older notes said @bhp35, which does not exist) |
 | Greyforge Labs | GreyforgeLabs | https://x.com/GreyforgeLabs | 1 | GitHub profile + social accounts; X name matches, 2026-10-02 |
-| Jared Moody | jaredmoody | https://x.com/jaredmoody | 1 (+ issue #144) | GitHub profile + social accounts, 2026-10-21 |
+| Jared Moody | jaredmoody | https://x.com/jaredmoody | 1 (+ issues #144, #164) | GitHub profile + social accounts, 2026-10-21 |
 | Barry Jones | brightball | https://x.com/brightball | 1 | linked from his site brightball.com; X name matches, 2026-10-21 |
 | John Zetterman | jzetterman | https://x.com/jzetterman | 1 | he said so himself on #140, 2026-10-16; X name matches |
 | Mark B | Fail-Safe | https://x.com/_FailSafe | 1 | said so himself on #148 (2026-10-25); GitHub profile + social accounts publish it, `x user` name matches, 2026-10-28. NOT @Fail_Safe (that is "Bob Boberson"). Builds Omarchy plugins himself (omarchy-veil, omarchy-audiogram-eq, omarchy-dexcom) |

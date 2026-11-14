@@ -63,6 +63,13 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
                  already-reacted bubble, removal; the first custom-emoji try refused with "moved" while the Mac was in use and pressed nothing).
                  877 bun, 7 Qt/Python suites, 92 bridge tests, CI green. Door one-way (ci.yml, imsg-react); Fred approved the literal diff.
                  Larry added: the ci.yml conflict resolved, one test for the resolve() prefix guard (two mutants killed).
+2026-11-14  (this commit) Mark All as Read with Messages minimized or windowless (macOS 27.2): imsg-read reads the window state
+                 (System Events, read-only), restores a minimized window or asks Messages to reopen, clicks, then minimizes it again,
+                 also when the click fails; unreadable state changes nothing; --status names the window. Reported with an exact
+                 repro by Jared Moody, github.com/jaredmoody, X https://x.com/jaredmoody (#164, roster). Written by a peer Larry
+                 session, finished and verified by Larry:gus: 19 tests on gus and on the Mac's Python 3.9.6, 6 guard mutants each
+                 fail a test, window_state minimized/restored/visible proven on the real gateway. Door one-way (bridge/mac/imsg-read);
+                 Fred approved.
 2026-11-14  #160 Opt-in native replies: replies=on, new Mac tool imsg-reply drives Messages' Reply UI with checks before one Return
                  (no Mac draft, recipient title, reply-view target, exact field text, front app), chat.db confirms, every failure after
                  Return exits 0 or 76 and never resends or hands the words back, twins refused. Marcus Vorwaller, github.com/marcus,

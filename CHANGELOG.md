@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Mark All as Read works with Messages minimized or closed (#164, Jared Moody).** On macOS 27.2 the Mark All as Read
+  menu item stays disabled while Messages has no window on screen, however long it is the active app, so every push exited
+  75 ("stayed disabled even after waking Messages"): 20 in a row from 20 Oct to 11 Nov on his gateway, hidden because
+  Blip's local read state covered it. `imsg-read` now looks at the window first (read-only), restores a minimized one or
+  asks Messages to reopen when there is none, clicks, and minimizes it again; an unreadable state changes nothing, and the
+  window goes back even if the click fails. `imsg-read --status` names the window as the reason when the menu is dormant.
+  Proven on the gateway with the tool's own functions (minimized, restored, visible), nothing marked read.
 - **Native replies (#160, Marcus Vorwaller), opt-in.** `replies=on` in bridge.conf lets you reply to a specific message
   in a direct conversation (text or a single picture) and have Messages thread it, through a new Mac tool, `imsg-reply`.
   Off by default, and refused by the shim, the dispatcher and the installer unless on. Every check runs before the single

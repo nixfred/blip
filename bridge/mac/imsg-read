@@ -826,6 +826,58 @@ def restore_front(prev: str) -> None:
         osa(f'tell application "System Events" to set frontmost of process "{name}" to true')
 
 
+# Messages validates its menus only against a window that is on screen. With the
+# window minimized, or no window at all, Mark All as Read stays disabled however
+# long Messages has been the active app, so every push exited 75 (#164, macOS
+# 27.2.1: 20 in a row from 20 Oct to 11 Nov; the same line is in this tool's own
+# push-read.log). Activation neither restores a minimized window nor opens one.
+WINDOW_STATE = """tell application "System Events"
+  if not (exists process "Messages") then return "no-window"
+  tell process "Messages"
+    if (count of windows) is 0 then return "no-window"
+    repeat with w in windows
+      if (value of attribute "AXMinimized" of w) is false then return "visible"
+    end repeat
+    return "minimized"
+  end tell
+end tell"""
+UNMINIMIZE = ('tell application "System Events" to tell process "Messages" to '
+              'set value of attribute "AXMinimized" of window 1 to false')
+REMINIMIZE = ('tell application "System Events" to tell process "Messages" to '
+              'if (count of windows) is 1 then set value of attribute "AXMinimized" of window 1 to true')
+REOPEN = 'tell application "Messages" to reopen'
+
+
+def window_state() -> str:
+    """'visible', 'minimized', 'no-window', or '' when it cannot be read. Read-only."""
+    code, out = osa(WINDOW_STATE)
+    return out if code == 0 and out in ("visible", "minimized", "no-window") else ""
+
+
+def bring_window_back(state: str) -> str:
+    """Put a window on screen for the menu to validate against. Returns what was
+    done, for put_window_back: 'minimized' (restored), 'opened' (asked Messages to
+    reopen), or '' (nothing needed, or it did not work: the click then fails as it
+    always did)."""
+    if state == "minimized":
+        done, script = "minimized", UNMINIMIZE
+    elif state == "no-window":
+        done, script = "opened", REOPEN
+    else:
+        return ""
+    if osa(script)[0] != 0:
+        return ""
+    time.sleep(0.5)   # the window animates in
+    return done
+
+
+def put_window_back(done: str) -> None:
+    """Minimize again what was minimized. A window opened because there was none is
+    left open: closing it is not something this has been shown to do safely."""
+    if done == "minimized":
+        osa(REMINIMIZE)
+
+
 def chat_url(handle: str) -> str:
     """Address a group by its opaque identifier, never its name or speaker.
 
@@ -886,9 +938,12 @@ def main() -> None:
         if n is None:
             print("ready (chat.db not readable here, so a push cannot be verified)")
         elif n and menu == "disabled":
+            state = window_state()
+            why = {"minimized": "Messages' window is minimized; a push restores it first",
+                   "no-window": "Messages has no window open; a push asks it to open one"}.get(
+                       state, "Messages validates its menu only while it is the active app")
             print(f"ready but dormant: {n} unread on the Mac and Mark All as Read is disabled "
-                  "(Messages validates its menu only while it is the active app) - "
-                  "a push right now would do nothing")
+                  f"({why}) - a push right now would do nothing")
         else:
             print(f"ready ({n} unread on the Mac, menu {menu})")
         sys.exit(0)
@@ -910,9 +965,14 @@ def main() -> None:
         ok, err = click("Mark All as Read")
         if not ok and not err and before:
             # Disabled, yet chat.db says unread: the menu is dormant, not empty.
+            # A minimized or missing window keeps it dormant even while active (#164).
+            done = bring_window_back(window_state())
             prev = wake_messages()
-            ok, err = click("Mark All as Read")
-            restore_front(prev)
+            try:
+                ok, err = click("Mark All as Read")
+            finally:
+                restore_front(prev)
+                put_window_back(done)
         if err:
             sys.stderr.write(f"imsg-read: {err}\n")
             sys.exit(1)
