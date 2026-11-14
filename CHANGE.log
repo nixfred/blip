@@ -63,6 +63,14 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
                  already-reacted bubble, removal; the first custom-emoji try refused with "moved" while the Mac was in use and pressed nothing).
                  877 bun, 7 Qt/Python suites, 92 bridge tests, CI green. Door one-way (ci.yml, imsg-react); Fred approved the literal diff.
                  Larry added: the ci.yml conflict resolved, one test for the resolve() prefix guard (two mutants killed).
+2026-11-14  #160 Opt-in native replies: replies=on, new Mac tool imsg-reply drives Messages' Reply UI with checks before one Return
+                 (no Mac draft, recipient title, reply-view target, exact field text, front app), chat.db confirms, every failure after
+                 Return exits 0 or 76 and never resends or hands the words back, twins refused. Marcus Vorwaller, github.com/marcus,
+                 X: none, by his own answer (#163, 2026-11-12; credit by GitHub handle, may link https://haplab.com). Seventh PR of his
+                 #156 split to land, sent back four times (undefined name REACTED, hand-back after possible send, 2 minute pending
+                 drop, zero-test CI steps, signal-killed helper, twins aimed by ordinal, focus recheck) all fixed. 894 bun, Python
+                 suites on gus and the Mac's 3.9.6, 10 of 10 guard mutants fail a test, CI green. Door one-way (shim, dispatch,
+                 installer, ci.yml); Fred approved. Live 27.2 send NOT done yet.
 2026-11-11  (this commit) Shared city works on a macOS 27.2 gateway: Find My's People rows are static text with commas
                  ("Name, 1 mi, Boston, MA · Now"), not buttons with dots, so #152's reader found zero rows. snapshot() now
                  also collects ListEntityRow* static text (buttons still win, so old layouts never double count) and

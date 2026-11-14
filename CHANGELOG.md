@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Native replies (#160, Marcus Vorwaller), opt-in.** `replies=on` in bridge.conf lets you reply to a specific message
+  in a direct conversation (text or a single picture) and have Messages thread it, through a new Mac tool, `imsg-reply`.
+  Off by default, and refused by the shim, the dispatcher and the installer unless on. Every check runs before the single
+  Return: no draft already on the Mac, the window title matches the recipient, the reply view names the target, the
+  focused field holds your exact text, Messages is in front. Afterwards chat.db must show your row; anything unconfirmed
+  says "Check Messages before sending again" and never hands your words back or resends (a helper killed by a signal
+  counts as unconfirmed). Identical messages in the same minute are refused. My review reproduced an undefined name that
+  broke tapbacks, a hand-back after a possible send, and untested guards; all fixed over four rounds. Not yet proven live
+  on a macOS 27.2 gateway: the window-title shape and the field fill need one real send in your own thread.
 - **Shared city works on a macOS 27.2 gateway (#152 follow-up).** Find My on 27.2 writes a People row as plain text with
   commas ("Name, 1 mi, Boston, MA · Now") where 27.0 and 27.1 used a button with dots, so the reader found no rows and
   every header kept the phone number. It now reads both layouts and rewrites the new one to the old shape before any

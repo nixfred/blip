@@ -40,6 +40,15 @@ reconstructed on Sunday from memory.
   The extractions keep your theme, controls, banner and mark-all-read link... I'll handle the follow-on rebases as earlier PRs
   merge rather than leaving those conflicts for you."
 
+### Sat 14 Nov: #160 merged, replies on a specific message (opt-in)
+
+- **#160 reply to a specific message.** Marcus Vorwaller (github.com/marcus; no X account, he asked to be credited by his GitHub
+  handle and said we may link haplab.com; his sixth merged PR). Off by default (`replies=on`). It drives Messages' Reply UI
+  with checks before a single Return and never resends. It took four rounds in five days and he answered each within hours:
+  an undefined name that would have broken tapbacks, a hand-back of the typed words after a send that may have happened, and
+  guards the tests never exercised. Final round: I broke each new guard on purpose, ten of ten were caught. Not proven live
+  on the 27.2 Mac yet: that needs one real send in Fred's own thread.
+
 ### Wed 11 Nov: #163 and #159 merged, voice messages play inside Blip and any message takes any emoji
 
 - **Shared city (Matt's #152) now reads macOS 27.2 (Larry, nixfred).** On the real gateway it showed nothing, for two
