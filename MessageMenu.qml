@@ -23,8 +23,10 @@ Menu {
   property var attachmentRows: null
   readonly property bool attachmentShown: !!menu.attachmentRows && menu.attachmentRows.open === true
   readonly property bool textRowsShown: menu.linkUrl === "" && !menu.attachmentShown
+  property bool canReply: false
   property bool canQuote: false
   property bool canCopy: false
+  signal replyRequested()
   signal quoteRequested()
   signal copyRequested()
   signal openRequested(string url)
@@ -95,6 +97,13 @@ Menu {
     enabled: visible
     height: visible ? implicitHeight : 0
     onTriggered: menu.saveAttachmentRequested()
+  }
+  MenuItem {
+    text: "Reply"
+    visible: menu.canReply && menu.linkUrl === ""
+    height: visible ? implicitHeight : 0
+    enabled: visible
+    onTriggered: menu.replyRequested()
   }
   MenuItem {
     text: "Quote and reply"

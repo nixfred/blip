@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { parseBinDir } from "./bin-dir";
 import { bridgeArgv, type BridgeTool } from "./source-id";
 
-export type ShimTool = "imsg" | "imsg-send" | "imsg-read" | "imsg-react" | "contacts" | "contact-save";
+export type ShimTool = "imsg" | "imsg-send" | "imsg-read" | "imsg-react" | "imsg-reply" | "contacts" | "contact-save";
 
 /** The shim directory: `bin_dir=` in bridge.conf, default ~/bin. */
 export function shimDir(home: string = process.env.HOME ?? homedir()): string {

@@ -19,8 +19,9 @@ import sys
 # Mail/Calendar/Notes/Reminders and pops four Automation prompts on the Mac.
 # blip-check covers what Blip needs.
 # imsg-react changes the Mac's Messages (a tapback); the shim only calls it with
-# tapbacks=on in bridge.conf, and it acts only with --yes.
-TOOLS = {"imsg", "imsg-send", "imsg-read", "imsg-react", "contacts", "contact-save", "blip-check"}
+# tapbacks=on in bridge.conf, and it acts only with --yes. imsg-reply sends a native
+# reply the same way, under replies=on.
+TOOLS = {"imsg", "imsg-send", "imsg-read", "imsg-react", "imsg-reply", "contacts", "contact-save", "blip-check"}
 
 
 def refuse(msg: str) -> None:

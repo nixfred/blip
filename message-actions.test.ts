@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { attachmentActions, bubbleIndexByGuid, quotedDraft, quoteText, saveableMime } from "./message-actions";
+import { attachmentActions, bubbleIndexByGuid, canReply, quotedDraft, quoteText, replyTarget, saveableMime } from "./message-actions";
 
 test("quote an older message without replacing or normalizing the draft", () => {
   expect(quotedDraft({ text: "An older\nmessage" }, "My reply\n  in progress"))
@@ -48,4 +48,36 @@ test("a right-clicked picture offers open, copy and save; a document open and sa
   expect(saveableMime("IMAGE/PNG")).toBe(true);
   const runtime = await import("./MessageActions.mjs");
   expect(runtime.attachmentActions({ id: "7", mime: "image/png" }).copy).toBe(true);
+});
+
+test("replies are offered only where imsg-react's sibling tool has been proven", () => {
+  const text = { guid: "G", text: "hello" };
+  const picture = { guid: "G", text: "", attachments: [{ id: "1", mime: "image/heic" }] };
+  expect(canReply(text, false)).toBe(true);
+  expect(canReply(picture, false)).toBe(true);
+  expect(canReply(text, true)).toBe(false);
+  expect(canReply(null, false)).toBe(false);
+  expect(canReply({ text: "no guid" }, false)).toBe(false);
+  expect(canReply({ guid: "G", text: "see https://example.com" }, false)).toBe(false);
+  expect(canReply({ ...text, link: { url: "https://example.com" } }, false)).toBe(false);
+  for (const flag of ["retracted", "audio", "pending", "failed", "scheduled"])
+    expect(canReply({ ...text, [flag]: true }, false)).toBe(false);
+  expect(canReply({ ...picture, text: "caption" }, false)).toBe(false);
+  expect(canReply({ guid: "G", attachments: [{ mime: "image/png" }, { mime: "image/png" }] }, false)).toBe(false);
+  expect(canReply({ guid: "G", attachments: [{ mime: "video/mp4" }] }, false)).toBe(false);
+  expect(canReply({ guid: "G", attachments: [{ mime: "image/png", sticker: {} }] }, false)).toBe(false);
+});
+
+test("a reply target carries what the banner and the pending bubble show", () => {
+  expect(replyTarget({ guid: "G", text: "hello  there", from_me: true, name: "" }))
+    .toEqual({ guid: "G", text: "hello there", mine: true, name: "", attachment: null });
+  const file = { id: "7", mime: "image/png" };
+  expect(replyTarget({ guid: "G", text: "", name: "Ann", attachments: [file] }))
+    .toEqual({ guid: "G", text: "Photo", mine: false, name: "Ann", attachment: file });
+});
+
+test("the QML runtime's reply rules are the same build", async () => {
+  const runtime = await import("./MessageActions.mjs");
+  expect(runtime.canReply({ guid: "G", text: "hello" }, false)).toBe(true);
+  expect(runtime.replyTarget({ guid: "G", text: "x" }).guid).toBe("G");
 });

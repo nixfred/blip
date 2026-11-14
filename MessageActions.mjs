@@ -14,6 +14,28 @@ function quotedDraft(message, draft) {
 
 ` + draft;
 }
+function canReply(message, group) {
+  if (!message || group || !String(message.guid || ""))
+    return false;
+  if (message.retracted || message.audio || message.pending || message.failed || message.scheduled || message.link)
+    return false;
+  const text = String(message.text || "").trim();
+  const files = message.attachments ?? [];
+  if (files.length === 0)
+    return text !== "" && !/:\/\/|\bwww\./i.test(text);
+  const only = files[0];
+  return files.length === 1 && text === "" && !only.sticker && String(only.mime || "").toLowerCase().startsWith("image/");
+}
+function replyTarget(message) {
+  const attachment = (message.attachments ?? [])[0] ?? null;
+  return {
+    guid: String(message.guid || ""),
+    text: quoteText(message) || (attachment ? "Photo" : ""),
+    mine: message.from_me === true,
+    name: String(message.name || ""),
+    attachment
+  };
+}
 function bubbleIndexByGuid(bubbles, guid) {
   if (!guid)
     return -1;
@@ -33,7 +55,9 @@ function attachmentActions(att) {
 export {
   attachmentActions,
   bubbleIndexByGuid,
+  canReply,
   quoteText,
   quotedDraft,
+  replyTarget,
   saveableMime
 };

@@ -1327,13 +1327,30 @@ def enrich(con, rows, with_names: bool, skew_ns=TAPBACK_SKEW_NS):
     if origins:
         for o in _chunked_in(
             con,
-            f"SELECT guid, text, attributedBody, is_from_me FROM {MESSAGE_SRC} m WHERE guid IN ({{marks}})",
+            f"SELECT ROWID, guid, text, attributedBody, is_from_me FROM {MESSAGE_SRC} m WHERE guid IN ({{marks}})",
             origins,
         ):
             osnip[o["guid"]] = {
                 "text": (o["text"] or decode_attributed_body(o["attributedBody"]) or "")[:120],
                 "from_me": bool(o["is_from_me"]),
+                "rowid": o["ROWID"],
             }
+        # A reply to a picture has no text to quote, so the context names the file.
+        bare = {v["rowid"]: k for k, v in osnip.items() if not v["text"].replace("\ufffc", "").strip()}
+        origin_files: dict[str, list] = {}
+        if bare:
+            for a in _chunked_in(
+                con,
+                """SELECT maj.message_id AS mid, a.ROWID AS aid, a.transfer_name AS name, a.mime_type AS mime
+                   FROM message_attachment_join maj JOIN attachment a ON a.ROWID = maj.attachment_id
+                   WHERE a.transfer_name NOT LIKE '%.pluginPayloadAttachment' AND maj.message_id IN ({marks})
+                   ORDER BY a.ROWID""",
+                list(bare),
+            ):
+                origin_files.setdefault(bare[a["mid"]], []).append(
+                    {"id": str(a["aid"]), "name": a["name"] or "file", "mime": a["mime"]})
+        for snip in osnip.values():
+            del snip["rowid"]
 
     for r in kept:
         e = extras[r["ROWID"]]
@@ -1344,7 +1361,13 @@ def enrich(con, rows, with_names: bool, skew_ns=TAPBACK_SKEW_NS):
         if has_edit:
             e.update(_edit_flags(r["date_edited"], r["date_retracted"], r["message_summary_info"]))
         if r["orig_guid"] and r["orig_guid"] in osnip:
-            e["reply_to"] = osnip[r["orig_guid"]]
+            e["reply_to"] = dict(osnip[r["orig_guid"]])
+            files = origin_files.get(r["orig_guid"])
+            if files:
+                # thread_originator_part opens with the part replied to ("2:0:1").
+                part = str(r["orig_part"] or "0").split(":")[0]
+                index = int(part) if part.isdecimal() else 0
+                e["reply_to"]["attachment"] = files[index] if index < len(files) else files[0]
         fx = _effect_name(r["style_id"])
         if fx:
             e["effect"] = fx
@@ -1515,6 +1538,7 @@ def base_select(con) -> str:
                    m.associated_message_type AS assoc_type,
                    m.associated_message_guid AS assoc_guid,
                    m.thread_originator_guid AS orig_guid,
+                   m.thread_originator_part AS orig_part,
                    m.expressive_send_style_id AS style_id,
                    m.is_audio_message,
                    m.balloon_bundle_id, m.payload_data,

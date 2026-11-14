@@ -47,7 +47,7 @@ test("no spawner hard-codes ~/bin", () => {
   const dir = import.meta.dir;
   for (const f of readdirSync(dir).filter(n => /\.(ts|qml)$/.test(n) && !n.endsWith(".test.ts"))) {
     const src = readFileSync(join(dir, f), "utf8");
-    expect({ f, hit: /["`'/]bin\/(imsg|imsg-send|imsg-read|imsg-react|contacts|contact-save)\b|["`']bin["`']\s*,\s*["`'](imsg|imsg-send|imsg-read|imsg-react|contacts|contact-save)["`']/.test(src.replace(/^\s*(\/\/|\*).*$/gm, "")) })
+    expect({ f, hit: /["`'/]bin\/(imsg|imsg-send|imsg-read|imsg-react|imsg-reply|contacts|contact-save)\b|["`']bin["`']\s*,\s*["`'](imsg|imsg-send|imsg-read|imsg-react|imsg-reply|contacts|contact-save)["`']/.test(src.replace(/^\s*(\/\/|\*).*$/gm, "")) })
       .toEqual({ f, hit: false });
   }
 });

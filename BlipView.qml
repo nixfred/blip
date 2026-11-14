@@ -678,7 +678,7 @@ FocusScope {
     pendingThreadChat = ""
     root.threadPendingRevision = root.pendingRevision
     root.threadTapbackDone = !!(root.pendingTapback && root.pendingTapback.done)
-    var pending = root.pendingSends.filter(function(p) { return p.chat === threadRunningChat })
+    var pending = root.pendingSends.concat(hostWidget ? hostWidget.replyPending : []).filter(function(p) { return p.chat === threadRunningChat })
     threadProc.command = ["bun", root.threadScript, threadRunningChat, "80",
                           "--time-format", root.timeFormat,
                           "--date-format", root.dateFormat,
@@ -858,9 +858,27 @@ FocusScope {
       if (isImageMime(atts[i].mime)) { copyAttachment(atts[i]); return }
     }
   }
-  /** Ctrl+R: quote the selected bubble into the compose field. iMessage's
-   *  inline reply is not reachable through the bridge (no message GUID leaves
-   *  the Mac and AppleScript has no reply-to), so this is a plain "> quote". */
+  // ---- native replies: replies=on in bridge.conf, the Mac's imsg-reply. The
+  // composer holds one target at a time; send() hands it to the send queue.
+  readonly property bool repliesOn: hostWidget ? hostWidget.replies === true : false
+  property var replyTarget: null
+  onActiveChanged: if (root.replyTarget && (!root.active || String(root.active.chat) !== root.replyTarget.chat)) root.replyTarget = null
+  function canReplyTo(b) {
+    return root.repliesOn && root.online && !!root.active && root.isSendable(root.active) && MessageActions.canReply(b, root.activeIsGroup)
+  }
+  function startReply(b) {
+    var target = MessageActions.replyTarget(b)
+    target.chat = String(root.active.chat)
+    root.replyTarget = target
+    if (target.attachment && root.isImageMime(target.attachment.mime)) root.enqueueFetch(target.attachment, "", true)
+    leaveBubbles()
+    Qt.callLater(function() { composeField.forceActiveFocus() })
+  }
+  /** Ctrl+R: a native reply where the Mac can send one, otherwise a "> quote". */
+  function replyToBubble(b) {
+    if (root.canReplyTo(b)) root.startReply(b)
+    else root.quoteBubble(b)
+  }
   function quoteBubble(b) {
     composeField.text = MessageActions.quotedDraft(b, composeField.text)
     composeField.cursorPosition = composeField.length
@@ -1234,6 +1252,8 @@ FocusScope {
     if (!inThread) return
     for (var i = 0; i < bubbles.length; i++) {
       var atts = (bubbles[i].attachments || []).concat((bubbles[i].stickers || []).map(function(sticker) { return sticker.attachment }))
+      var replied = bubbles[i].replyAttachment
+      if (replied && isImageMime(replied.mime) && typeof replied.bytes === "number" && replied.bytes > 0 && replied.bytes <= root.autoFetchMaxSource) enqueueFetch(replied, "", true)
       for (var j = 0; j < atts.length; j++) {
         // Bytes must be KNOWN — null/0 must not slip through and auto-pull
         // something the click-path 100 MB ceiling would allow. The SOURCE cap
@@ -1692,6 +1712,11 @@ FocusScope {
       return
     }
 
+    if (root.replyTarget && root.attachCount > 0) {
+      note = "a reply can't carry attachments yet — remove them or cancel the reply"
+      return
+    }
+
     if (root.attachCount > 0) {
       if (sendProc.running || fileSendProc.running) {
         note = "a message is already sending"
@@ -1721,14 +1746,26 @@ FocusScope {
     // green-bubble (SMS/RCS) threads send on their own service (war room #2)
     var svc = String(root.active.service || "")
     if (!root.activeIsGroup && /^(SMS|RCS)$/i.test(svc)) target = target.concat(["--service", svc.toUpperCase()])
-    var localId = String(++root.nextSendId)
+    var localId = String(Date.now()) + "-" + String(++root.nextSendId)
     root.pendingRevision++
-    root.pendingSends = root.pendingSends.concat([{ chat: chat, text: text, ts: stamp, localId: localId }])
-    root.bubbles = root.appendPendingBubble(root.bubbles, text, stamp, localId)
+    var reply = root.replyTarget
+    root.replyTarget = null
+    var pendingSend = { chat: chat, text: text, ts: stamp, localId: localId }
+    if (reply) {
+      pendingSend.replyText = reply.text
+      pendingSend.replyMine = reply.mine
+      pendingSend.replyAttachment = reply.attachment
+    }
+    if (!reply) root.pendingSends = root.pendingSends.concat([pendingSend])
+    root.bubbles = root.appendPendingBubble(root.bubbles, text, stamp, localId, reply)
     root.pinToBottom = true
     composeField.text = ""
     note = ""
-    root.sendQueue = root.sendQueue.concat([{ chat: chat, text: text, stamp: stamp, localId: localId, target: target }])
+    if (reply) {
+      hostWidget.queueReply({ chat: chat, text: text, stamp: stamp, localId: localId, reply: reply }, pendingSend)
+      return
+    }
+    root.sendQueue = root.sendQueue.concat([{ chat: chat, text: text, stamp: stamp, localId: localId, target: target, reply: null }])
     pumpSend()
   }
 
@@ -1758,7 +1795,7 @@ FocusScope {
   /** The instant echo: thread.ts's pendingBubble() in miniature — enough to
    *  draw the bubble in the right run with the right clock. Every reload
    *  replaces it with the TypeScript version until the real row lands. */
-  function appendPendingBubble(list, text, stamp, localId) {
+  function appendPendingBubble(list, text, stamp, localId, reply) {
     var out = (list || []).slice()
     var prev = out.length ? out[out.length - 1] : null
     var newDay = !prev || root.localDay(prev.ts) !== root.localDay(stamp)
@@ -1767,18 +1804,18 @@ FocusScope {
     if (!start) { var p = Object.assign({}, prev); p.groupEnd = false; p.time = ""; out[out.length - 1] = p }
     out.push({ localId: localId, ts: stamp, from_me: true, name: "", text: String(text).trim(), day: newDay ? "Today" : "",
                groupStart: start, groupEnd: true, time: Qt.formatTime(new Date(), root.timeFormat),
-               receipt: "", tapbacks: [], attachments: [], replyText: "", replyMine: false, edited: false,
+               receipt: "", tapbacks: [], attachments: [], replyText: reply ? reply.text : "", replyMine: reply ? reply.mine : false, replyAttachment: reply ? reply.attachment : null, edited: false,
                link: null, retracted: false, effect: "", audio: false, html: "", failed: false, pending: true })
     return out
   }
 
-  function failPending(chat, localId, reason, text, stamp) {
+  function failPending(chat, localId, reason, text, stamp, reply) {
     root.pendingRevision++
     root.pendingSends = SendState.markSendFailed(root.pendingSends, localId, reason,
-      {chat: chat, localId: localId, text: text, ts: stamp})
+      {chat: chat, localId: localId, text: text, ts: stamp, replyText: reply ? reply.text : "", replyMine: reply ? reply.mine : false, replyAttachment: reply ? reply.attachment : null})
     if (root.inThread && String(root.active.chat) === chat) {
       if (!root.bubbles.some(function(b) { return b.localId === localId }))
-        root.bubbles = root.appendPendingBubble(root.bubbles, text, stamp, localId)
+        root.bubbles = root.appendPendingBubble(root.bubbles, text, stamp, localId, reply)
       root.bubbles = SendState.markSendFailed(root.bubbles, localId, reason)
     }
   }
@@ -1798,7 +1835,8 @@ FocusScope {
     // process on this machine and travels through ssh into the Mac's ps.
     // Which program sends is source-id.ts's answer for this conversation — in
     // stock Blip always the Mac's imsg-send in bin_dir, exactly as before.
-    sendProc.command = SourceId.bridgeArgv(job.chat, "imsg-send", hostWidget ? hostWidget.binDir : root.home + "/bin").concat(job.target).concat(["--yes", "--text-stdin", "--keep-dashes"])
+    var binDir = hostWidget ? hostWidget.binDir : root.home + "/bin"
+    sendProc.command = SourceId.bridgeArgv(job.chat, "imsg-send", binDir).concat(job.target).concat(["--yes", "--text-stdin", "--keep-dashes"])
     sendProc.stdinEnabled = true
     sendProc.running = true
     sendProc.write(job.text)
@@ -1920,7 +1958,8 @@ FocusScope {
             // ordinary reload (the bubble stays up either way).
             if (Array.isArray(d.pending)) {
               var chat = root.threadRunningChat
-              root.pendingSends = root.pendingSends.filter(function(p) { return p.chat !== chat }).concat(d.pending)
+              root.pendingSends = root.pendingSends.filter(function(p) { return p.chat !== chat }).concat(d.pending.filter(function(p) { return !p.replyText }))
+              if (hostWidget) hostWidget.reconcileReplies(chat, d.pending)
               if (d.pending.some(function(p) { return p.failed !== true }) && root.reloadTries < 8) {
                 root.reloadTries++
                 root.reloadChat = chat
@@ -2003,7 +2042,9 @@ FocusScope {
           : plainErr !== "" ? plainErr : "Send failed (exit " + code + ")"
         root.failPending(completedChat, completedId, reason, completedText, completedStamp)
         if (belongsHere) {
-          if (composeField.text === "") composeField.text = completedText
+          if (composeField.text === "" && belongsHere) {
+            composeField.text = completedText
+          }
           if (code === 69 || code === 255) root.note = "not sent — Mac unreachable"
           else root.note = (plainErr !== "" ? "send failed: " + plainErr : "send failed (exit " + code + ")")
         }
@@ -2016,6 +2057,17 @@ FocusScope {
   // imsg-react runs in hostWidget (BarWidget), which outlives this view.
   Connections {
     target: root.hostWidget
+    function onReplyPendingChanged() { root.pendingRevision++ }
+    function onReplyExited(job, code, reason) {
+      if (root.inThread && String(root.active.chat) === job.chat) {
+        root.note = reason
+        if (SendState.replyCanRestore(code) && composeField.text === "") {
+          composeField.text = job.text
+          root.replyTarget = job.reply
+        }
+        root.requestThreadLoad(job.chat)
+      }
+    }
     function onTapbackExited(chat, ok) {
       if (ok) {
         // the thread was left while it ran: nothing on screen is waiting for it
@@ -3570,17 +3622,31 @@ FocusScope {
                   spacing: 0
                   Item { Layout.fillWidth: true; visible: bubbleRow.mine }
                   Rectangle {
-                    Layout.preferredWidth: Math.min(Math.ceil(replySnippet.implicitWidth) + Style.space(18), Math.round(content.width * 0.7))
-                    Layout.preferredHeight: Math.ceil(replySnippet.implicitHeight) + Style.space(10)
+                    id: replyChip
+                    readonly property var att: modelData.replyAttachment || null
+                    readonly property string thumb: att && root.isImageMime(att.mime) ? String(root.attFiles[String(att.id || "")] || "") : ""
+                    readonly property int thumbSpace: thumb !== "" ? Style.space(28) + Style.space(6) : 0
+                    Layout.preferredWidth: Math.min(Math.ceil(replySnippet.implicitWidth) + Style.space(18) + thumbSpace, Math.round(content.width * 0.7))
+                    Layout.preferredHeight: Math.max(Math.ceil(replySnippet.implicitHeight), thumb !== "" ? Style.space(28) : 0) + Style.space(10)
                     radius: Style.space(12)
                     color: "transparent"
                     border.color: root.dim
                     border.width: 1
                     opacity: 0.75
+                    Image {
+                      visible: replyChip.thumb !== ""
+                      x: Style.space(9); y: Style.space(5)
+                      width: Style.space(28); height: width
+                      source: replyChip.thumb
+                      fillMode: Image.PreserveAspectCrop
+                      asynchronous: true
+                      sourceSize.width: width * 2; sourceSize.height: height * 2
+                    }
                     Text {
                       id: replySnippet
-                      x: Style.space(9); y: Style.space(5)
-                      width: Math.round(content.width * 0.7) - Style.space(18)
+                      x: Style.space(9) + replyChip.thumbSpace
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: parent.width - x - Style.space(9)
                       text: "↩ " + (modelData.replyMine ? "You: " : "") + String(modelData.replyText || "")
                       textFormat: Text.PlainText
                       elide: Text.ElideRight
@@ -4086,7 +4152,7 @@ FocusScope {
                     Layout.leftMargin: bubbleRow.mine ? 0 : Style.space(6)
                     Layout.maximumWidth: Math.max(1, content.width * 0.78)
                     wrapMode: Text.WrapAnywhere
-                    text: [modelData.failed === true ? "⚠ Not Delivered" : "",
+                    text: [modelData.failed === true ? (modelData.failureReason === "Check Messages before sending again" ? "⚠ Delivery unconfirmed" : "⚠ Not Delivered") : "",
                            modelData.failed === true ? String(modelData.failureReason || "")
                              : modelData.pending === true ? "Sending…"
                              : modelData.scheduled === true ? "Scheduled for " + String(modelData.scheduledFor || "")
@@ -4179,6 +4245,57 @@ FocusScope {
           foreground: root.foreground
         }
 
+        // The message a native reply is answering. ✕ or Escape cancels it.
+        Rectangle {
+          id: replyBanner
+          readonly property var target: root.replyTarget
+          readonly property var att: target ? target.attachment : null
+          readonly property string thumb: att && root.isImageMime(att.mime) ? String(root.attFiles[String(att.id || "")] || "") : ""
+          Layout.fillWidth: true
+          Layout.preferredHeight: Math.max(replyBannerText.implicitHeight, thumb !== "" ? Style.space(28) : 0) + Style.space(12)
+          visible: root.inThread && target !== null
+          radius: Style.space(12)
+          color: Qt.alpha(root.foreground, 0.08)
+          RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: Style.space(10)
+            anchors.rightMargin: Style.space(6)
+            spacing: Style.space(6)
+            Image {
+              visible: replyBanner.thumb !== ""
+              Layout.preferredWidth: Style.space(28)
+              Layout.preferredHeight: Style.space(28)
+              source: replyBanner.thumb
+              fillMode: Image.PreserveAspectCrop
+              asynchronous: true
+              sourceSize.width: Style.space(56); sourceSize.height: Style.space(56)
+            }
+            Text {
+              id: replyBannerText
+              Layout.fillWidth: true
+              text: replyBanner.target
+                ? "Replying to " + (replyBanner.target.mine ? "yourself" : (replyBanner.target.name || "message")) + ": " + replyBanner.target.text
+                : ""
+              textFormat: Text.PlainText
+              elide: Text.ElideRight
+              maximumLineCount: 1
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: root.fontCaption
+            }
+            Text {
+              text: "✕"
+              textFormat: Text.PlainText
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: root.fontCaption
+              leftPadding: Style.space(6); rightPadding: Style.space(6)
+              Accessible.name: "Cancel reply"
+              HoverHandler { cursorShape: Qt.PointingHandCursor }
+              TapHandler { onTapped: { root.replyTarget = null; composeField.forceActiveFocus() } }
+            }
+          }
+        }
         // queued attachments — ✕ removes one. ONE CHIP PER ROW, never a
         // RowLayout of N: summed implicit widths stretch the whole column
         // past the panel and take every right-aligned element off-screen
@@ -4341,7 +4458,7 @@ FocusScope {
                 bottomPadding: Style.spacing.inputPaddingY + Border.bottom(_composeBorder)
                 // Esc drops a bubble selection first (back to the bottom), then
                 // leaves the thread — the two-step Esc a text selection gets.
-                Keys.onEscapePressed: if (root.shareUrl !== "") root.closeShare(); else if (root.bubbleCursor >= 0) root.leaveBubbles(); else root.back()
+                Keys.onEscapePressed: if (root.shareUrl !== "") root.closeShare(); else if (root.bubbleCursor >= 0) root.leaveBubbles(); else if (root.replyTarget) root.replyTarget = null; else root.back()
                 // Left from the START of the text (or an empty field) hands focus
                 // back to the sidebar (split view); anywhere else it moves the
                 // caret as usual — the arrows' edge rule. Not while the share
@@ -4386,7 +4503,7 @@ FocusScope {
                   if (b) {
                     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { event.accepted = true; root.openBubble(b); return }
                     if (event.matches(StandardKey.Copy)) { event.accepted = true; root.copyBubble(b); return }
-                    if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) { event.accepted = true; root.quoteBubble(b); return }
+                    if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) { event.accepted = true; root.replyToBubble(b); return }
                     if (event.key === Qt.Key_E && (event.modifiers & Qt.ControlModifier)) { event.accepted = true; root.openMessageMenuAt(b, root.bubbleCursorItem); return }
                   }
                   if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
@@ -4566,6 +4683,8 @@ FocusScope {
     palette.buttonText: root.foreground
     palette.highlight: root.accent
     palette.highlightedText: "#ffffff"
+    canReply: root.canReplyTo(root.messageContext)
+    onReplyRequested: if (root.messageContext) root.startReply(root.messageContext)
     canQuote: root.messageContext !== null && MessageActions.quoteText(root.messageContext) !== ""
               && root.online && root.isSendable(root.active)
     canCopy: root.messageContext !== null && String(root.messageContext.text || "") !== ""

@@ -24,3 +24,19 @@ export function friendlySendError(raw: string): string {
     ? "Messages can't start on the Mac: nobody is logged in there. Log in on the Mac, then send again."
     : raw;
 }
+
+/** Local sentinel for a helper that never started, distinct from Mac EX_SOFTWARE. */
+export const REPLY_NOT_STARTED = -2;
+
+/** QProcess CrashExit cannot establish whether Return reached Messages. */
+export function replyExitCode(code: number, status: number): number { return status === 0 ? code : 76; }
+
+/** Transport errors cannot prove whether Return reached the Mac. */
+export function replyFailure(code: number, detail: string): string {
+  return !replyCanRestore(code)
+    ? "Check Messages before sending again"
+    : (detail.trim().slice(0, 240) || "Reply was not sent");
+}
+
+/** Only explicit pre-send refusals prove the text is safe to hand back. */
+export function replyCanRestore(code: number): boolean { return [REPLY_NOT_STARTED, 1, 64, 65, 75, 77, 78].includes(code); }

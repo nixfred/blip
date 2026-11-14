@@ -125,12 +125,12 @@ describe("QML safety invariants", () => {
     expect(panel).toContain("var completedStamp = root.sendStamp");
     // the field clears as Enter is pressed; a failure puts the words back
     // only when nothing newer has been typed
-    expect(panel).toContain("if (composeField.text === \"\") composeField.text = completedText");
+    expect(panel).toContain("if (composeField.text === \"\" && belongsHere) {");
   });
 
   test("a send shows its bubble at once and reloads carry the in-flight ledger on stdin", () => {
-    expect(panel).toContain("root.bubbles = root.appendPendingBubble(root.bubbles, text, stamp, localId)");
-    expect(panel).toContain("root.pendingSends = root.pendingSends.concat([{ chat: chat, text: text, ts: stamp, localId: localId }])");
+    expect(panel).toContain("root.bubbles = root.appendPendingBubble(root.bubbles, text, stamp, localId, reply)");
+    expect(panel).toContain("root.pendingSends = root.pendingSends.concat([pendingSend])");
     expect(panel).toContain('"--pending-stdin"');
     expect(panel).toContain("threadProc.write(JSON.stringify(pending))");
     expect(panel).toContain("root.failPending(completedChat, completedId, reason, completedText, completedStamp)");
@@ -564,7 +564,7 @@ describe("QML safety invariants", () => {
     expect(panel).toContain("readonly property color hoverFill: Style.hoverFillFor(foreground, accent)");
     expect(panel).not.toContain("foreground.b, 0.08)");
     expect(panel).toContain("onHasCursorChanged: if (hasCursor) root.bubbleCursorItem = bubbleRow");
-    expect(panel).toContain("if (root.bubbleCursor >= 0) root.leaveBubbles(); else root.back()");
+    expect(panel).toContain("if (root.bubbleCursor >= 0) root.leaveBubbles(); else if (root.replyTarget) root.replyTarget = null; else root.back()");
     const move = qmlFunction("moveBubbleCursor");
     expect(move).toContain("bubbleCursor = n - 1");            // Up from nothing = newest
     expect(move).toContain("leaveBubbles()");                  // Down past newest = same exit as Esc
@@ -966,7 +966,7 @@ test("idle remaps do not adopt the focused workspace", () => {
 test("share-sheet Escape, search generations, bounded sender labels", () => {
   // Astra A#7: the share sheet must close before back() (which would clear the
   // draft under it). #39 adds the bubble selection as a middle step.
-  expect(panel).toContain('Keys.onEscapePressed: if (root.shareUrl !== "") root.closeShare(); else if (root.bubbleCursor >= 0) root.leaveBubbles(); else root.back()');
+  expect(panel).toContain('Keys.onEscapePressed: if (root.shareUrl !== "") root.closeShare(); else if (root.bubbleCursor >= 0) root.leaveBubbles(); else if (root.replyTarget) root.replyTarget = null; else root.back()');
   expect(panel).toContain("if (q !== newQueryRan) { newResults = []; newCursor = 0 }");
   expect(panel.split("Layout.maximumWidth: Math.max(1, bubbleRow.width - Style.space(40))").length - 1).toBe(2);
   expect(widget).toContain('return "code expired"');

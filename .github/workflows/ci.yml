@@ -34,12 +34,21 @@ jobs:
         run: |
           sudo apt-get install -y -q qml6-module-qtquick-controls qml6-module-qtquick-templates
           python3 scripts/test-reaction-ui.py
+      - name: Reply target banner (synthetic QtTest)
+        run: |
+          sudo apt-get install -y -q qml6-module-qtquick-controls qml6-module-qtquick-templates qml6-module-qtquick-layouts
+          python3 scripts/test-reply-ui.py
       - name: OTP desktop adapter (no desktop needed)
         run: |
           python3 -m py_compile otp-desktop.py
           python3 test_otp_desktop.py
       - name: Mac tools compile (python3 syntax, no macOS needed)
-        run: python3 -m py_compile bridge/linux/blip-bridged bridge/mac/imsg bridge/mac/imsg-send bridge/mac/contacts bridge/mac/tcc-check bridge/mac/blip-check bridge/mac/blip-dispatch bridge/mac/imsg-read bridge/mac/imsg-react bridge/mac/calling_codes.py bridge/mac/contact-save bridge/mac/read_state.py bridge/mac/findmy_city.py
+        run: python3 -m py_compile bridge/linux/blip-bridged bridge/mac/imsg bridge/mac/imsg-send bridge/mac/contacts bridge/mac/tcc-check bridge/mac/blip-check bridge/mac/blip-dispatch bridge/mac/imsg-read bridge/mac/imsg-react bridge/mac/imsg-reply bridge/mac/calling_codes.py bridge/mac/contact-save bridge/mac/read_state.py bridge/mac/findmy_city.py
+      - name: Native replies (synthetic database and Messages)
+        run: |
+          python3 bridge/mac/test_reply.py
+          python3 bridge/mac/test_reply_enrich.py
+          python3 bridge/mac/test_reply_jxa.py
       - name: Sticker metadata and bounded animated rendering
         run: |
           sudo apt-get install -y -q ffmpeg imagemagick qt6-image-formats-plugins

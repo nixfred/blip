@@ -4003,6 +4003,9 @@ function moveTapbackCursor(cursor, dir, n = TAPBACKS.length) {
 function tapbacksOn(conf) {
   return confOn(conf, "tapbacks");
 }
+function repliesOn(conf) {
+  return confOn(conf, "replies");
+}
 function confOn(conf, key) {
   let v = "";
   for (const raw of String(conf || "").split(`
@@ -4213,6 +4216,7 @@ export {
   pendingAfterLoad,
   pendingTapback,
   reactionEmoji,
+  repliesOn,
   searchReactionEmoji,
   shownTapbacks,
   tapbackArgs,

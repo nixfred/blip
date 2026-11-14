@@ -35,6 +35,18 @@ describe("blip-shim: tapbacks=on gates imsg-react", () => {
     }
   });
 
+  test("replies have their own gate, and tapbacks=on does not open it", () => {
+    for (const conf of ["", "replies=off\n", "tapbacks=on\n"]) {
+      const r = run("imsg-reply", conf);
+      expect(r.code).toBe(78);
+      expect(r.err).toContain("replies=on");
+      expect(r.log).toBe("");
+    }
+    const r = run("imsg-reply", "replies=on\n");
+    expect(r.code).toBe(0);
+    expect(r.log).toContain("imsg-reply '--guid' 'ABC'");
+  });
+
   test("tapbacks=on passes it through like any bridge tool", () => {
     for (const conf of ["tapbacks=on\n", "tapbacks=ON\n", 'tapbacks="yes"\n', "tapbacks=1\n"]) {
       const r = run("imsg-react", conf);
