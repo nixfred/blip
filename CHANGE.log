@@ -70,6 +70,16 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
                  session, finished and verified by Larry:gus: 19 tests on gus and on the Mac's Python 3.9.6, 6 guard mutants each
                  fail a test, window_state minimized/restored/visible proven on the real gateway. Door one-way (bridge/mac/imsg-read);
                  Fred approved.
+2026-11-16  #167 A failed Mark All as Read is retried per conversation, bounded by what you had seen, so newer messages stay unread
+                 and --all never repeats (push_read=thread). Found on a real locked gateway (#166). Curtis Chambers, github.com/curtisc,
+                 X: none known (nothing on his GitHub profile; asked on #167). His first PR. Review found the expansion also ran under
+                 the default push_read=all and would have opened Messages once per unread chat; gated to thread in the merge, with a
+                 test that fails without it. 903 bun, Mac read suites on gus, CI green. Six should-fix items left as follow-ups.
+2026-11-16  #165 A send follows what the conversation's own messages say (iMessage, SMS or RCS), not the Mac's chat label, so a
+                 contact on RCS no longer gets every send as iMessage and error 22. SMS only ever on phone numbers and short codes.
+                 Jason Alexander, github.com/jasona, X https://x.com/jasona (his GitHub twitter_username; `x user` resolves it, name
+                 matches, 2.2k followers). Two review rounds (an email address could carry SMS; five should-fix items), all closed;
+                 rebased onto #160 in the merge. 927 bun, four QtTest scripts, CI green. Live Android RCS send NOT done yet.
 2026-11-14  #160 Opt-in native replies: replies=on, new Mac tool imsg-reply drives Messages' Reply UI with checks before one Return
                  (no Mac draft, recipient title, reply-view target, exact field text, front app), chat.db confirms, every failure after
                  Return exits 0 or 76 and never resends or hands the words back, twins refused. Marcus Vorwaller, github.com/marcus,

@@ -38,6 +38,8 @@ tags are at the bottom.
 | Mark B | Fail-Safe | https://x.com/_FailSafe | 1 | said so himself on #148 (2026-10-25); GitHub profile + social accounts publish it, `x user` name matches, 2026-10-28. NOT @Fail_Safe (that is "Bob Boberson"). Builds Omarchy plugins himself (omarchy-veil, omarchy-audiogram-eq, omarchy-dexcom) |
 | Matt (X name Matthew Disbrow) | mmdisbrow | https://x.com/MattDbrow | 1 | he said so himself on #152, 2026-11-08; `x user` resolves it and the name matches. Nothing on his GitHub profile |
 | Jason Meller | terracatta | https://x.com/jmeller | 1 | GitHub profile twitter_username AND social accounts; X name matches, 3.4k followers (#153, merged 2026-11-08; row added 2026-11-11, it was missed on the day) |
+| Jason Alexander | jasona | https://x.com/jasona | 1 | GitHub profile twitter_username AND social accounts; `x user` resolves it and the name matches, 2026-11-16 (#165) |
+| Curtis Chambers | curtisc | NONE KNOWN | 1 | nothing on his GitHub profile; ask him (#167, merged 2026-11-16). Credit by GitHub handle until he answers |
 
 ## Likely, waiting on Fred
 

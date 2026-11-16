@@ -40,6 +40,18 @@ reconstructed on Sunday from memory.
   The extractions keep your theme, controls, banner and mark-all-read link... I'll handle the follow-on rebases as earlier PRs
   merge rather than leaving those conflicts for you."
 
+### Mon 16 Nov: #167 and #165 merged
+
+- **#167 a failed Mark All as Read no longer gets lost.** Curtis Chambers (github.com/curtisc; his first PR, no X account known, ask him).
+  He found it on a real locked gateway: the click was forgotten or repeated as an unbounded read. Now it is saved first and retried
+  per conversation only up to what you had seen, so a message that arrived after the click stays unread. My review found it also
+  ran under the default `push_read=all`, where it would have opened Messages on the Mac once per chat; fixed in the merge with a
+  test that fails without the fix. Six smaller review items are left as follow-ups.
+- **#165 a send follows the conversation, not a stale label.** Jason Alexander (github.com/jasona, X https://x.com/jasona). A
+  contact on RCS whose chat row still said iMessage got every send as iMessage, failing with error 22. Two review rounds (an email
+  address in a merged phone + email chat could have been handed SMS) and a rebase onto #160, which I did in the merge. Not yet
+  proven on a real Android contact through the Mac.
+
 ### Sat 14 Nov: #160 merged, replies on a specific message (opt-in)
 
 - **#160 reply to a specific message.** Marcus Vorwaller (github.com/marcus; no X account, he asked to be credited by his GitHub
