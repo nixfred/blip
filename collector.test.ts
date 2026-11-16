@@ -1280,6 +1280,11 @@ describe("failed-delivery detection", () => {
     expect(selectFailures([mine({ error: 25, ts: "2026-08-31T19:00:00Z" })], [], now).length).toBe(0);
   });
 
+  test("a row the recipient has read is no failure, whatever error the Mac logged", () => {
+    expect(selectFailures([mine({ service: "SMS", error: 4, read_at: "2026-08-31T20:25:06Z" })], [], now).length).toBe(0);
+    expect(selectFailures([mine({ service: "SMS", error: 4 })], [], now).length).toBe(1);
+  });
+
   test("dedupes through the toasted ring — interrupts exactly once", () => {
     const first = selectFailures([mine({ error: 25 })], [], now);
     const again = selectFailures([mine({ error: 25 })], first.map((f) => f.key), now);
@@ -1409,6 +1414,22 @@ describe("a re-keyed group is ONE conversation", () => {
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ chat: email, last_ts: "2026-09-05T17:24:01Z", unread: 1 });
   });
+
+  // #165 review: a DM sends `--to <canonical>`, so an alias's service, the
+  // other handle of a merged phone + email conversation, must not ride along.
+  test("a merged DM keeps the canonical's own service, never the alias's", () => {
+    const phone = "+15550100001";
+    const email = "pat@example.com";
+    const sms = (c: string, ts: string) => ({ ...(thread(c, ts, 1, 0) as object), service: "SMS" }) as never;
+    const newerAlias = foldThreadAliases(
+      [thread(email, "2026-09-04T21:32:29Z", 3, 0), sms(phone, "2026-09-05T17:24:01Z")],
+      { [phone]: email },
+    );
+    expect(newerAlias[0]).toMatchObject({ chat: email, service: "iMessage" });
+    // the canonical has no rows in the window: unknown, so the label decides
+    const aliasOnly = foldThreadAliases([sms(phone, "2026-09-05T17:24:01Z")], { [phone]: email });
+    expect(aliasOnly[0]).toMatchObject({ chat: email, service: "" });
+  });
 });
 
 describe("complete conversation list (mergeChats)", () => {
@@ -1512,14 +1533,38 @@ describe("complete conversation list (mergeChats)", () => {
     expect(mergeChats([windowThread], [unified], {}, {})[0]!.service).toBe("iMessage");
   });
 
-  test("a genuinely green DM still takes its service from the list", () => {
-    const green = { ...windowThread, chat: "+15559990000", service: "SMS" };
-    expect(mergeChats([green], [chats[2]!], {}, {})[0]!.service).toBe("SMS");
+  test("a DM whose own id has no rows in the window takes the label", () => {
+    // what foldThreadAliases leaves when only an alias had rows
+    const unknown = { ...windowThread, service: "" };
+    expect(mergeChats([unknown], [{ ...chats[0]!, service: "SMS" }], {}, {})[0]!.service).toBe("SMS");
   });
 
-  test("the list may still move a DM the other way, onto iMessage", () => {
+  // Live shapes (2026-11-12, a macOS 27.2 gateway). Two Android contacts, both
+  // texting on RCS, so the window says RCS. One chat row's label said
+  // iMessage, so with their reply the newest row, every send went out as
+  // iMessage and failed with error 22. The other's label said SMS, so every
+  // send went out as plain SMS, which the Mac logged as error 4. The label
+  // follows the Mac's own last send, so it never corrected itself.
+  test("an RCS contact whose chat row still says iMessage is sent RCS", () => {
+    const rcs = { ...windowThread, service: "RCS" };
+    const label = { ...chats[0]!, service: "iMessage", last_from_me: false };
+    expect(mergeChats([rcs], [label], {}, {})[0]!.service).toBe("RCS");
+  });
+
+  test("an RCS contact whose chat row says SMS is sent RCS", () => {
+    const rcs = { ...windowThread, service: "RCS" };
+    const label = { ...chats[0]!, service: "SMS" };
+    expect(mergeChats([rcs], [label], {}, {})[0]!.service).toBe("RCS");
+  });
+
+  test("the label cannot move a DM with rows onto iMessage either", () => {
     const green = { ...windowThread, service: "SMS" };
-    expect(mergeChats([green], [chats[0]!], {}, {})[0]!.service).toBe("iMessage");
+    expect(mergeChats([green], [chats[0]!], {}, {})[0]!.service).toBe("SMS");
+  });
+
+  test("a quiet DM the window has no rows for still takes the list's service", () => {
+    const out = mergeChats([windowThread], chats, {}, {});
+    expect(out.find((t) => t.chat === "+15559990000")!.service).toBe("SMS");
   });
 
   // Live shape: a contact who moved from iPhone to Android, every recent
@@ -1823,6 +1868,98 @@ describe("which service a DM sends on (@lukejmorrison, PR #4)", () => {
       at(0, { from_me: false, service: "SMS" }),
       at(1, { from_me: false, service: "iMessage" }),
     ])).toBe("iMessage");
+  });
+
+  test("after a failed iMessage, a contact who texts us on RCS is sent RCS, not SMS", () => {
+    // SMS to an RCS contact is what the Mac logged error 4 on (2026-11-12)
+    expect(sendServiceForMessages([
+      at(0, { from_me: false, service: "RCS" }),
+      at(1, { from_me: true, service: "iMessage", error: 22 }),
+    ])).toBe("RCS");
+    expect(sendServiceForMessages([
+      at(0, { from_me: false, service: "SMS" }),
+      at(1, { from_me: true, service: "iMessage", error: 22 }),
+    ])).toBe("SMS");
+  });
+
+  test("a read receipt clears a relayed SMS or RCS in a 1:1, and nothing else", () => {
+    const { sendFailed } = require("./collector") as typeof import("./collector");
+    const read = "2026-09-03T10:00:06Z";
+    expect(sendFailed(at(0, { from_me: true, service: "SMS", error: 4 }))).toBe(true);
+    expect(sendFailed(at(0, { from_me: true, service: "SMS", error: 4, read_at: read }))).toBe(false);
+    expect(sendFailed(at(0, { from_me: true, service: "RCS", error: 4, read_at: read }))).toBe(false);
+    expect(sendFailed(at(0, { from_me: true, service: "SMS", error: 0 }))).toBe(false);
+    expect(sendFailed(at(0, { from_me: true, service: "SMS" }))).toBe(false);
+    expect(sendFailed(at(0, { from_me: false, service: "SMS", error: 4 }))).toBe(false);
+    // #165 review: an iMessage keeps the Mac's verdict (a failed edit of a read
+    // message carries both), and so does a group, where one receipt is one member
+    expect(sendFailed(at(0, { from_me: true, service: "iMessage", error: 22, read_at: read }))).toBe(true);
+    expect(sendFailed(at(0, { chat: "chat900001", from_me: true, service: "SMS", error: 4, read_at: read }))).toBe(true);
+  });
+
+  // #165 review blocker: a merged phone + email conversation. The send goes
+  // `--to <target>`, so only the target's own rows decide.
+  test("only the target's own rows decide: an email is never sent SMS", () => {
+    const email = "pat@example.com";
+    const phone = "+15551234567";
+    const cluster = [
+      at(0, { chat: phone, handle: phone, from_me: false, service: "SMS" }),
+      at(1, { chat: email, handle: email, from_me: true, service: "iMessage", delivered: true,
+              read_at: "2026-09-03T11:00:09Z" }),
+    ];
+    expect(sendServiceForMessages(cluster, false, email)).toBe("iMessage");
+    // after a failed SMS the old rule saw the same inbound SMS again and looped
+    expect(sendServiceForMessages([
+      ...cluster, at(2, { chat: email, handle: email, from_me: true, service: "SMS", error: 4 }),
+    ], false, email)).toBe("iMessage");
+  });
+
+  test("...and a phone whose person last wrote from their email is not sent iMessage", () => {
+    const email = "pat@example.com";
+    const phone = "+15551234567";
+    expect(sendServiceForMessages([
+      at(0, { chat: phone, handle: phone, from_me: false, service: "SMS" }),
+      at(1, { chat: email, handle: email, from_me: false, service: "iMessage" }),
+    ], false, phone)).toBe("SMS");
+  });
+
+  test("an address that is not a number gets SMS never, and RCS only if it texted us on RCS", () => {
+    const email = "pat@example.com";
+    expect(sendServiceForMessages([at(0, { chat: email, handle: email, from_me: false, service: "SMS" })], false, email))
+      .toBe("iMessage");
+    expect(sendServiceForMessages([at(0, { chat: email, handle: email, from_me: true, service: "RCS" })], false, email))
+      .toBe("iMessage");
+    // an RCS business agent replies from an address and is answered on RCS
+    const agent = "verify_agent@rbm.goog";
+    expect(sendServiceForMessages([at(0, { chat: agent, handle: agent, from_me: false, service: "RCS" })], false, agent))
+      .toBe("RCS");
+  });
+
+  // #165 review should-fix 1: a quiet blue DM whose last inbound is an old SMS.
+  test("our iMessage that reached them after their last text keeps a DM on iMessage", () => {
+    const blue = [
+      msg({ ts: "2025-03-01T10:00:00Z", from_me: false, service: "SMS" }),
+      msg({ ts: "2026-11-01T10:00:00Z", from_me: true, service: "iMessage", delivered: true }),
+      msg({ ts: "2026-11-02T10:00:00Z", from_me: true, service: "iMessage", read_at: "2026-11-02T10:01:00Z" }),
+      msg({ ts: "2026-11-03T10:00:00Z", from_me: true, service: "iMessage", delivered: true, read_at: "2026-11-03T10:00:30Z" }),
+    ];
+    expect(sendServiceForMessages(blue)).toBe("iMessage");
+    // an error-22 send is never delivered, so the #151 loop stays closed
+    expect(sendServiceForMessages([
+      msg({ ts: "2025-03-01T10:00:00Z", from_me: false, service: "SMS" }),
+      msg({ ts: "2026-11-01T10:00:00Z", from_me: true, service: "iMessage", error: 22 }),
+    ])).toBe("SMS");
+    // proof older than their last text is not proof of now: they moved to RCS since
+    expect(sendServiceForMessages([
+      msg({ ts: "2026-10-01T10:00:00Z", from_me: true, service: "iMessage", delivered: true }),
+      msg({ ts: "2026-11-01T10:00:00Z", from_me: false, service: "RCS" }),
+    ])).toBe("RCS");
+    // only our NEWEST proven send counts: an RCS that arrived after a read iMessage
+    expect(sendServiceForMessages([
+      msg({ ts: "2026-10-01T10:00:00Z", from_me: false, service: "RCS" }),
+      msg({ ts: "2026-10-02T10:00:00Z", from_me: true, service: "iMessage", delivered: true }),
+      msg({ ts: "2026-10-03T10:00:00Z", from_me: true, service: "RCS", delivered: true }),
+    ])).toBe("RCS");
   });
 
   test("our failed iMessage to a phone, newest, means they are not on iMessage", () => {

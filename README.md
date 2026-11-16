@@ -521,7 +521,8 @@ prefer_imessage=on
 
 A thread with a successful iMessage in the loaded window then stays
 iMessage. A never-iMessage RCS/SMS thread stays green. A failed iMessage to
-a phone still flips to SMS so the send does not stick. Groups are unchanged
+a phone still flips the next send to RCS, if that is how they last texted
+you, or to SMS, so the send does not stick. Groups are unchanged
 (they send by chat id). Default is off.
 
 **Tapbacks (experimental).** Right-click a message, or select it

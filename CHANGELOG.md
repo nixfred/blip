@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **A send now follows what the conversation's own messages say, not the Mac's chat label (#165, Jason Alexander).** A
+  contact texting you on RCS while their chat row was still labelled iMessage got every send as iMessage, failing with
+  error 22. The send now reads the service from the opened conversation's recent rows (most recent delivered proof wins;
+  a failed iMessage does not count), and only a phone number or short code ever carries SMS, so a merged phone + email
+  conversation can no longer hand an email address SMS; a group still sends by chat id with no service. Review found the
+  email-address case and five should-fix items, all closed over two rounds; rebased onto #160 by me, `SendState.mjs`
+  regenerated. Not yet proven on a real Android contact through the Mac's RCS service.
 - **A failed Mark All as Read is retried per conversation without losing newer messages (#167, Curtis Chambers), under `push_read=thread`.**
   A bulk mark-all that failed or was interrupted (a locked Mac, a dropped link) used to be forgotten, or worse repeated
   as an unbounded `--all`. The attempt is now saved before the bridge runs and, once a snapshot shows what the click

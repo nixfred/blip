@@ -23,9 +23,13 @@ import {
   loadState,
   mergeTapbacks,
   normalizeMsgStamps,
+  preferImessagePolicy,
+  sendFailed,
+  sendServiceForMessages,
   type AttachmentMeta,
   type ImsgMessage,
   type LinkCard,
+  type SendService,
   type Tapback,
 } from "./collector";
 export { dedupeSelfEcho };
@@ -138,6 +142,12 @@ export interface ThreadOutput {
   bubbles: Bubble[];
   /** Sends for this chat the Mac has not written yet (`--pending-stdin`). */
   pending?: PendingSend[];
+  /** What a DM sends on, decided from the rows of the id it sends to
+   *  (`threadSendService`). The list row's service is the Mac's chat label
+   *  and goes stale when a contact moves to Android, so BlipView prefers this
+   *  once it has loaded. Absent for groups, which send by chat id, and for a
+   *  DM with no rows under its own id, where the label has to stand. */
+  service?: SendService;
 }
 
 // ---------------------------------------------------------------- formatting
@@ -326,6 +336,8 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
       !sameSender(m, next) ||
       minutesBetween(m.ts, next.ts) > GROUP_GAP_MINUTES;
     const stickerState = normalizeStickerOverlays(m.stickers);
+    // A read receipt outranks the Mac's error code (`sendFailed`).
+    const failed = sendFailed(m);
 
     out.push({
       ts: m.ts,
@@ -340,7 +352,7 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
       groupStart,
       groupEnd,
       time: groupEnd ? clockLabel(m.ts, formats.time) : "",
-      receipt: i === receiptIdx && !(m.error ?? 0) ? (m.read_at ? receiptLabel(m.read_at, today, formats) : m.delivered ? "Delivered" : "") : "",
+      receipt: i === receiptIdx && !failed ? (m.read_at ? receiptLabel(m.read_at, today, formats) : m.delivered ? "Delivered" : "") : "",
       tapbacks: m.tapbacks ?? [],
       // Belt to imsg 1.5.1's suspenders: link-preview payloads are not files.
       attachments: (m.attachments ?? []).filter(
@@ -355,7 +367,7 @@ export function decorate(msgs: ImsgMessage[], today: string, formats = DEFAULT_F
       effect: m.effect ?? "",
       audio: m.audio === true,
       html: linkify((m.text ?? "").replace(/￼/g, "").trim()),
-      failed: m.from_me && typeof m.error === "number" && m.error !== 0,
+      failed,
       ...(m.scheduled === true
         ? { scheduled: true, scheduledFor: `${dayLabel(m.ts, today, formats)} ${clockLabel(m.ts, formats.time)}` }
         : {}),
@@ -593,6 +605,19 @@ export function selectThread(
   return msgs.length > limit ? msgs.slice(msgs.length - limit) : msgs;
 }
 
+/**
+ * What a DM in this conversation sends on, from the rows of the id it sends
+ * `--to` and no others. A merged phone + email conversation shows both
+ * handles' rows. Deciding from all of them sent SMS to an email address, and
+ * iMessage to an Android number after they last wrote from the email (#165
+ * review). No rows of its own → undefined. An empty answer must not stand in
+ * as "iMessage": the caller keeps the list's label instead.
+ */
+export function threadSendService(msgs: ImsgMessage[], chat: string, preferImessage = false): SendService | undefined {
+  const own = msgs.filter((m) => chatKey(m) === chat);
+  return own.length ? sendServiceForMessages(own, preferImessage, chat) : undefined;
+}
+
 // ---------------------------------------------------------------- transport
 
 export function loadThread(
@@ -601,6 +626,7 @@ export function loadThread(
   today: string,
   formats = DEFAULT_FORMATS,
   runner = spawnSync,
+  preferImessage?: boolean,
 ): ThreadOutput {
   // Groups load by EXACT chat id (imsg ≥1.8.0 `thread --chat`). The old
   // recent-window scan cost ~20× the rows and missed anything older than
@@ -629,7 +655,11 @@ export function loadThread(
     const msgs = selectThread(
       rows, chat, group, limit, state.selfChats, state.chatAliases,
     );
-    return { ok: true, online: true, error: "", bubbles: decorate(msgs, today, formats) };
+    const service = group ? undefined : threadSendService(msgs, chat, preferImessage ?? preferImessagePolicy());
+    return {
+      ok: true, online: true, error: "", bubbles: decorate(msgs, today, formats),
+      ...(service ? { service } : {}),
+    };
   } catch (e) {
     return { ok: false, online: true, error: `bad JSON from imsg: ${e}`, bubbles: [] };
   }

@@ -21,7 +21,7 @@ import {
   withPendingSends,
 } from "./thread";
 import type { Bubble, PendingSend } from "./thread";
-import { cliChatArg } from "./thread";
+import { cliChatArg, threadSendService } from "./thread";
 
 function msg(over: Partial<ImsgMessage> = {}): ImsgMessage {
   return {
@@ -397,6 +397,53 @@ describe("loadThread", () => {
     expect(r.ok).toBe(false);
     expect(r.error).toBe("nope");
   });
+
+  // 2026-11-12: a contact texting on RCS whose chat row still said iMessage.
+  // The conversation's own rows are the evidence the send path needs.
+  test("a DM reports the service its own rows say to send on", () => {
+    const rows = [
+      msg({ ts: "2026-08-30T12:00:00Z", service: "RCS" }),
+      msg({ ts: "2026-08-30T12:01:00Z", from_me: true, service: "iMessage", error: 22 }),
+    ];
+    const r = loadThread("+15551234567", 10, "2026-08-30", DEFAULT_FORMATS,
+      fake({ status: 0, stdout: JSON.stringify(rows) }), false);
+    expect(r.ok).toBe(true);
+    expect(r.service).toBe("RCS");
+  });
+
+  // #165 review blocker, through the function loadThread uses: a merged
+  // phone + email conversation shows both handles' rows.
+  test("only rows under the id we send to decide the service", () => {
+    const email = "pat@example.com";
+    const phone = "+15551234567";
+    const rows = [
+      msg({ ts: "2026-08-30T12:00:00Z", chat: phone, handle: phone, service: "SMS" }),
+      msg({ ts: "2026-08-30T12:05:00Z", chat: email, handle: email, from_me: true, service: "iMessage",
+            delivered: true, read_at: "2026-08-30T12:05:09Z" }),
+    ];
+    expect(threadSendService(rows, email)).toBe("iMessage");
+    expect(threadSendService([
+      msg({ ts: "2026-08-30T12:00:00Z", chat: phone, handle: phone, service: "SMS" }),
+      msg({ ts: "2026-08-30T12:05:00Z", chat: email, handle: email, service: "iMessage" }),
+    ], phone)).toBe("SMS");
+  });
+
+  // #165 review should-fix 4: "iMessage" for an empty list must not replace the label.
+  test("no rows under the id we send to: no service, so the label stands", () => {
+    expect(threadSendService([msg({ chat: "+15550000000", handle: "+15550000000" })], "+15551234567")).toBeUndefined();
+    const r = loadThread("+15551234567", 10, "2026-08-30", DEFAULT_FORMATS,
+      fake({ status: 0, stdout: "[]" }), false);
+    expect(r.ok).toBe(true);
+    expect(r).not.toHaveProperty("service");
+  });
+
+  test("a group reports no service: it sends by chat id", () => {
+    const id = "abcdef0123456789abcdef0123456789";
+    const r = loadThread(id, 10, "2026-08-30", DEFAULT_FORMATS,
+      fake({ status: 0, stdout: JSON.stringify([msg({ chat: id, service: "RCS" })]) }), false);
+    expect(r.ok).toBe(true);
+    expect(r.service).toBeUndefined();
+  });
 });
 
 describe("localToday", () => {
@@ -557,6 +604,35 @@ describe("rich decoration", () => {
       today,
     );
     expect(out.map((b) => b.receipt)).toEqual(["", "", "", ""]);
+  });
+
+  // 2026-11-12: plain SMS that the Mac relayed to a contact on RCS, logged
+  // error 4. Each one carried the contact's read receipt seconds later. The
+  // bubble said Not Delivered under a message that had been read.
+  test("a sent message with a read receipt is not failed, whatever error the Mac logged", () => {
+    const out = decorate(
+      [
+        msg({ ts: "2026-08-31T10:00:00Z", from_me: true, service: "SMS", error: 4 }),
+        msg({ ts: "2026-08-31T10:01:00Z", from_me: true, service: "SMS", error: 4, read_at: "2026-08-31T10:01:06Z" }),
+      ],
+      today,
+    );
+    expect(out.map((b) => b.failed)).toEqual([true, false]);
+    expect(out[1]!.receipt).toBe("Read 10:01 AM");
+  });
+
+  test("a read receipt does not clear a failed iMessage", () => {
+    // #165 review: a failed edit of a message already read carries both
+    const out = decorate([msg({ ts: "2026-08-31T10:00:00Z", from_me: true, service: "iMessage", error: 22,
+                                read_at: "2026-08-31T10:00:06Z" })], today);
+    expect(out[0]!.failed).toBe(true);
+    expect(out[0]!.receipt).toBe("");
+  });
+
+  test("a failed newest message still owns no receipt", () => {
+    const out = decorate([msg({ ts: "2026-08-31T10:00:00Z", from_me: true, service: "SMS", error: 4 })], today);
+    expect(out[0]!.failed).toBe(true);
+    expect(out[0]!.receipt).toBe("");
   });
 
   test("receipt from an earlier day carries the day label", () => {
