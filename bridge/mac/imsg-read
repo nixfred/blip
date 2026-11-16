@@ -66,6 +66,10 @@ def messages_ui_lock():
     The owner-only lock contains no data. A second read must never change the
     selected conversation between the first read's URL and its menu click.
     """
+    # No menu action can succeed behind the lock screen. Refuse before
+    # acquiring the shared lock or starting an AppleEvent that can hang.
+    if screen_locked():
+        raise OSError(SCREEN_LOCKED)
     folder = os.path.expanduser("~/.blip")
     os.makedirs(folder, mode=0o700, exist_ok=True)
     parent = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)

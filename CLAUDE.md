@@ -211,9 +211,14 @@ what it is handed. Keep it that way.
   retry counters/deadlines and bounded bridge status errors. Persist BEFORE any
   Mac mutation, then execute one due action per collector run. Never detach it.
   A failed action survives restarts and retries with backoff (2–60 seconds).
-  Only `--all` is dropped on failure (it cannot be bounded); a per-chat intent
-  is NEVER dropped, however many attempts. Dropping one after five tries
-  resurrected a dot the user had already read through `intent.seen`, after a
+  `--all` is attempted once; a failure or interruption keeps its click timestamp
+  and becomes per-chat `--through` retries from the next complete snapshot.
+  Later arrivals and explicit gestures are preserved; without a snapshot the
+  bulk intent waits without repeating `--all`. Business/service ids that cannot
+  be opened individually retain the bounded bulk marker until a snapshot
+  confirms they are read; the marker never blocks later per-chat gestures.
+  Attempts are persisted before touching Messages. A per-chat intent is NEVER
+  dropped, however many attempts. Dropping one after five tries resurrected a dot the user had already read through `intent.seen`, after a
   night of a locked Mac (441 attempts, 2026-10-06). A kept intent cannot
   consume a newer inbound: the snapshot compare and `--through` guard it.
   `imsg read-state` returns the COMPLETE metadata-only unread snapshot; it is

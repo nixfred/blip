@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A failed Mark All as Read is retried per conversation without losing newer messages (#167, Curtis Chambers), under `push_read=thread`.**
+  A bulk mark-all that failed or was interrupted (a locked Mac, a dropped link) used to be forgotten, or worse repeated
+  as an unbounded `--all`. The attempt is now saved before the bridge runs and, once a snapshot shows what the click
+  covered, becomes bounded per-chat reads (`--through` the newest message you had seen), so a message that arrived after
+  the click stays unread. Found on a real locked gateway (#166). My review caught that the expansion also ran under the
+  default `push_read=all`, where it would have opened Messages on the Mac once per unread conversation; it is now gated
+  to `thread`, with a test that fails without the gate. Still open from review, not blocking: the leftover marker for
+  business threads keeps the old error on screen, and a message stamped ahead of the Linux clock can come back unread.
 - **Mark All as Read works with Messages minimized or closed (#164, Jared Moody).** On macOS 27.2 the Mark All as Read
   menu item stays disabled while Messages has no window on screen, however long it is the active app, so every push exited
   75 ("stayed disabled even after waking Messages"): 20 in a row from 20 Oct to 11 Nov on his gateway, hidden because
