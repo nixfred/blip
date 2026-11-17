@@ -25,20 +25,11 @@ reconstructed on Sunday from memory.
 
 ---
 
-## 2026-W46 (Mon 9 Nov to Sun 15 Nov): OPEN, post due Sun 15 Nov
+## 2026-W47 (Mon 16 Nov to Sun 22 Nov): OPEN, post due Sun 22 Nov
 
 ### What people said this week (quote with attribution in the post)
 
-- **Ian Swope (https://x.com/ianfs) on #132, Mon 9 Nov**, answering Fred's question about the Pin gap: "the claim in
-  #150 was mine to check. My round trips used a chat whose row was already on screen, so "`open imessage:` brings a
-  row into view" was never actually tested." Then he tested it and sent the fix (#154).
-- **Matt (https://x.com/MattDbrow) on #152, Sun 8 Nov 23:11Z**: "Thanks — my X handle is @MattDbrow."
-- **Marcus Vorwaller (github.com/marcus, no X found 9 Nov) on #156, Mon 9 Nov**: "I'm opening it to start a
-  conversation, not expecting a merge as-is. Happy to split it, drop parts, or keep the UI in my fork and send only the features you want."
-- Comment sweep Mon 9 Nov (since 8 Nov): the three notes above, nothing else from outside.
-- **Marcus Vorwaller (github.com/marcus) on #156, Tue 10 Nov**, after splitting it into six PRs: "The restyle stays in my fork.
-  The extractions keep your theme, controls, banner and mark-all-read link... I'll handle the follow-on rebases as earlier PRs
-  merge rather than leaving those conflicts for you."
+- Comment sweep Tue 17 Nov (since 13 Nov): only the two notes from Jason Alexander on #165, quoted under W46 because he wrote them Sat 14 Nov, before the merge.
 
 ### Mon 16 Nov: #167 and #165 merged
 
@@ -51,6 +42,40 @@ reconstructed on Sunday from memory.
   contact on RCS whose chat row still said iMessage got every send as iMessage, failing with error 22. Two review rounds (an email
   address in a merged phone + email chat could have been handed SMS) and a rebase onto #160, which I did in the merge. Not yet
   proven on a real Android contact through the Mac.
+
+### Tue 17 Nov: every merged PR that never got a thank-you now has one
+
+- **Catch-up thank-yous on 21 merged PRs (#37, #38, #40, #41, #42, #46, #50, #51, #52, #53, #55, #56, #57, #58, #59, #60, #63, #64, #65, #66, #67).**
+  An audit of all 128 merged PRs found these 21, merged 6 to 10 Sep, with no comment and no review from me: Erik
+  Fillipsveen (github.com/Fileri, 13 PRs, X: none found, his 22 in all make him the largest contributor), Jon Kinney
+  (github.com/jondkinney, X https://x.com/jondkinney, 7 PRs) and Danny Cecil (github.com/jefehoser, X
+  https://x.com/jefehoser, 1 PR). Each now has a comment on its own PR saying what the change did, which release first
+  shipped it, and that the whole suite passes on today's `main` (927 tests, 0 failures). Nothing in them claims a review I
+  did not do at the time. For the post: Erik is not named in Post 4 (2.6.2) or the 2.6.2 release notes, only in 2.5.0 and
+  `CONTRIBUTORS-X.md`; Post 8 is where he gets the credit his 22 PRs earn.
+- Open question for Fred: 2.6.2 (26 Sep) is still the latest release and `manifest.json` still says 2.6.2, while the
+  `Unreleased` section of `CHANGELOG.md` now holds every PR since. A release is Fred's call.
+
+## 2026-W46 (Mon 9 Nov to Sun 15 Nov): OPEN, post due Sun 15 Nov
+
+### What people said this week (quote with attribution in the post)
+
+- **Ian Swope (https://x.com/ianfs) on #132, Mon 9 Nov**, answering Fred's question about the Pin gap: "the claim in
+  #150 was mine to check. My round trips used a chat whose row was already on screen, so "`open imessage:` brings a
+  row into view" was never actually tested." Then he tested it and sent the fix (#154).
+- **Matt (https://x.com/MattDbrow) on #152, Sun 8 Nov 23:11Z**: "Thanks — my X handle is @MattDbrow."
+- **Marcus Vorwaller (github.com/marcus, no X found 9 Nov) on #156, Mon 9 Nov**: "I'm opening it to start a
+  conversation, not expecting a merge as-is. Happy to split it, drop parts, or keep the UI in my fork and send only the features you want."
+- Comment sweep Mon 9 Nov (since 8 Nov): the three notes above, nothing else from outside.
+- **Jason Alexander (https://x.com/jasona) on #165, Sat 14 Nov 22:01Z**, correcting his own evidence before the merge: "I converted
+  the install time with the wrong time zone. The fix went in at 00:41 UTC on 2026-11-13, so the three RCS sends I cited
+  (00:31-00:36 UTC) came before it and are not evidence for this PR. No send to either RCS contact has gone out since the
+  install, so a Blip send through the Mac's RCS service is still unconfirmed. I've fixed the comment and the PR
+  description. The rest stands: 240 sends since the install, and none has an error." That is why #165 is recorded as not
+  yet proven on a real RCS contact.
+- **Marcus Vorwaller (github.com/marcus) on #156, Tue 10 Nov**, after splitting it into six PRs: "The restyle stays in my fork.
+  The extractions keep your theme, controls, banner and mark-all-read link... I'll handle the follow-on rebases as earlier PRs
+  merge rather than leaving those conflicts for you."
 
 ### Sat 14 Nov: #160 merged, replies on a specific message (opt-in)
 
