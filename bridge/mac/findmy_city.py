@@ -560,8 +560,31 @@ def unavailable_reason(target: object, now: datetime) -> str:
     return "unsupported-location"
 
 
+def _findmy_running() -> bool:
+    try:
+        return subprocess.run(["/usr/bin/pgrep", "-x", "FindMy"], capture_output=True, timeout=1).returncode == 0
+    except Exception:
+        return True
+
+
 def shared_city(handle: object, contacts, *, enabled: bool, row_reader=read_rows,
                 card_loader=load_cards, refresher=foreground_rows, now=None) -> dict:
+    """NixNet 2026-11-16: quit Find My afterwards if this call launched it."""
+    was_running = _findmy_running() if enabled else True
+    try:
+        return _shared_city_impl(handle, contacts, enabled=enabled, row_reader=row_reader,
+                                 card_loader=card_loader, refresher=refresher, now=now)
+    finally:
+        if not was_running and _findmy_running():
+            try:
+                subprocess.run(["/usr/bin/osascript", "-e", 'tell application id "com.apple.findmy" to quit'],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+            except Exception:
+                pass
+
+
+def _shared_city_impl(handle: object, contacts, *, enabled: bool, row_reader=read_rows,
+                      card_loader=load_cards, refresher=foreground_rows, now=None) -> dict:
     canonical = normalize_handle(handle)
     result = {"ok": True, "handle": canonical, "city": None,
               "reason": "source-unavailable" if enabled else "disabled"}

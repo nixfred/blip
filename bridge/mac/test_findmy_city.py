@@ -655,5 +655,38 @@ console.log('PASS');
             shared.assert_called_once_with(HANDLE, contacts, enabled=True)
 
 
+
+class QuitAfterLaunchTests(unittest.TestCase):
+    """NixNet 2026-11-16: Find My must not be left open by a shared-city read."""
+
+    def _run(self, running_before):
+        calls = []
+        state = {"running": running_before}
+
+        def fake(cmd, **kwargs):
+            calls.append(cmd[0])
+            if cmd[0] == "/usr/bin/pgrep":
+                return SimpleNamespace(returncode=0 if state["running"] else 1, stdout="")
+            return SimpleNamespace(returncode=0, stdout="")
+
+        def reader(enabled):
+            state["running"] = True
+            return []
+
+        with mock.patch.object(city.subprocess, "run", side_effect=fake):
+            city.shared_city("+15555550100", None, enabled=True, row_reader=reader)
+        return calls
+
+    def test_quits_find_my_it_launched(self):
+        self.assertIn("/usr/bin/osascript", self._run(running_before=False))
+
+    def test_leaves_find_my_the_user_had_open(self):
+        self.assertNotIn("/usr/bin/osascript", self._run(running_before=True))
+
+    def test_disabled_never_touches_find_my(self):
+        with mock.patch.object(city.subprocess, "run") as run:
+            city.shared_city("+15555550100", None, enabled=False)
+        run.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()
