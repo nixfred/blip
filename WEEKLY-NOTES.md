@@ -53,8 +53,11 @@ reconstructed on Sunday from memory.
   shipped it, and that the whole suite passes on today's `main` (927 tests, 0 failures). Nothing in them claims a review I
   did not do at the time. For the post: Erik is not named in Post 4 (2.6.2) or the 2.6.2 release notes, only in 2.5.0 and
   `CONTRIBUTORS-X.md`; Post 8 is where he gets the credit his 22 PRs earn.
-- Open question for Fred: 2.6.2 (26 Sep) is still the latest release and `manifest.json` still says 2.6.2, while the
-  `Unreleased` section of `CHANGELOG.md` now holds every PR since. A release is Fred's call.
+- Release answered the same day: Fred ordered the official release and **2.7.0 shipped Tue 17 Nov 2026** (tag `v2.7.0` on
+  9fe5d98, both remotes, https://github.com/nixfred/blip/releases/tag/v2.7.0). 200 commits from 22 people and 42 merged
+  PRs since 2.6.2; `bun test` on gus 927 pass, 0 fail. The release body thanks all 21 outside contributors by GitHub
+  handle, Erik Fillipsveen (@Fileri, 22 PRs) among them. Said plainly in the notes: #165 is not proven on a real RCS
+  contact and #160 not on a 27.2 gateway. For the post: this is the 2.7.0 release post, and Erik is named in it.
 
 ## 2026-W46 (Mon 9 Nov to Sun 15 Nov): OPEN, post due Sun 15 Nov
 
