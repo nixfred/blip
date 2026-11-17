@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased
+## 2.7.0 - 2026-11-17 - any-emoji reactions, native replies, stickers and voice messages
+
+Everything since 2.6.2: 200 commits from 22 people and 42 merged pull requests. The big pieces are reactions with any
+emoji on any message, opt-in native replies, stickers drawn as stickers, voice messages that play inline, a bridge that
+costs the Mac far less per poll and per conversation, and a long run of macOS 27 and 27.2 fixes. The entries below are
+newest first.
+
+**Before you update**
+- **Mac side: re-run `blip-setup`** (or `install.sh` on the Mac) so `imsg`, `imsg-read`, `imsg-react`, `imsg-send` and
+  the new `imsg-reply` match this version.
+- **Linux side, new optional packages.** Voice messages play inline with `ffmpeg`, `qt6-multimedia` and
+  `qt6-multimedia-ffmpeg`. Animated stickers need `ffmpeg` and `qt6-imageformats`. Without them a voice message is a
+  chip and a sticker is a still, as before. `blip-setup` says what is missing.
+- **Opt-in and off by default:** `replies=on` (native replies), `tapbacks=on` (reactions), `shared_city=on` (a friend's
+  city under their name). Reacting with any emoji needs macOS 27.2 or newer on the gateway.
+- **Not yet proven live:** a send to a real RCS (Android) contact through the Mac (#165), and a native reply on a 27.2
+  gateway (#160). Both are covered by tests and went through review; neither has had a real send in someone's own
+  thread yet.
+
 
 - **A send now follows what the conversation's own messages say, not the Mac's chat label (#165, Jason Alexander).** A
   contact texting you on RCS while their chat row was still labelled iMessage got every send as iMessage, failing with
