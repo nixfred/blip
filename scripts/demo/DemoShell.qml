@@ -27,6 +27,7 @@ ShellRoot {
     property int unread: 0
     property bool healthy: true
     property string lastError: ""
+    property var readSync: null
     property var draftCache: ({})
     property var avatarCache: ({})
     signal tapbackExited(string chat, bool ok)
@@ -129,6 +130,12 @@ ShellRoot {
       function share(url: string): string { return view.shareLink(url) }
       function threads(): string { return String(host.threads.length) }
       function macsession(state: string): string { host.macSession = state; return state }
+      function readsync(state: string): string {
+        if (state === "locked") host.readSync = { pending: 1, reason: "locked", label: "Read sync paused (1)", detail: "Read updates are queued and will sync when unlocked. The Mac's screen is locked, so System Events can reach no window; unlock it, or set System Settings ▸ Lock Screen ▸ Start Screen Saver when inactive to Never (README, Keeping the Mac awake)" }
+        else if (state === "pending") host.readSync = { pending: 2, reason: "pending", label: "Read sync pending (2)", detail: "2 read updates are queued and retrying automatically." }
+        else host.readSync = null
+        return state
+      }
     }
   }
 }

@@ -1305,3 +1305,16 @@ describe("a signed-out Mac is said before a send fails (reads work, sends cannot
   });
 });
 
+describe("pending read sync renders as a compact indicator instead of a red alert", () => {
+  test("BarWidget stores readSync separately from lastError and reports it in status", () => {
+    expect(widget).toContain("property var readSync: null");
+    expect(widget).toContain('read_sync=" + root.readSync.reason + "(" + root.readSync.pending + ")"');
+  });
+
+  test("BlipView renders a compact muted pill with tooltip and expandable detail", () => {
+    expect(panel).toContain('objectName: "blipReadSyncIndicator"');
+    expect(panel).toContain('objectName: "blipReadSyncDetail"');
+    expect(panel).toContain("onReadSyncChanged: if (!readSync) readSyncExpanded = false");
+  });
+});
+

@@ -27,7 +27,7 @@ import { appendFileSync, chmodSync, lstatSync, mkdirSync, readdirSync, readFileS
 import { basename, dirname, join } from "node:path";
 import { mergeStickers, type StickerOverlay } from "./stickers";
 import { parseReadSnapshot, parseReadIntents, queueReadIntent, retryReadIntent, reconcileReadIntents,
-  type ReadSnapshot, type ReadIntents } from "./read-sync";
+  classifyReadSync, type ReadSnapshot, type ReadIntents, type ReadSyncNotice } from "./read-sync";
 
 const HOME = process.env.HOME ?? homedir();
 
@@ -232,6 +232,9 @@ export interface BlipOutput {
   /** Whether anyone is logged in at the Mac's screen. "signed-out" means reads work and
    *  sends cannot. Absent on a failed poll and from a collector that predates it. */
   macSession?: MacSession;
+  /** Compact non-error notice when read updates are queued waiting on a locked
+   *  Mac or automatic retry. Hard bridge/permission failures stay in `error`. */
+  readSync?: ReadSyncNotice;
 }
 
 // ---------------------------------------------------------------- state I/O
@@ -2815,15 +2818,11 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
       }
     }
   }
-  const remaining = Object.keys(pendingReads).length;
-  const warning = !persisted
-    ? "state write failed; notifications paused"
-    : syncError || (remaining ? (Object.values(pendingReads).find(r => r.error)?.error || `Read sync pending (${remaining}); retrying automatically`) :
-      !remoteReads ? "Read sync snapshot unavailable; update/check the Mac bridge" : "");
+  const syncStatus = classifyReadSync({ persisted, remoteReads, pendingReads, syncError });
   return {
     ok: true,
     online: true,
-    error: warning,
+    error: syncStatus.error,
     ts: producedAt,
     unread,
     unreadCounts: remoteReads ? exactCounts : undefined,
@@ -2843,6 +2842,7 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
     readPush,
     // Cached for 20 s, so this is one probe in about four polls, not one per poll.
     macSession: checkMacSession(),
+    ...(syncStatus.notice ? { readSync: syncStatus.notice } : {}),
   };
 }
 

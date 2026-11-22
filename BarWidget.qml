@@ -274,6 +274,8 @@ BarWidget {
   // shows a notice. Straight from the collector, which asks the Mac at most every 20 s.
   property string macSession: "unknown"
   property string lastError: ""
+  // Compact read-sync pause/pending notice ({pending, reason, label, detail}) or null.
+  property var readSync: null
   property string lastRun: ""
   // Unsent compose text per chat id, shared by the panel and the app window.
   // In memory only: message text never lands on disk.
@@ -747,7 +749,7 @@ BarWidget {
       if (running) { sawExit = false; return }
       Qt.callLater(function() {
         if (!collector.sawExit && !collector.running) {
-          root.online = false; root.healthy = false
+          root.online = false; root.healthy = false; root.readSync = null
           root.lastError = "cannot start `bun` — it may be installed but missing from the PATH the bar sees (the graphical session does not read your shell rc); link it into ~/.local/bin and restart the shell"
         }
       })
@@ -760,6 +762,17 @@ BarWidget {
           var d = JSON.parse(text.trim())
           root.online = d.online === true
           root.lastError = String(d.error || "")
+          root.readSync = (d.ok === true && d.readSync && typeof d.readSync === "object"
+            && Number.isInteger(Number(d.readSync.pending)) && Number(d.readSync.pending) > 0
+            && (d.readSync.reason === "locked" || d.readSync.reason === "pending")
+            && typeof d.readSync.label === "string" && d.readSync.label !== "")
+            ? {
+                pending: Number(d.readSync.pending),
+                reason: String(d.readSync.reason),
+                label: String(d.readSync.label),
+                detail: String(d.readSync.detail || "")
+              }
+            : null
           root.lastRun = String(d.ts || "")
           if (typeof d.readPush === "string") root.readPush = d.readPush
           if (d.macSession === "ok" || d.macSession === "signed-out" || d.macSession === "unknown") root.macSession = d.macSession
@@ -811,6 +824,7 @@ BarWidget {
           }
         } catch (e) {
           root.healthy = false
+          root.readSync = null
           root.lastError = "collector produced unparseable output"
         }
       }
@@ -1289,6 +1303,7 @@ BarWidget {
         + " watch=" + root.watchAlive
         + " read_push=" + (root.readPush !== "" ? root.readPush : "?")
         + (root.macSession === "signed-out" ? " mac_session=signed-out" : "")
+        + (root.readSync ? " read_sync=" + root.readSync.reason + "(" + root.readSync.pending + ")" : "")
         + " autofill=" + (root.otpAutofill ? (otp.ready ? "ready" : "starting") : "off")
         + " scroll_gain=" + root.scrollGain + (root.touchpadScrollGain !== 1 ? "/" + root.touchpadScrollGain : "")
         + (root.smoothScroll ? " smooth_scroll=on" : "")
@@ -1347,6 +1362,7 @@ BarWidget {
       for (var i = 0; i < hot.length; i++)
         parts.push("  " + hot[i].name + " (" + hot[i].unread + ")")
     }
+    if (root.online && root.readSync) parts.push("↻ " + root.readSync.label)
     if (root.online && !root.healthy && root.lastError !== "") parts.push("⚠ " + root.lastError)
     return parts.join("\n") + "\nclick: threads · double-click: app · middle: refresh · right: mark all read"
   }
