@@ -346,6 +346,16 @@ what it is handed. Keep it that way.
   Duplicate scans include named conversations and short codes. The private
   `audit-cache.json` holds contact summaries only and is reused only after
   validating the handle-set and current Mac store fingerprints.
+- **Geometry follows Omarchy's scale through `Style.space()`.** Omarchy's one
+  text-size knob, `omarchy display text size`, writes `[font] base-size` to
+  `~/.config/omarchy/shell.toml`; `Style.fontScale = base/12` drives BOTH
+  `Style.font.*` and `Style.space()` (via `effectiveSpacingScale`). A bare
+  pixel literal for a size silently stops scaling while the text inside it
+  grows: the window's `1040`/`720`/`minimumSize`, `sidebarWidth: 320` and the
+  pinned avatars' 56..88 bounds did exactly that until they were wrapped.
+  BlipWindow's saved-size guard compares against `win.minimumSize`, not the
+  literal, so a size saved at a smaller base-size is not restored below the
+  scaled minimum. At the default base-size 12 every `Style.space(n)` is `n`.
 - **Blip toast permission is local, not Messages Hide Alerts.** Conversation
   menus use `toast-allowlist.ts` to update the existing `allowlist.json`.
   Matching stays exact chat OR handle, as in `selectToasts`; disabling removes

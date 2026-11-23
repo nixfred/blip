@@ -2593,7 +2593,9 @@ FocusScope {
   // ---- layout: one pane (popout) or two (window). Both panes always exist —
   // hiding, not unloading, keeps image state, selection, and scroll position.
   property bool splitView: false
-  property int sidebarWidth: 320
+  // Scaled like the text it holds, so names do not start eliding sooner
+  // when `omarchy display text size` goes up.
+  property int sidebarWidth: Style.space(320)
   readonly property bool listShowing: splitView || !inThread
 
   RowLayout {
@@ -3064,7 +3066,7 @@ FocusScope {
                       // Hidden layouts defer their first measurement. Derive
                       // the size from the pane's known width and supply both
                       // implicit size and layout hints before the first open.
-                      readonly property real avatarSize: Math.min(88, Math.max(56,
+                      readonly property real avatarSize: Math.min(Style.space(88), Math.max(Style.space(56),
                         ((root.splitView ? root.sidebarWidth - Style.space(36) : root.width)
                           - pinnedGrid.columnSpacing * 2) / 3 * 0.62))
                       implicitWidth: avatarSize

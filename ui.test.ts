@@ -207,6 +207,21 @@ describe("QML safety invariants", () => {
     expect(scaleFontPx(10, 14, 11)).toBe(13);
   });
 
+  // Style.space() carries Omarchy's spacing scale, which tracks [font]
+  // base-size, so geometry written as a bare pixel literal silently stops
+  // following `omarchy display text size` while the text inside it grows.
+  test("window and sidebar geometry follow the Omarchy scale", () => {
+    expect(window).toContain("implicitWidth: Style.space(1040)");
+    expect(window).toContain("implicitHeight: Style.space(720)");
+    expect(window).toContain("minimumSize: Qt.size(Style.space(720), Style.space(480))");
+    // The restore guard has to move with the minimum, or a window saved at a
+    // small base-size is accepted below the minimum after scaling up.
+    expect(window).toContain("d.width >= win.minimumSize.width");
+    expect(window).toContain("d.height >= win.minimumSize.height");
+    expect(window).not.toContain("d.width >= 720");
+    expect(panel).toContain("property int sidebarWidth: Style.space(320)");
+  });
+
   test("message menu retains share sheet: URL on stdin, never argv", () => {
     expect(panel).toContain("function openShare(u, auto)");
     expect(panel).toContain("qrProc.write(u)");
@@ -984,13 +999,14 @@ test("pinned avatars size through Layout hints, not width bindings", () => {
   const start = panel.indexOf("id: pinnedAvatar");
   expect(start).toBeGreaterThan(-1);
   const avatar = panel.slice(start, panel.indexOf("radius: width / 2", start));
-  expect(avatar).toContain("readonly property real avatarSize: Math.min(88, Math.max(56,");
+  expect(avatar).toContain(
+    "readonly property real avatarSize: Math.min(Style.space(88), Math.max(Style.space(56),");
   expect(avatar).toContain("implicitWidth: avatarSize");
   expect(avatar).toContain("implicitHeight: avatarSize");
   expect(avatar).toContain("Layout.preferredWidth: avatarSize");
   expect(avatar).not.toContain("pinnedGrid.width");
   expect(avatar).toContain("Layout.preferredHeight: avatarSize");
-  expect(avatar).not.toContain(" width: Math.min(88");
+  expect(avatar).not.toContain(" width: Math.min(");
 });
 
 // Drafts: text typed but not sent is kept per conversation across a thread
