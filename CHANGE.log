@@ -44,6 +44,7 @@ PEOPLE (verified handles)
   Mark B            github.com/Fail-Safe    X https://x.com/_FailSafe (he said so himself on #148, 2026-10-25; checked 2026-10-28: GitHub profile twitter_username AND social accounts now publish it, `x user @_FailSafe` shows name "Mark B", 78 followers. The earlier @Fail_Safe is "Bob Boberson", NOT him)
   Colton Fitzgerald github.com/coltonfitzgerald X: none found (checked 2026-10-28: GitHub profile and social accounts empty, coltonfitzgerald.me did not load, @coltonfitzgerald does not resolve on X; asked him on #146 and Fred)
   Gerald LaMontagne github.com/lama7        X: none found (checked 2026-11-09: GitHub profile and social accounts empty, his site sahd.lamafam.org lists none, the one X account with his login is named "Lama" with 2 followers and is not guessed; asked him on #157)
+  Tim Pearson       github.com/ttiimmaahh   X https://x.com/ttiimmaahh_ (GitHub profile twitter_username AND social accounts; `x user @ttiimmaahh_` resolves it, X name "ttiimmaahh" matches his login, 467 followers, checked 2026-11-23; the trailing underscore is part of the handle)
   Fred Nix          github.com/nixfred      X https://x.com/nixfred
 
 Earlier contributors and their handles: CONTRIBUTORS-X-POST.md.
@@ -52,6 +53,36 @@ Earlier contributors and their handles: CONTRIBUTORS-X-POST.md.
 LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
+
+2026-11-23  RELEASE 2.8.0 (tag v2.8.0 on a251d5f): nine commits since 2.7.0, three merged PRs from two outside people (#168, #169, #170).
+                 https://github.com/nixfred/blip/releases/tag/v2.8.0. Headlines: Blip's text on the same type ramp as the rest of the Omarchy
+                 shell (#170), the window, sidebar and pinned avatars scaling with the text size (#169), a locked Mac as a quiet pill instead
+                 of a red alert (#168). A minor version because the default text size is one pixel larger for every user. No file under
+                 bridge/ or scripts/blip-setup changed, so no blip-setup re-run. The release body carries a big thank-you to Tim Pearson.
+                 Not looked at on a live desktop by Larry: the #168 pill (no screenshot of it exists anywhere). Cut by Larry on Fred's order:
+                 bun test on gus 937 pass 0 fail, the twelve QtTest and Python UI suites, every Mac suite, py_compile, shellcheck all pass,
+                 tag on origin and forgejo.
+2026-11-23  #170 Blip's text moves onto the ramp Omarchy's own panels use: body for what you read (bubbles, composer, names, search, Contact
+                 Review), bodySmall for supporting text (previews, times, sender names, chips, banners), caption only for fine print.
+                 At the default size names and bubbles go 11px to 12px, previews and times 10px to 11px. Tim Pearson, github.com/ttiimmaahh,
+                 X https://x.com/ttiimmaahh_ (GitHub profile twitter_username AND social accounts; `x user` resolves it and the name matches
+                 his login, 2026-11-23; the trailing underscore is part of the handle). His first PR. He found the cause by measuring (SF Pro
+                 against the theme mono is about 4% of x-height; caption 34 uses against body 4), ran the ramp on his own desktop since
+                 September, attached before and after screenshots, and wrote three tests that fail on 2.7.0. Larry added: the ui.test.ts
+                 conflict with #168 and #169 resolved, and ui_font_size re-anchored from bodySmall to body (b08baca) so it still means
+                 bubble text, found merging (it would have drawn 15px bubbles for ui_font_size=14). 937 bun, twelve UI suites, CI green.
+2026-11-23  #169 The window (1040 by 720, minimum 720 by 480), the split-view sidebar (320) and the pinned avatars (56 to 88) go through
+                 Style.space(), so they grow with `omarchy display text size` like the text inside them: at base-size 15 the sidebar is
+                 400px and "Dana Whitfield" is no longer cut to "Dana Whitf...". The saved-size guard compares against the scaled minimum.
+                 Nothing moves at the default size. Tim Pearson, github.com/ttiimmaahh, X https://x.com/ttiimmaahh_ (same handle as #170).
+                 He also found scripts/demo/blip-shots rendering every conversation as "loading" (DemoShell lacked replyPending) and named
+                 the one-line fix; Larry added it with his credit (7a75a5b) so the release was not held for it. He offered a follow-up for the
+                 newer fixed-size components (AudioMessage, ReactionPicker, ComposerEmojiPicker, MessageMenu, StickerImage); invited on the PR.
+2026-11-23  #168 A locked gateway Mac shows a muted "Read sync paused (N)" pill beside "mark all read" (hover for detail, click to expand)
+                 instead of a four-line red banner; real failures still show red; status reports read_sync=locked(N) with healthy=true.
+                 Danny Cecil, github.com/jefehoser, X https://x.com/jefehoser (confirmed by Fred 2026-09-16); his ninth merged PR. 937 bun,
+                 test-read-ui green. NOT seen drawn: no screenshot in the PR, no locked gateway in front of Larry. The pill text is caption,
+                 one step under "mark all read" (bodySmall after #170); left as he wrote it.
 
 2026-11-17  RELEASE 2.7.0 (tag v2.7.0 on 9fe5d98): everything since 2.6.2, 200 commits from 22 people and 42 merged PRs.
                  https://github.com/nixfred/blip/releases/tag/v2.7.0. Headlines: reactions with any emoji on any message (#159), opt-in native

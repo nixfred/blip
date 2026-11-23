@@ -15,7 +15,7 @@ tags are at the bottom.
 |---|---|---|---|---|
 | Ian Swope | ianswope | https://x.com/ianfs | 24 | GitHub profile + social accounts; replies to @NixFred about Omarchy. NOT @IanSwope |
 | Jon Kinney | jondkinney | https://x.com/jondkinney | 12 | GitHub profile |
-| Danny Cecil | jefehoser | https://x.com/jefehoser | 8 | same login on X, posts Omarchy; confirmed by Fred 2026-09-16 |
+| Danny Cecil | jefehoser | https://x.com/jefehoser | 9 | same login on X, posts Omarchy; confirmed by Fred 2026-09-16 |
 | Adam Gamble | adamgamble | https://x.com/adamgamble | 5 | GitHub profile |
 | Zach Wilke | zachwilke | https://x.com/zachwilke_1 | 5 | his site pinefall.dev |
 | Johan Thorén | johanthoren | https://x.com/jmythoren | 3 | GitHub profile + social accounts |
@@ -40,6 +40,7 @@ tags are at the bottom.
 | Jason Meller | terracatta | https://x.com/jmeller | 1 | GitHub profile twitter_username AND social accounts; X name matches, 3.4k followers (#153, merged 2026-11-08; row added 2026-11-11, it was missed on the day) |
 | Jason Alexander | jasona | https://x.com/jasona | 1 | GitHub profile twitter_username AND social accounts; `x user` resolves it and the name matches, 2026-11-16 (#165) |
 | Curtis Chambers | curtisc | NONE KNOWN | 1 | nothing on his GitHub profile; ask him (#167, merged 2026-11-16). Credit by GitHub handle until he answers |
+| Tim Pearson | ttiimmaahh | https://x.com/ttiimmaahh_ | 2 | GitHub profile twitter_username AND social accounts; `x user @ttiimmaahh_` resolves it, X name "ttiimmaahh" matches his login, 467 followers, 2026-11-23 (#169, #170, merged 2026-11-23; first PRs). The handle ends in an underscore. Offered the chance to opt out on #170 |
 
 ## Likely, waiting on Fred
 
@@ -70,7 +71,7 @@ on GitHub, no name or site (checked 2026-10-21); Fred asked.
 ## Paste block
 
 ```
-@ianfs @jondkinney @jefehoser @adamgamble @zachwilke_1 @jmythoren @gjouret @damonjanis @tlehmanifold @joshuaswarren @ezachrisen @jethrojones @bbishdotdev @badenpiland @followbl @StudioXRadio @chadstovern @GreyforgeLabs @bndnsmth @jaredmoody @brightball @jzetterman @_FailSafe @MattDbrow @jmeller
+@ianfs @jondkinney @jefehoser @adamgamble @zachwilke_1 @jmythoren @gjouret @damonjanis @tlehmanifold @joshuaswarren @ezachrisen @jethrojones @bbishdotdev @badenpiland @followbl @StudioXRadio @chadstovern @GreyforgeLabs @bndnsmth @jaredmoody @brightball @jzetterman @_FailSafe @MattDbrow @jmeller @jasona @ttiimmaahh_
 ```
 
 Plus by name: Erik Fillipsveen (github.com/Fileri), joshhattan,

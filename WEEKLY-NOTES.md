@@ -25,11 +25,63 @@ reconstructed on Sunday from memory.
 
 ---
 
+## 2026-W48 (Mon 23 Nov to Sun 29 Nov): OPEN, post due Sun 29 Nov
+
+### What people said this week (quote with attribution in the post)
+
+- Comment sweep Mon 23 Nov (since 17 Nov): one note, Danny Cecil's on #40, quoted under W47 because he wrote it Tue 17 Nov.
+- Nothing yet from Tim Pearson; he has not replied to the thank-you or the X-handle question on #170.
+
+### Mon 23 Nov: #170, #169 and #168 merged, and Blip 2.8.0 is out
+
+- **#170 Blip's text now reads at the desktop's size.** Tim Pearson (github.com/ttiimmaahh, X https://x.com/ttiimmaahh_, handle ends in an
+  underscore; GitHub profile and social accounts publish it, `x user` resolves it, checked 23 Nov). His first PR. Blip followed
+  `omarchy display text size` yet read about 20% smaller than the shell around it. He did not ask for a bigger font: he measured
+  the font (SF Pro against the theme's monospace is about 4% of x-height, so not the cause), counted the tokens (`caption` 34 uses,
+  `body` 4, where Omarchy's panels lead with `body`), and moved Blip onto a semantic ramp: body for what you read, bodySmall for
+  supporting text, caption for fine print only. At the default size names and bubbles go 11px to 12px, previews and times 10px
+  to 11px. He ran it on his own desktop since September, attached before and after screenshots (I read them) and wrote three
+  tests that fail on 2.7.0 (I put 2.7.0's QML back to see). For the post: this is the story, and the "found the cause instead
+  of asking for a bigger font" angle is true and checkable.
+- **#169 the window, sidebar and pinned avatars follow the text size.** Tim Pearson again. Four bare pixel literals (window
+  1040 by 720 and minimum 720 by 480, sidebar 320, pinned avatars 56 to 88) now go through `Style.space()`; at base-size 15 the
+  sidebar is 400px and "Dana Whitfield" is no longer cut to "Dana Whitf...". The saved-size guard compares against the scaled
+  minimum, the part most people would miss. Nothing moves at the default size. He left the newer fixed-size components alone and
+  offered a follow-up; invited on the PR (AudioMessage, ReactionPicker, ComposerEmojiPicker, MessageMenu, StickerImage).
+- **#168 a locked Mac is a quiet pill, not a red alert.** Danny Cecil (github.com/jefehoser, X https://x.com/jefehoser), his ninth
+  merged PR. A gateway Mac with a locked screen under `push_read=thread` showed four lines of red error for a normal pause; it now
+  shows a muted "Read sync paused (N)" pill, and real failures still show red. NOT checked by me: I have not seen it drawn, and no
+  screenshot exists. For the post, say it is tested and not yet seen on a locked Mac.
+- **Found while merging, ours:** `ui_font_size` (documented as bubble text in pixels) was anchored to `bodySmall`, which was the
+  bubble step before #170. Left alone it would have drawn 15px bubbles for anyone with `ui_font_size=14`. Re-anchored to `body`
+  with a test that fails if reverted (b08baca). Tim's own instinct, that the knob must keep working, was right; the anchor had to move.
+- **Also ours, credited to Tim:** `DemoShell` lacked `replyPending`, so `scripts/demo/blip-shots` drew every conversation as
+  "loading". He named the one-line fix on #169; added with his credit (7a75a5b). Other host properties DemoShell lacks were not audited.
+- **Blip 2.8.0 shipped** the same day (tag `v2.8.0` on a251d5f, both remotes; https://github.com/nixfred/blip/releases/tag/v2.8.0).
+  Nine commits, three merged PRs from two outside people. `bun test` on gus 937 pass, 0 fail; the twelve QtTest and Python UI suites,
+  every Mac-tool suite, `py_compile`, `bash -n` and shellcheck pass. No bridge file changed, so no `blip-setup` re-run. A minor
+  version because the default text size is one pixel larger for everyone. The release body opens its thanks with a long paragraph
+  for Tim. Said plainly in the notes: #165 (a real RCS contact) and #160 (a 27.2 gateway) are still not proven live.
+- **Issues, Mon 23 Nov.** #125: status posted (item 1 done 10 Nov, item 3 done in `CLAUDE.md`, item 2, `runReadAction` inside the
+  collector with a 180 s timeout, still open, `collector.ts:2373`). #78: a correction posted, #36 was already fixed on 9 Sep when
+  the 18 Sep hold was written, so the hold on Undo Send is lifted and a PR is welcome on the stated terms (flag, own messages, two
+  minute refusal, chat.db as referee); Local Delete stays out. #129 (mikev1963, SSH) and #112 (Ian Swope, Chrome autocomplete):
+  nothing new, left open as before.
+- **Audit:** all 128 merged PRs carry a comment or review from me; nothing missing. No new merged PR from outside between 17 Nov and today.
+- **Post:** Post 9 is drafted (docs/x-post-2026-11-23.txt). 2.7.0 (17 Nov) never had its own announcement post: Post 8 (through
+  14 Nov) was READY and Fred posts; the 2.7.0 release is covered in one line of Post 9.
+
+### Handles Fred still needs to answer (23 Nov)
+
+- Tim Pearson: handle verified from his own profile; he was offered an opt-out on #170. Nothing to ask Fred unless Tim declines.
+
 ## 2026-W47 (Mon 16 Nov to Sun 22 Nov): OPEN, post due Sun 22 Nov
 
 ### What people said this week (quote with attribution in the post)
 
 - Comment sweep Tue 17 Nov (since 13 Nov): only the two notes from Jason Alexander on #165, quoted under W46 because he wrote them Sat 14 Nov, before the merge.
+- **Danny Cecil (https://x.com/jefehoser) on #40, Tue 17 Nov 22:05Z**, replying to the catch-up thank-you: "Thanks Fred! I love Blip and admire all the
+  stuff you do to make Omarchy even better! -Danny". Found by the Mon 23 Nov sweep; it landed on an already merged PR.
 
 ### Mon 16 Nov: #167 and #165 merged
 

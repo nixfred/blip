@@ -24,6 +24,7 @@ no pomp, no em dashes. Plain text below the marker; X renders no markdown.
 | W44 | ROLLED INTO W45 (Larry, 2026-11-04): nothing outside merged after Post 7's PRs, only the #132 half fix | 2026-W44 | notes in WEEKLY-NOTES.md |
 | W45 | DRAFT 2026-11-08 (due Sun 8 Nov; covers W44 + W45) | 2026-W45 | #132 half fix, #149 (Ian Swope), #150 (Ian Swope), #151 (Dima Grigorchuk), #152 (Matt), #153 (Jason Meller); text below, notes in WEEKLY-NOTES.md |
 | 8 | READY 2026-11-14 (on vic's clipboard; Fred posts) | 2026-09-26 to 2026-11-14 | One big thank-you post replacing the unsent drafts 5, 6, 7 and W45: 40 PRs from 18 outside people, 1 cherry-pick, 1 reporter, plus what is in review. Text docs/x-post-2026-11-14.txt, image docs/img/x-post-2026-11-14.png (source .html) |
+| 9 | DRAFT 2026-11-23 (Fred posts) | 2026-W47 + W48 | Blip 2.8.0: Tim Pearson's two PRs (#170 text ramp, #169 geometry follows the scale) as the story, Danny Cecil's #168 pill, a line for 2.7.0. Text docs/x-post-2026-11-23.txt. No image yet |
 
 ---
 

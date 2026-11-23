@@ -1,0 +1,13 @@
+Blip 2.8.0 is out. Blip puts iMessage on the Omarchy desktop, using a Mac you already own as the gateway.
+
+The headline is two pull requests from Tim Pearson (@ttiimmaahh_), his first.
+
+Blip felt small next to the rest of the desktop. Tim did not ask for a bigger font. He measured it: SF Pro against the theme's monospace is about 4% of x-height, so the font was never the cause. Then he counted which text size Blip's panel used. The small caption size, 34 times. The normal body size, 4 times, where every Omarchy panel leads with body. He moved Blip onto the same ramp as the rest of the shell, wrote tests that fail on the old code, ran it on his own desktop for two months first, and attached before and after screenshots. Names and bubbles go from 11px to 12px, previews and times from 10px to 11px. Same font, same colours, same layout.
+
+His second PR: the window, the sidebar and the pinned avatars now grow with the desktop's text size. At a larger size the text used to grow inside boxes that did not, so names were cut off and previews wrapped. At size 15 the sidebar is now 400px instead of 320. He also found a bug in our own screenshot tool and named the one-line fix.
+
+Danny Cecil (@jefehoser) sent a third: a Mac with a locked screen now shows a small "Read sync paused" pill instead of four lines of red error. Read updates wait and sync when you unlock it. Tested, not yet seen on a locked Mac.
+
+Nothing changes on the Mac side, so there is no setup to re-run. Release 2.7.0 (any-emoji reactions, native replies, stickers, voice messages) went out on 17 November.
+
+https://github.com/nixfred/blip/releases/tag/v2.8.0
