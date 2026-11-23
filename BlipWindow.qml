@@ -27,9 +27,11 @@ FloatingWindow {
   // Same fill as Omarchy's other FloatingWindow (dev gallery). A 0.70
   // alpha assumed Hyprland blur, which Omarchy 4.x ships off.
   color: hostWidget && hostWidget.appearance ? hostWidget.appearance.background : Commons.Color.background
-  implicitWidth: 1040
-  implicitHeight: 720
-  minimumSize: Qt.size(720, 480)
+  // Style.space() carries Omarchy's spacing scale, which follows [font]
+  // base-size: a bare literal here stays put while the text inside grows.
+  implicitWidth: Style.space(1040)
+  implicitHeight: Style.space(720)
+  minimumSize: Qt.size(Style.space(720), Style.space(480))
   visible: false
   // Focused = Hyprland's active toplevel is this window (title prefix "Blip").
   // A visible-but-unfocused window keeps refreshing but does not mark read.
@@ -207,7 +209,9 @@ FloatingWindow {
   Component.onCompleted: {
     try {
       var d = JSON.parse(winState.text())
-      if (d && d.width >= 720 && d.height >= 480) { implicitWidth = d.width; implicitHeight = d.height }
+      // Against the scaled minimum, not the literal: a size saved at a smaller
+      // base-size is too small for a larger one and falls back to the default.
+      if (d && d.width >= win.minimumSize.width && d.height >= win.minimumSize.height) { implicitWidth = d.width; implicitHeight = d.height }
       if (d && typeof d.workspace === "string") savedWorkspace = d.workspace
       if (d && d.visible === true) { prepareRestore.running = true; return }
     } catch (e) { /* first run */ }
