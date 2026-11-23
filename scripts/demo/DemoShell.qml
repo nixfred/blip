@@ -28,6 +28,7 @@ ShellRoot {
     property bool healthy: true
     property string lastError: ""
     property var readSync: null
+    property var replyPending: []
     property var draftCache: ({})
     property var avatarCache: ({})
     signal tapbackExited(string chat, bool ok)
