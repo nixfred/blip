@@ -965,7 +965,7 @@ FocusScope {
       anchors.centerIn: parent
       text: root.tapbackRow(pill.tapbacks)
       textFormat: Text.PlainText
-      font.pixelSize: root.fontCaption
+      font.pixelSize: root.fontBodySmall
     }
   }
 
@@ -2682,7 +2682,7 @@ FocusScope {
           textFormat: Text.PlainText
           color: root.urgent
           font.family: root.fontFamily
-          font.pixelSize: root.fontCaption
+          font.pixelSize: root.fontBodySmall
           wrapMode: Text.WordWrap
         }
 
@@ -2745,7 +2745,7 @@ FocusScope {
               textFormat: Text.PlainText
               color: root.dim
               font.family: root.fontFamily
-              font.pixelSize: root.fontBodySmall
+              font.pixelSize: root.fontBody
               wrapMode: Text.WordWrap
             }
             // Reachable, but signed out at the screen: the one failure that reads fine and
@@ -2770,7 +2770,7 @@ FocusScope {
               textFormat: Text.PlainText
               color: root.urgent
               font.family: root.fontFamily
-              font.pixelSize: root.fontBodySmall
+              font.pixelSize: root.fontBody
               wrapMode: Text.WordWrap
             }
 
@@ -2855,7 +2855,7 @@ FocusScope {
                 textFormat: Text.PlainText
                 color: markAllHover.hovered ? root.mineFill : root.cyan
                 font.family: root.fontFamily
-                font.pixelSize: root.fontCaption
+                font.pixelSize: root.fontBodySmall
                 font.underline: markAllHover.hovered
                 HoverHandler { id: markAllHover; cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: root.markAllRead() }
@@ -2887,7 +2887,7 @@ FocusScope {
               foreground: root.foreground
               accent: root.accent
               font.family: root.fontFamily
-              font.pixelSize: root.fontBodySmall
+              font.pixelSize: root.fontBody
               onAccepted: root.acceptNewField()
               Keys.onEscapePressed: root.exitNew()
               Keys.onPressed: function(event) {
@@ -2912,7 +2912,7 @@ FocusScope {
               textFormat: Text.PlainText
               color: root.dim
               font.family: root.fontFamily
-              font.pixelSize: root.fontCaption
+              font.pixelSize: root.fontBodySmall
             }
 
             Repeater {
@@ -2946,7 +2946,7 @@ FocusScope {
                     elide: Text.ElideRight
                     color: root.foreground
                     font.family: root.fontFamily
-                    font.pixelSize: root.fontBodySmall
+                    font.pixelSize: root.fontBody
                     font.bold: true
                   }
                   Text {
@@ -2956,7 +2956,7 @@ FocusScope {
                     elide: Text.ElideRight
                     color: root.dim
                     font.family: root.fontFamily
-                    font.pixelSize: root.fontCaption
+                    font.pixelSize: root.fontBodySmall
                   }
                 }
               }
@@ -2995,7 +2995,7 @@ FocusScope {
               foreground: root.foreground
               accent: root.accent
               font.family: root.fontFamily
-              font.pixelSize: root.fontBodySmall
+              font.pixelSize: root.fontBody
               onAccepted: root.acceptSearchField()
               onActiveFocusChanged: if (activeFocus && !root.searching) root.searching = true
               Keys.onEscapePressed: root.exitSearch()
@@ -3167,7 +3167,7 @@ FocusScope {
                       elide: Text.ElideRight
                       color: root.foreground
                       font.family: root.fontFamily
-                      font.pixelSize: root.fontCaption
+                      font.pixelSize: root.fontBodySmall
                       font.bold: modelData.unread > 0
                     }
                   }
@@ -3182,7 +3182,7 @@ FocusScope {
               textFormat: Text.PlainText
               color: root.dim
               font.family: root.fontFamily
-              font.pixelSize: root.fontCaption
+              font.pixelSize: root.fontBodySmall
             }
 
             Repeater {
@@ -3222,7 +3222,7 @@ FocusScope {
                       elide: Text.ElideRight
                       color: root.foreground
                       font.family: root.fontFamily
-                      font.pixelSize: root.fontBodySmall
+                      font.pixelSize: root.fontBody
                       font.bold: true
                     }
                     Text {
@@ -3230,7 +3230,7 @@ FocusScope {
                       textFormat: Text.PlainText
                       color: root.dim
                       font.family: root.fontFamily
-                      font.pixelSize: root.fontCaption
+                      font.pixelSize: root.fontBodySmall
                     }
                   }
                   Text {
@@ -3244,7 +3244,7 @@ FocusScope {
                     wrapMode: Text.WordWrap
                     color: root.dim
                     font.family: root.fontFamily
-                    font.pixelSize: root.fontCaption
+                    font.pixelSize: root.fontBodySmall
                   }
                 }
               }
@@ -3257,7 +3257,7 @@ FocusScope {
               textFormat: Text.PlainText
               color: root.dim
               font.family: root.fontFamily
-              font.pixelSize: root.fontBodySmall
+              font.pixelSize: root.fontBody
               wrapMode: Text.WordWrap
             }
 
@@ -3400,7 +3400,7 @@ FocusScope {
                           elide: Text.ElideRight
                           color: root.foreground
                           font.family: root.fontFamily
-                          font.pixelSize: root.fontBodySmall
+                          font.pixelSize: root.fontBody
                           // Messages keeps the name semibold ALWAYS; unread is
                           // carried by the dot and the blue timestamp, not by
                           // the name suddenly changing weight.
@@ -3411,7 +3411,7 @@ FocusScope {
                           textFormat: Text.PlainText
                           color: modelData.unread > 0 ? root.mineFill : root.dim
                           font.family: root.fontFamily
-                          font.pixelSize: root.fontCaption
+                          font.pixelSize: root.fontBodySmall
                         }
                       }
                       // TWO lines, wrapped — the single most recognisable thing
@@ -3426,7 +3426,7 @@ FocusScope {
                         maximumLineCount: 2
                         color: root.dim
                         font.family: root.fontFamily
-                        font.pixelSize: root.fontCaption
+                        font.pixelSize: root.fontBodySmall
                         lineHeight: 1.15
                       }
                     }
@@ -3544,7 +3544,7 @@ FocusScope {
           textFormat: Text.PlainText
           color: root.urgent
           font.family: root.fontFamily
-          font.pixelSize: root.fontCaption
+          font.pixelSize: root.fontBodySmall
           wrapMode: Text.WordWrap
         }
 
@@ -3644,7 +3644,7 @@ FocusScope {
               horizontalAlignment: Text.AlignHCenter
               color: root.dim
               font.family: root.fontFamily
-              font.pixelSize: root.fontCaption
+              font.pixelSize: root.fontBodySmall
             }
 
             Repeater {
@@ -3672,7 +3672,7 @@ FocusScope {
                   horizontalAlignment: Text.AlignHCenter
                   color: root.dim
                   font.family: root.fontFamily
-                  font.pixelSize: root.fontCaption
+                  font.pixelSize: root.fontBodySmall
                   font.bold: true
                   topPadding: Style.space(10)
                   bottomPadding: Style.space(4)
@@ -3692,7 +3692,7 @@ FocusScope {
                   elide: Text.ElideRight
                   color: root.dim
                   font.family: root.fontFamily
-                  font.pixelSize: root.fontCaption
+                  font.pixelSize: root.fontBodySmall
                 }
 
                 // "You unsent a message" tombstone replaces a retracted bubble
@@ -3708,7 +3708,7 @@ FocusScope {
                     elide: Text.ElideRight
                     color: root.dim
                     font.family: root.fontFamily
-                    font.pixelSize: root.fontCaption
+                    font.pixelSize: root.fontBodySmall
                     font.italic: true
                     padding: Style.space(4)
                   }
@@ -3754,7 +3754,7 @@ FocusScope {
                       maximumLineCount: 1
                       color: root.dim
                       font.family: root.fontFamily
-                      font.pixelSize: root.fontCaption
+                      font.pixelSize: root.fontBodySmall
                     }
                   }
                   Item { Layout.fillWidth: true; visible: !bubbleRow.mine }
@@ -3998,7 +3998,7 @@ FocusScope {
                         textFormat: Text.PlainText
                         color: bubbleRow.mine ? root.mineText : root.theirsText
                         font.family: root.fontFamily
-                        font.pixelSize: root.fontCaption
+                        font.pixelSize: root.fontBodySmall
                       }
                       HoverHandler { cursorShape: Qt.PointingHandCursor }
                       TapHandler { onTapped: root.openAttachment(chipRow.modelData) }
@@ -4087,7 +4087,7 @@ FocusScope {
                           elide: Text.ElideRight
                           color: bubbleRow.mine ? root.mineText : root.theirsText
                           font.family: root.fontFamily
-                          font.pixelSize: root.fontBodySmall
+                          font.pixelSize: root.fontBody
                           font.bold: true
                         }
                         Text {
@@ -4101,7 +4101,7 @@ FocusScope {
                           color: bubbleRow.mine ? root.mineText : root.theirsText
                           opacity: 0.85
                           font.family: root.fontFamily
-                          font.pixelSize: root.fontCaption
+                          font.pixelSize: root.fontBodySmall
                         }
                         Text {
                           Layout.fillWidth: true
@@ -4111,7 +4111,7 @@ FocusScope {
                           color: bubbleRow.mine ? root.mineText : root.theirsText
                           opacity: 0.6
                           font.family: root.fontFamily
-                          font.pixelSize: root.fontCaption
+                          font.pixelSize: root.fontBodySmall
                         }
                       }
                     }
@@ -4185,7 +4185,7 @@ FocusScope {
                       selectionColor: bubbleRow.mine ? "#ffffff" : root.mineFill
                       selectedTextColor: bubbleRow.mine ? root.mineFill : "#ffffff"
                       font.family: root.fontFamily
-                      font.pixelSize: root.fontBodySmall
+                      font.pixelSize: root.fontBody
                       onActiveFocusChanged: root.bubbleFocused = activeFocus
                       Keys.onEscapePressed: { deselect(); composeField.forceActiveFocus() }
                       // Ctrl+C through wl-copy: Qt's own clipboard does not reliably
@@ -4335,7 +4335,7 @@ FocusScope {
               textFormat: Text.PlainText
               color: root.dim
               font.family: root.fontFamily
-              font.pixelSize: root.fontBodySmall
+              font.pixelSize: root.fontBody
             }
           }
         }
@@ -4382,14 +4382,14 @@ FocusScope {
               maximumLineCount: 1
               color: root.dim
               font.family: root.fontFamily
-              font.pixelSize: root.fontCaption
+              font.pixelSize: root.fontBodySmall
             }
             Text {
               text: "✕"
               textFormat: Text.PlainText
               color: root.dim
               font.family: root.fontFamily
-              font.pixelSize: root.fontCaption
+              font.pixelSize: root.fontBodySmall
               leftPadding: Style.space(6); rightPadding: Style.space(6)
               Accessible.name: "Cancel reply"
               HoverHandler { cursorShape: Qt.PointingHandCursor }
@@ -4430,7 +4430,7 @@ FocusScope {
                   textFormat: Text.PlainText
                   color: root.mineText
                   font.family: root.fontFamily
-                  font.pixelSize: root.fontCaption
+                  font.pixelSize: root.fontBodySmall
                 }
                 HoverHandler { cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: root.removeAttachment(modelData.path) }
@@ -4549,7 +4549,7 @@ FocusScope {
                 selectionColor: Style.selectionFillFor(root.foreground, root.mineFill)
                 selectedTextColor: root.foreground
                 font.family: root.fontFamily
-                font.pixelSize: root.fontBodySmall
+                font.pixelSize: root.fontBody
                 readonly property var _composeBorder: Border.controlSpec(
                   activeFocus ? "focus" : (hovered ? "hover-cursor" : "normal"),
                   root.foreground, root.mineFill)
@@ -4652,7 +4652,7 @@ FocusScope {
           textFormat: Text.PlainText
           color: root.urgent
           font.family: root.fontFamily
-          font.pixelSize: root.fontCaption
+          font.pixelSize: root.fontBodySmall
           wrapMode: Text.WordWrap
         }
         Text {
@@ -4664,7 +4664,7 @@ FocusScope {
             || root.note === "sent to LocalSend" || root.note.indexOf("attached") === 0
           color: calm ? root.dim : root.urgent
           font.family: root.fontFamily
-          font.pixelSize: root.fontCaption
+          font.pixelSize: root.fontBodySmall
           wrapMode: Text.WordWrap
         }
       }
@@ -4919,7 +4919,7 @@ FocusScope {
     foreground: root.foreground
     accent: root.accent
     fontFamily: root.fontFamily
-    fontSize: root.fontBodySmall
+    fontSize: root.fontBody
     onClosed: root.focusDefault()
     onCopyRequested: function(text) { root.copyText(text) }
     onContactSaved: if (root.hostWidget) root.hostWidget.refresh(true)
@@ -4946,7 +4946,7 @@ FocusScope {
       wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter
       anchors.centerIn: parent
       text: root.copyFeedback; textFormat: Text.PlainText
-      color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontCaption
+      color: root.foreground; font.family: root.fontFamily; font.pixelSize: root.fontBodySmall
     }
   }
 
@@ -5041,7 +5041,7 @@ FocusScope {
           text: root.shareUrl
           textFormat: Text.PlainText
           color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.7)
-          font.family: root.fontFamily; font.pixelSize: root.fontCaption
+          font.family: root.fontFamily; font.pixelSize: root.fontBodySmall
           elide: Text.ElideMiddle
           maximumLineCount: 1
         }

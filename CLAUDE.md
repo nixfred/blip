@@ -377,6 +377,23 @@ what it is handed. Keep it that way.
   their phone off would pull Find My forward once a minute for as long as the chat stayed open (found in
   review of #152; the author added the limit). Do not add another focus-changing path to `findmy_city.py`
   without the same cooldown, and keep `CityRecord` free of coordinates, names and raw AX descriptions.
+- **Blip's type ramp is body-led, like Omarchy's own panels.** Blip follows
+  `omarchy display text size` through `Style.font.*`, yet it read ~20% smaller
+  than the desktop around it. The cause was TOKEN CHOICE, not scaling: the
+  dominant token was `caption` (10px at base-size 12) where every Omarchy panel
+  leads with `body` (12px). Not the font either: SF Pro Text's x-height is
+  0.526 em against MesloLGS NF Mono's 0.547, only ~4%, so do not "fix" size by
+  dropping SF Pro. The ramp is semantic: primary content (bubble text, the
+  composer, thread and contact names, empty states, the search and new-message
+  fields, Contact Review) is `fontBody`; supporting text (previews, times,
+  sender names, day dividers, chips, tapbacks, the reply banner, notes and
+  errors) is `fontBodySmall`; only fine print (receipts, bubble metadata, the
+  version tag, section headers, "Esc closes", avatar initials) stays
+  `fontCaption`. Do not shrink Blip to fit more in by pushing content back to
+  caption; a cramped panel is fixed with the desktop knob. `ui_font_size=N`
+  remains the Blip-only override (anchored to `bodySmall`, so it scales the
+  whole ramp and opts out of the desktop knob). `ui.test.ts` ("type ramp")
+  keeps caption from dominating again.
 - **Configuration is `bridge.conf` keys, not a settings system.** Blip has one
   config file (`~/.config/blip/bridge.conf`, parsed not sourced) carrying
   `host`, `remote_bin`, `automation`, `ui_font_size`, `ui_font_theme`,

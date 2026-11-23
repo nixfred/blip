@@ -1334,3 +1334,37 @@ describe("pending read sync renders as a compact indicator instead of a red aler
   });
 });
 
+// Blip reads at the same apparent size as the rest of the shell. Its dominant
+// token used to be `caption` (10px at base-size 12) where Omarchy's own panels
+// lead with `body` (12px), so Blip rendered ~20% smaller than the desktop
+// around it at every scale. Primary content (bubbles, composer, thread and
+// contact names) is body; supporting text (previews, times, sender names,
+// chips, banners) is bodySmall; only fine print (receipts, bubble metadata,
+// the version tag, section headers, key hints) stays caption.
+describe("type ramp", () => {
+  test("leads with body, not caption", () => {
+    const counts = { fontCaption: 0, fontBodySmall: 0, fontBody: 0 };
+    for (const m of panel.matchAll(/(?:pixelSize|fontSize):.*?\b(fontCaption|fontBodySmall|fontBody)\b/g))
+      counts[m[1] as keyof typeof counts]++;
+    // caption is fine print only: it must not dominate the interface again.
+    expect(counts.fontCaption).toBeLessThan(counts.fontBody);
+    expect(counts.fontCaption).toBeLessThan(counts.fontBodySmall);
+    expect(counts.fontBody).toBeGreaterThan(10);
+  });
+
+  test("bubble text and the composer read at body size", () => {
+    const bubble = panel.indexOf("selectedTextColor: bubbleRow.mine");
+    expect(bubble).toBeGreaterThan(-1);
+    expect(panel.slice(bubble, bubble + 200)).toContain("font.pixelSize: root.fontBody\n");
+    const compose = panel.indexOf("placeholderText: root.attachCount > 0");
+    expect(compose).toBeGreaterThan(-1);
+    expect(panel.slice(compose, compose + 700)).toContain("font.pixelSize: root.fontBody\n");
+  });
+
+  test("contact review reads at body size", () => {
+    const review = panel.indexOf('objectName: "blipContactReview"');
+    expect(review).toBeGreaterThan(-1);
+    expect(panel.slice(review, review + 300)).toContain("fontSize: root.fontBody\n");
+  });
+});
+
