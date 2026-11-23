@@ -1,5 +1,53 @@
 # Changelog
 
+## 2.8.0 - 2026-11-23 - text that reads at the desktop's size
+
+Everything since 2.7.0: nine commits, three merged pull requests from two people. Blip's text now sits on the same type
+ramp as the rest of the Omarchy shell, the window and sidebar grow with the desktop's text size instead of staying
+put, and a Mac that has locked its screen no longer paints a red alert over the panel. The entries below are newest
+first.
+
+**Before you update**
+- **Nothing on the Mac changes.** No file under `bridge/` and not `scripts/blip-setup` differs from 2.7.0, so there is no
+  `blip-setup` re-run. Copy the plugin files and restart the shell.
+- **Your text is one step larger by default.** At the default text size, names, bubble text and the composer go from 11px
+  to 12px, and previews and times from 10px to 11px. Font, colours and layout are the same. If you set `ui_font_size`
+  yourself, nothing changes for you: it still means bubble text in pixels.
+- **Not yet looked at on a live desktop:** the read-sync pill (#168). It is covered by tests and the author checked it
+  against a locked gateway, but I have not seen it drawn.
+
+- **Blip reads at the desktop's size (#170, Tim Pearson).** Blip followed `omarchy display text size` yet read about 20%
+  smaller than the shell around it at every scale. Tim traced it to token choice, not scaling and not the font: the
+  dominant token in the panel was `caption` (34 uses, 10px at the default size) where every Omarchy panel leads with
+  `body`, and SF Pro against the theme's monospace differs by only about 4% of x-height. The ramp is now semantic:
+  `body` for what you read (bubble text, the composer, thread and contact names, empty states, the search and
+  new-message fields, Contact Review), `bodySmall` for supporting text (previews, times, sender names, day dividers,
+  attachment chips, tapbacks, the reply banner, notes and errors), and `caption` only for fine print (receipts, bubble
+  metadata, the version tag, section headers, key hints, avatar initials). After: `body` 17 uses, `bodySmall` 32,
+  `caption` 9. Voice-message and sticker labels stay `caption` because their boxes are fixed size. He had run the
+  ramp on his own machine since September, attached before and after screenshots, and the three new "type ramp" tests
+  fail on 2.7.0 and pass here. It is a change to defaults, not a new setting.
+- **The window, sidebar and pinned avatars follow the text size (#169, Tim Pearson).** Four sizes were bare pixel
+  literals: the window's 1040 by 720 default and 720 by 480 minimum, the sidebar's 320, and the pinned avatars' 56 to 88
+  bounds. At a larger text size the text grew inside containers that did not, so pinned names elided ("Dana Whitf..."),
+  previews wrapped and cut off, and the window opened cramped. They now go through `Style.space()`, so at base-size 15 the
+  sidebar is 400px and the window opens at 1300 by 900; at the default size nothing moves. The saved-size guard compares
+  against the scaled minimum, so a window size saved at a smaller text size is not restored too small. He left the newer
+  fixed-size components (audio, reaction picker, emoji picker, message menu, sticker) alone on purpose and offered to
+  follow up.
+- **A locked Mac is a quiet pill, not a red alert (#168, Danny Cecil).** Under `push_read=thread`, reads queued behind a
+  locked gateway used to show a four-line red "imsg-read: ..." banner, which made a normal pause look like a broken
+  bridge. They now show a muted "Read sync paused (N)" pill beside "mark all read": hover for the detail, click to
+  expand it inline. `status` reports `read_sync=locked(N)` with `healthy=true`. Real failures (Accessibility or Full Disk
+  Access denied, a state write failure, a missing read-state snapshot, any non-locked error in a mixed queue) still show
+  the red banner, and the queue's durability, backoff and `--through` rules are untouched.
+- **`ui_font_size` still means bubble text (found merging #170).** The setting is documented as bubble text in pixels, and
+  it was anchored to `bodySmall`, which was the bubble step. When #170 moved bubbles up to `body` the anchor stayed, so
+  `ui_font_size=14` would have drawn 15px bubbles for everyone who had set it. It now anchors to `body`; a test pins it.
+- **The screenshot harness works again (Tim Pearson).** `scripts/demo/blip-shots` drew every conversation as "loading"
+  because its stand-in shell lacked `replyPending`, which `BlipView` has read since native replies (#160). Tim found the
+  line while preparing #169; added with his credit.
+
 ## 2.7.0 - 2026-11-17 - any-emoji reactions, native replies, stickers and voice messages
 
 Everything since 2.6.2: 200 commits from 22 people and 42 merged pull requests. The big pieces are reactions with any
