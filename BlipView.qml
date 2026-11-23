@@ -188,6 +188,11 @@ FocusScope {
   /** The Mac is reachable but nobody is logged in at its screen: reading works, sending cannot. */
   readonly property bool macSignedOut: online && hostWidget ? hostWidget.macSession === "signed-out" : false
   readonly property string macSignedOutText: "The Mac is signed out: Blip can read, but cannot send until you log in at the Mac."
+  /** Compact read-sync pause/pending indicator when updates are queued waiting on a locked Mac or retry. */
+  readonly property var readSync: (online && hostWidget && hostWidget.readSync && Number(hostWidget.readSync.pending) > 0)
+    ? hostWidget.readSync : null
+  property bool readSyncExpanded: false
+  onReadSyncChanged: if (!readSync) readSyncExpanded = false
   readonly property int unread: hostWidget ? hostWidget.unread : 0
   readonly property var toastAllowlist: hostWidget ? hostWidget.toastAllowlist : []
   readonly property bool toastAllowlistLoaded: hostWidget ? hostWidget.toastAllowlistLoaded === true : false
@@ -2770,13 +2775,74 @@ FocusScope {
             // ---------------------------------------------- LIST VIEW
             RowLayout {
               Layout.fillWidth: true
+              spacing: Style.space(8)
               visible: root.online && root.listShowing
                 && (root.newMode || root.canMarkAllRead && !root.searchShowing)
               PanelSectionHeader {
+                visible: root.newMode
                 Layout.fillWidth: true
-                text: root.newMode ? "NEW MESSAGE" : ""
+                text: "NEW MESSAGE"
                 foreground: root.foreground
                 fontFamily: root.fontFamily
+              }
+              // Compact status pill when read updates are queued (e.g. Mac screen
+              // locked). Hover for detail; click to expand/collapse inline.
+              Rectangle {
+                id: readSyncPill
+                objectName: "blipReadSyncIndicator"
+                visible: root.readSync !== null && !root.newMode && !root.searchShowing
+                onVisibleChanged: if (!visible) root.readSyncExpanded = false
+                Accessible.role: Accessible.Button
+                Accessible.name: root.readSync ? String(root.readSync.label || "") : ""
+                readonly property real maxPillWidth: Math.max(0,
+                  listContent.width - (markAllBtn.visible ? markAllBtn.implicitWidth + Style.space(8) : 0))
+                Layout.maximumWidth: maxPillWidth
+                implicitWidth: Math.min(maxPillWidth, readSyncRow.implicitWidth + Style.space(12))
+                implicitHeight: readSyncRow.implicitHeight + Style.space(4)
+                radius: height / 2
+                color: readSyncHover.hovered || root.readSyncExpanded
+                  ? root.hoverFill
+                  : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06)
+                Row {
+                  id: readSyncRow
+                  anchors.verticalCenter: parent.verticalCenter
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  anchors.leftMargin: Style.space(6)
+                  anchors.rightMargin: Style.space(6)
+                  spacing: Style.space(4)
+                  Text {
+                    id: readSyncIcon
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "↻"
+                    textFormat: Text.PlainText
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fontCaption
+                  }
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.min(implicitWidth, Math.max(0, readSyncPill.maxPillWidth - Style.space(12) - readSyncIcon.implicitWidth - readSyncRow.spacing))
+                    text: root.readSync ? String(root.readSync.label || "") : ""
+                    textFormat: Text.PlainText
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fontCaption
+                    elide: Text.ElideRight
+                  }
+                }
+                HoverHandler { id: readSyncHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: root.readSyncExpanded = !root.readSyncExpanded }
+                PanelToolTip {
+                  visible: root.readSync !== null && !root.readSyncExpanded && readSyncHover.hovered
+                  width: Math.min(Style.space(280), Math.max(Style.space(180), listContent.width))
+                  text: root.readSync ? String(root.readSync.detail || "") : ""
+                  fontFamily: root.fontFamily
+                }
+              }
+              Item {
+                visible: !root.newMode
+                Layout.fillWidth: true
               }
               // Clear local marks and, unless push_read=off, ask Messages
               // on the Mac to mark its conversations read too.
@@ -2792,6 +2858,18 @@ FocusScope {
                 HoverHandler { id: markAllHover; cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: root.markAllRead() }
               }
+            }
+            Text {
+              objectName: "blipReadSyncDetail"
+              Layout.fillWidth: true
+              visible: root.online && root.listShowing && root.readSync !== null
+                && root.readSyncExpanded && !root.newMode && !root.searchShowing
+              text: root.readSync ? String(root.readSync.detail || "") : ""
+              textFormat: Text.PlainText
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: root.fontCaption
+              wrapMode: Text.WordWrap
             }
 
             // ------------------------------------------------ SEARCH

@@ -256,7 +256,10 @@ what it is handed. Keep it that way.
   because Messages selection is process-global. `push_read` still defaults to
   `all`; this installation may opt into `thread` in bridge.conf. `off` suppresses
   explicit menu read pushes too. `read_push=` reports policy; `watch=` reports
-  watcher health. Never conflate those.
+  watcher health. Never conflate those. Queued intents waiting on a locked Mac
+  screen (or retrying without a hard error) surface through `BlipOutput.readSync`
+  (`classifyReadSync`) as a compact muted indicator in BlipView and `read_sync=`
+  in IPC `status`; hard bridge/permission errors stay in `error` (red banner).
 - **No message content in state.json.** `~/.local/state/blip/state.json` holds
   timestamps, counts, opaque SHA-256 toast keys, self-chat ids, and group
   metadata. It is atomic and `0600`; no message bodies are allowed. EXCEPTION

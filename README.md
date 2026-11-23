@@ -642,7 +642,8 @@ System Events, so the one Blip feature that drives Messages' own window — the
 per-conversation read push under `push_read=thread` — fails 25 minutes after
 you last touched the Mac and recovers the second you unlock it. Reading
 `chat.db` needs no window, which is exactly what makes it confusing: Blip
-reports `healthy=false` with *"the Mac's screen is locked"*, you walk over,
+shows a compact *"Read sync paused"* indicator (and reports `read_sync=locked(N)`
+in `status`), you walk over,
 and Messages is open and fine. Keep a gateway Mac unlocked:
 
 ```bash

@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { enqueueRefresh, parseReadSnapshot, parseReadIntents, queueReadIntent, reconcileReadIntents, retryReadIntent } from "./read-sync";
+import { classifyReadSync, enqueueRefresh, isScreenLockedError, parseReadSnapshot, parseReadIntents, queueReadIntent, reconcileReadIntents, retryReadIntent } from "./read-sync";
 
 const chat = "+15551234567";
 const old = "2026-09-01T10:00:00Z";
@@ -97,6 +97,8 @@ with open(home+'/actions.jsonl','a') as f: f.write(json.dumps(args)+'\\n')
 ctl=json.load(open(home+'/control.json'))
 if ctl.get('inspect_attempt'):
  with open(home+'/attempt.json','w') as f: json.dump(json.load(open(home+'/.local/state/blip/state.json'))['pendingReads'],f)
+if ctl.get('locked'):
+ print("imsg-read: the Mac's screen is locked, so System Events can reach no window; unlock it",file=sys.stderr); sys.exit(77)
 if ctl.get('fail'):
  print('imsg-read: Accessibility is not granted',file=sys.stderr); sys.exit(77)
 data=json.load(open(home+'/remote.json'))
@@ -438,4 +440,114 @@ test("an interrupted bulk action resumes with a bounded read, never another all"
   expect(f.run().unread).toBe(0);
   expect(f.actions()).toEqual([["--chat", chat, "--through", old]]);
   expect(f.state().pendingReads).toEqual({});
+});
+
+describe("read sync status classification", () => {
+  const lockedErr = "imsg-read: the Mac's screen is locked, so System Events can reach no window; unlock it";
+  const snap = parseReadSnapshot(snapshot(0))!;
+
+  test("identifies screen-locked errors without conflating permission errors", () => {
+    expect(isScreenLockedError(lockedErr)).toBe(true);
+    expect(isScreenLockedError("the Mac's screen is locked")).toBe(true);
+    expect(isScreenLockedError("imsg-read: Accessibility is not granted")).toBe(false);
+    expect(isScreenLockedError("")).toBe(false);
+  });
+
+  test("classifies locked and queued states as compact notices while hard errors stay errors", () => {
+    expect(classifyReadSync({ persisted: true, remoteReads: snap, pendingReads: {}, syncError: "" }))
+      .toEqual({ error: "", notice: null });
+    expect(classifyReadSync({ persisted: false, remoteReads: snap, pendingReads: {}, syncError: "" }))
+      .toEqual({ error: "state write failed; notifications paused", notice: null });
+    expect(classifyReadSync({ persisted: true, remoteReads: null, pendingReads: {}, syncError: "" }))
+      .toEqual({ error: "Read sync snapshot unavailable; update/check the Mac bridge", notice: null });
+
+    const oneLocked = classifyReadSync({
+      persisted: true,
+      remoteReads: snap,
+      pendingReads: { [chat]: { unread: false, seen: old, attempts: 1, retryAt: 5000, error: lockedErr } },
+      syncError: lockedErr,
+    });
+    expect(oneLocked.error).toBe("");
+    expect(oneLocked.notice?.reason).toBe("locked");
+    expect(oneLocked.notice?.pending).toBe(1);
+    expect(oneLocked.notice?.label).toBe("Read sync paused (1)");
+    expect(oneLocked.notice?.detail).toContain("The Mac's screen is locked");
+
+    const bulkLocked = classifyReadSync({
+      persisted: true,
+      remoteReads: snap,
+      pendingReads: { "*": { unread: false, seen: old, attempts: 1, retryAt: 5000, error: lockedErr } },
+      syncError: "",
+    });
+    expect(bulkLocked.error).toBe("");
+    expect(bulkLocked.notice?.label).toBe("Read sync paused");
+
+    const queuedNoErr = classifyReadSync({
+      persisted: true,
+      remoteReads: snap,
+      pendingReads: {
+        [chat]: { unread: false, seen: old, attempts: 0, retryAt: 0 },
+        "+15557654321": { unread: false, seen: old, attempts: 0, retryAt: 0 },
+      },
+      syncError: "",
+    });
+    expect(queuedNoErr.error).toBe("");
+    expect(queuedNoErr.notice).toEqual({
+      pending: 2,
+      reason: "pending",
+      label: "Read sync pending (2)",
+      detail: "2 read updates are queued and retrying automatically.",
+    });
+
+    const mixedHard = classifyReadSync({
+      persisted: true,
+      remoteReads: snap,
+      pendingReads: {
+        [chat]: { unread: false, seen: old, attempts: 1, retryAt: 5000, error: lockedErr },
+        "+15557654321": { unread: false, seen: old, attempts: 1, retryAt: 5000, error: "imsg-read: Accessibility is not granted" },
+      },
+      syncError: "",
+    });
+    expect(mixedHard.error).toContain("Accessibility");
+    expect(mixedHard.notice).toBeNull();
+
+    const orphanSyncErr = classifyReadSync({
+      persisted: true,
+      remoteReads: snap,
+      pendingReads: {},
+      syncError: lockedErr,
+    });
+    expect(orphanSyncErr.error).toBe(lockedErr);
+    expect(orphanSyncErr.notice).toBeNull();
+  });
+
+  test("locked Mac reports a compact readSync notice instead of a hard error and clears on unlock", () => {
+    const f = fixture();
+    f.put("control.json", { locked: true });
+    const paused = f.run("--read", chat, "--seen", old);
+    expect(paused.unread).toBe(0);
+    expect(paused.error).toBe("");
+    expect(paused.readSync).toMatchObject({
+      pending: 1,
+      reason: "locked",
+      label: "Read sync paused (1)",
+    });
+    expect(paused.readSync.detail).toContain("screen is locked");
+
+    // Subsequent poll during backoff keeps the compact notice without re-running imsg-read.
+    const backoff = f.run();
+    expect(backoff.error).toBe("");
+    expect(backoff.readSync?.label).toBe("Read sync paused (1)");
+    expect(f.actions()).toHaveLength(1);
+
+    // Unlocking drains the queued read and clears the notice.
+    f.put("control.json", {});
+    const st = f.state(); st.pendingReads[chat].retryAt = 0; f.save(st);
+    const cleared = f.run();
+    expect(cleared.unread).toBe(0);
+    expect(cleared.error).toBe("");
+    expect(cleared.readSync).toBeUndefined();
+    expect(f.state().pendingReads).toEqual({});
+    expect(f.actions()).toHaveLength(2);
+  });
 });
