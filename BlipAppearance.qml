@@ -42,8 +42,9 @@ QtObject {
   readonly property bool themeFontForced: !!hostWidget && hostWidget.uiFontTheme === true
   readonly property string fontFamily:
     (messagesFont !== "" && !themeFontForced) ? messagesFont : themeFont
-  // `ui_font_size=N` in bridge.conf: N is bubble text in px. Unset (0) keeps
-  // Omarchy's tokens. Caption/body keep the same ratios as Style.font.
+  // `ui_font_size=N` in bridge.conf: N is bubble text in px, which is the
+  // `body` step of the ramp (bubbles lead with body since #170). Unset (0)
+  // keeps Omarchy's tokens. Every other step keeps its Style.font ratio.
   readonly property int uiFontSizePx: {
     if (!hostWidget) return 0
     var n = hostWidget.uiFontSize
@@ -51,8 +52,8 @@ QtObject {
   }
   readonly property real uiFontScale: {
     if (uiFontSizePx <= 0) return 1
-    var small = Style.font.bodySmall
-    return small > 0 ? uiFontSizePx / small : 1
+    var anchor = Style.font.body
+    return anchor > 0 ? uiFontSizePx / anchor : 1
   }
   readonly property int fontTitle: Math.max(1, Math.round(Style.font.title * uiFontScale))
   readonly property int fontCaption: Math.max(1, Math.round(Style.font.caption * uiFontScale))

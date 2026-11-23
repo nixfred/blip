@@ -1361,6 +1361,18 @@ describe("type ramp", () => {
     expect(panel.slice(compose, compose + 700)).toContain("font.pixelSize: root.fontBody\n");
   });
 
+  test("ui_font_size stays bubble text: the override anchors to body, not bodySmall", () => {
+    const appearance = readFileSync(new URL("./BlipAppearance.qml", import.meta.url), "utf8");
+    // Bubbles are `body`, so N must land on body or ui_font_size=14 would draw 15px bubbles.
+    expect(appearance).toContain("var anchor = Style.font.body\n");
+    expect(appearance).toContain("uiFontSizePx / anchor");
+    expect(appearance).not.toContain("Style.font.bodySmall\n    return");
+    // The arithmetic the docs promise, at the default base-size 12 (body 12, bodySmall 11, caption 10).
+    expect(scaleFontPx(12, 14, 12)).toBe(14);
+    expect(scaleFontPx(11, 14, 12)).toBe(13);
+    expect(scaleFontPx(10, 14, 12)).toBe(12);
+  });
+
   test("contact review reads at body size", () => {
     const review = panel.indexOf('objectName: "blipContactReview"');
     expect(review).toBeGreaterThan(-1);

@@ -391,9 +391,13 @@ what it is handed. Keep it that way.
   version tag, section headers, "Esc closes", avatar initials) stays
   `fontCaption`. Do not shrink Blip to fit more in by pushing content back to
   caption; a cramped panel is fixed with the desktop knob. `ui_font_size=N`
-  remains the Blip-only override (anchored to `bodySmall`, so it scales the
-  whole ramp and opts out of the desktop knob). `ui.test.ts` ("type ramp")
-  keeps caption from dominating again.
+  remains the Blip-only override and opts out of the desktop knob. N is bubble
+  text in px, so `BlipAppearance.uiFontScale` anchors to `body`, the step bubbles
+  now use, and the other steps keep their ratios to it. It was anchored to
+  `bodySmall` while bubbles were `bodySmall`; leaving the anchor there when the
+  ramp moved up a step would have made `ui_font_size=14` mean 15px bubbles for
+  everyone who had set it (found merging #170). `ui.test.ts` ("type ramp") keeps
+  caption from dominating again and pins the anchor.
 - **Configuration is `bridge.conf` keys, not a settings system.** Blip has one
   config file (`~/.config/blip/bridge.conf`, parsed not sourced) carrying
   `host`, `remote_bin`, `automation`, `ui_font_size`, `ui_font_theme`,
