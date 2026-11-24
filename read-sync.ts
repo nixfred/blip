@@ -4,6 +4,15 @@ export interface RemoteRead { unread: number; oldest: string; latest: string; al
 export type ReadSnapshot = Record<string, RemoteRead>;
 export interface ReadIntent { unread: boolean; seen: string; attempts: number; retryAt: number; error?: string; chats?: string[] }
 export type ReadIntents = Record<string, ReadIntent>;
+/** The one read action that may be running (or just finished) outside the poll.
+ *  `done` is written by the worker, never by the collector, and state.json is
+ *  written by the collector only: the two never race for a file. */
+export interface ReadAction {
+  chat: string; unread: boolean; seen: string; startedAt: number;
+  done?: { ok: boolean; error: string; at: number };
+}
+/** imsg-read's own timeout is 180 s; a worker still silent after this has died. */
+export const READ_ACTION_DEADLINE_MS = 190_000;
 export interface ReadSyncNotice { pending: number; reason: "locked" | "pending"; label: string; detail: string }
 export interface ReadSyncStatus { error: string; notice: ReadSyncNotice | null }
 
@@ -155,4 +164,37 @@ export function enqueueRefresh<T extends { markRead: boolean; unreadChat: string
   }
   q.push(req);
   return q;
+}
+
+export function parseReadAction(value: unknown): ReadAction | null {
+  const v = value as ReadAction;
+  if (!v || typeof v !== "object" || typeof v.chat !== "string" || !v.chat || v.chat.length > 512 ||
+      typeof v.unread !== "boolean" || typeof v.seen !== "string" ||
+      !Number.isFinite(v.startedAt) || v.startedAt < 0) return null;
+  const d = v.done;
+  if (d !== undefined && (!d || typeof d.ok !== "boolean" || typeof d.error !== "string" || !Number.isFinite(d.at))) return null;
+  return { chat: v.chat, unread: v.unread, seen: v.seen, startedAt: v.startedAt,
+    ...(d ? { done: { ok: d.ok, error: d.error.slice(0, 240).replace(/[\x00-\x1f\x7f]/g, " "), at: d.at } } : {}) };
+}
+
+/** Fold a finished read action back into the queue. The caller (the collector,
+ *  the only writer of state.json) persists the result.
+ *  - still running: nothing changes, `settled` is false, and no other action starts.
+ *  - a worker that never reported by the deadline counts as a failure.
+ *  - an intent replaced by a newer gesture while the action ran is left alone:
+ *    the result belonged to the old one and the new one runs on its own turn.
+ *  - success retires the intent; failure keeps it (never dropped) with the error and
+ *    the backoff counted from when the action ended, not from when it began. */
+export function settleReadAction(pending: ReadIntents, action: ReadAction, now: number):
+  { pending: ReadIntents; settled: boolean; error: string } {
+  if (!action.done && now - action.startedAt <= READ_ACTION_DEADLINE_MS) return { pending, settled: false, error: "" };
+  const result = action.done ?? { ok: false, error: "imsg-read did not finish; will retry", at: now };
+  const cur = pending[action.chat];
+  if (!cur || cur.unread !== action.unread || cur.seen !== action.seen) return { pending, settled: true, error: "" };
+  const next = { ...pending };
+  if (result.ok) { delete next[action.chat]; return { pending: next, settled: true, error: "" }; }
+  const backoff = Math.max(0, cur.retryAt - action.startedAt);
+  next[action.chat] = { ...cur, error: result.error.slice(0, 240).replace(/[\x00-\x1f\x7f]/g, " "),
+    retryAt: Math.max(cur.retryAt, result.at + backoff) };
+  return { pending: next, settled: true, error: result.error };
 }

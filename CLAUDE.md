@@ -228,7 +228,17 @@ what it is handed. Keep it that way.
 - **Read sync is an acknowledged, durable action queue.** `pendingReads` in
   state.json stores only chat ids, desired read/unread state, visible timestamps,
   retry counters/deadlines and bounded bridge status errors. Persist BEFORE any
-  Mac mutation, then execute one due action per collector run. Never detach it.
+  Mac mutation, then start one due action per collector run. The action runs in
+  its own worker process (`startReadAction`, `collector.ts --read-worker`), because
+  `imsg-read` has a 180 s timeout and one hung Mac call used to stall every poll
+  and toast behind it (#125 item 2). It is detached from the POLL, never from its
+  ACKNOWLEDGEMENT: the collector writes `read-action.json` first (so no second
+  action starts while one runs), the worker only adds `done` to it, and the
+  collector remains the SOLE writer of state.json, folding the result in
+  (`settleReadAction`) on the poll that started it (it waits up to
+  `BLIP_READ_GRACE_MS`, default 5 s) or on a later one. A worker silent past 190 s
+  counts as a failure and the intent is kept. Do not let the worker write
+  state.json: two writers lose acknowledgements.
   A failed action survives restarts and retries with backoff (2–60 seconds).
   `--all` is attempted once; a failure or interruption keeps its click timestamp
   and becomes per-chat `--through` retries from the next complete snapshot.

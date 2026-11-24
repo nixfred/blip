@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { expandFailedMarkAll } from "./collector";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { expandFailedMarkAll, readActionGraceMs } from "./collector";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { classifyReadSync, enqueueRefresh, isScreenLockedError, parseReadSnapshot, parseReadIntents, queueReadIntent, reconcileReadIntents, retryReadIntent } from "./read-sync";
+import { classifyReadSync, enqueueRefresh, isScreenLockedError, parseReadSnapshot, parseReadIntents, queueReadIntent, reconcileReadIntents, retryReadIntent, settleReadAction, parseReadAction, READ_ACTION_DEADLINE_MS } from "./read-sync";
 
 const chat = "+15551234567";
 const old = "2026-09-01T10:00:00Z";
@@ -91,9 +91,10 @@ else:
 `;
   writeFileSync(join(home, "bin/imsg"), bridge, { mode: 0o755 });
   writeFileSync(join(home, "bin/imsg-read"), `#!/usr/bin/env python3
-import json,os,sys
+import json,os,sys,time
 home=os.environ['HOME']; args=sys.argv[1:]
 with open(home+'/actions.jsonl','a') as f: f.write(json.dumps(args)+'\\n')
+while json.load(open(home+'/control.json')).get('hang'): time.sleep(0.05)
 ctl=json.load(open(home+'/control.json'))
 if ctl.get('inspect_attempt'):
  with open(home+'/attempt.json','w') as f: json.dump(json.load(open(home+'/.local/state/blip/state.json'))['pendingReads'],f)
@@ -111,10 +112,11 @@ print('verified')
 `, { mode: 0o755 });
   const statePath = join(home, ".local/state/blip/state.json");
   const state = () => JSON.parse(readFileSync(statePath, "utf8"));
+  const extraEnv: Record<string, string> = {};
   const run = (...args: string[]) => {
     // HOME isolates the shims; the runtime dir isolates the live accelerator.
     const result = spawnSync(process.execPath, [join(import.meta.dir, "collector.ts"), "--deep", ...args], {
-      encoding: "utf8", env: { ...process.env, HOME: home, XDG_RUNTIME_DIR: home }, timeout: 10000,
+      encoding: "utf8", env: { ...process.env, HOME: home, XDG_RUNTIME_DIR: home, ...extraEnv }, timeout: 10000,
     });
     expect(result.status).toBe(0);
     const out = JSON.parse(result.stdout);
@@ -122,7 +124,7 @@ print('verified')
     return out;
   };
   const actions = () => { try { return readFileSync(join(home, "actions.jsonl"), "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l)); } catch { return []; } };
-  return { home, put, run, state, actions, save: (s: unknown) => writeFileSync(statePath, JSON.stringify(s)) };
+  return { home, put, run, state, actions, extraEnv, save: (s: unknown) => writeFileSync(statePath, JSON.stringify(s)) };
 }
 
 describe("collector read sync lifecycle", () => {
@@ -549,5 +551,96 @@ describe("read sync status classification", () => {
     expect(cleared.readSync).toBeUndefined();
     expect(f.state().pendingReads).toEqual({});
     expect(f.actions()).toHaveLength(2);
+  });
+});
+
+describe("the read action runs off the poll path (#125 item 2)", () => {
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  test("a hung imsg-read does not hold up polling, and its result is picked up later", async () => {
+    const f = fixture(); f.run();
+    f.extraEnv.BLIP_READ_GRACE_MS = "200";
+    f.put("control.json", { hang: true });
+    // Before this change the poll waited on imsg-read for up to 180 s (here, until
+    // the harness killed it at 10 s and `run` failed on the exit status).
+    let t = Date.now();
+    const first = f.run("--read", chat, "--seen", old);
+    expect(Date.now() - t).toBeLessThan(4000);
+    expect(first.unread).toBe(0);
+    expect(f.state().pendingReads[chat].attempts).toBe(1);
+    // Polls while it hangs return at once, start nothing else, and keep the intent.
+    t = Date.now();
+    const second = f.run();
+    expect(Date.now() - t).toBeLessThan(4000);
+    expect(second.unread).toBe(0);
+    expect(f.actions()).toHaveLength(1);
+    expect(f.state().pendingReads[chat]).toBeDefined();
+    // The Mac answers; the next poll folds the result in and retires the intent.
+    f.put("control.json", {});
+    const marker = join(f.home, ".local/state/blip/read-action.json");
+    for (let i = 0; i < 100 && !(existsSync(marker) && JSON.parse(readFileSync(marker, "utf8")).done); i++) await sleep(50);
+    expect(JSON.parse(readFileSync(marker, "utf8")).done.ok).toBe(true);
+    f.run();
+    expect(f.state().pendingReads).toEqual({});
+    expect(existsSync(marker)).toBe(false);
+    expect(f.actions()).toHaveLength(1);
+  }, 20000);
+
+  test("a failure that ends after the poll left is kept with its error and retried", async () => {
+    const f = fixture(); f.run();
+    f.extraEnv.BLIP_READ_GRACE_MS = "0";
+    f.put("control.json", { hang: true, fail: true });
+    f.run("--read", chat, "--seen", old);
+    f.put("control.json", { fail: true });
+    const marker = join(f.home, ".local/state/blip/read-action.json");
+    for (let i = 0; i < 100 && !(existsSync(marker) && JSON.parse(readFileSync(marker, "utf8")).done); i++) await sleep(50);
+    const out = f.run();
+    expect(out.error).toContain("Accessibility");
+    expect(f.state().pendingReads[chat].attempts).toBe(1);
+    expect(f.state().pendingReads[chat].error).toContain("Accessibility");
+    expect(existsSync(marker)).toBe(false);
+  }, 20000);
+
+  test("grace period is bounded and configurable", () => {
+    expect(readActionGraceMs({})).toBe(5000);
+    expect(readActionGraceMs({ BLIP_READ_GRACE_MS: "250" })).toBe(250);
+    expect(readActionGraceMs({ BLIP_READ_GRACE_MS: "-1" })).toBe(5000);
+    expect(readActionGraceMs({ BLIP_READ_GRACE_MS: "junk" })).toBe(5000);
+    expect(readActionGraceMs({ BLIP_READ_GRACE_MS: "9999999" })).toBe(60000);
+  });
+});
+
+describe("settleReadAction", () => {
+  const a = { chat, unread: false, seen: old, startedAt: 1000 };
+  const pend = { [chat]: { unread: false, seen: old, attempts: 1, retryAt: 3000 } };
+  test("a running action changes nothing and blocks the next", () => {
+    expect(settleReadAction(pend, a, 5000)).toEqual({ pending: pend, settled: false, error: "" });
+  });
+  test("success retires the intent", () => {
+    const r = settleReadAction(pend, { ...a, done: { ok: true, error: "", at: 2000 } }, 5000);
+    expect(r).toEqual({ pending: {}, settled: true, error: "" });
+  });
+  test("failure keeps the intent, with backoff counted from when the action ended", () => {
+    const r = settleReadAction(pend, { ...a, done: { ok: false, error: "imsg-read: Accessibility is not granted", at: 181000 } }, 182000);
+    expect(r.settled).toBe(true);
+    expect(r.error).toContain("Accessibility");
+    expect(r.pending[chat]).toMatchObject({ attempts: 1, retryAt: 183000 });
+    expect(r.pending[chat]!.error).toContain("Accessibility");
+  });
+  test("a worker that never reports is a failure after the deadline, never a lost intent", () => {
+    expect(settleReadAction(pend, a, 1000 + READ_ACTION_DEADLINE_MS).settled).toBe(false);
+    const r = settleReadAction(pend, a, 1001 + READ_ACTION_DEADLINE_MS);
+    expect(r.settled).toBe(true);
+    expect(r.pending[chat]).toBeDefined();
+    expect(r.pending[chat]!.error).toContain("did not finish");
+  });
+  test("a result for an intent a newer gesture replaced is ignored", () => {
+    const newer = { [chat]: { unread: true, seen: "", attempts: 0, retryAt: 0 } };
+    const r = settleReadAction(newer, { ...a, done: { ok: true, error: "", at: 2000 } }, 5000);
+    expect(r).toEqual({ pending: newer, settled: true, error: "" });
+  });
+  test("parseReadAction rejects junk and strips control characters", () => {
+    expect(parseReadAction({ chat: "", unread: false, seen: "", startedAt: 1 })).toBeNull();
+    expect(parseReadAction({ chat, unread: "no", seen: "", startedAt: 1 })).toBeNull();
+    expect(parseReadAction({ ...a, done: { ok: true, error: "x\u0007y", at: 1 } })!.done!.error).toBe("x y");
   });
 });

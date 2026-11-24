@@ -27,12 +27,15 @@ import { appendFileSync, chmodSync, lstatSync, mkdirSync, readdirSync, readFileS
 import { basename, dirname, join } from "node:path";
 import { mergeStickers, type StickerOverlay } from "./stickers";
 import { parseReadSnapshot, parseReadIntents, queueReadIntent, retryReadIntent, reconcileReadIntents,
-  classifyReadSync, type ReadSnapshot, type ReadIntents, type ReadSyncNotice } from "./read-sync";
+  classifyReadSync, parseReadAction, settleReadAction, type ReadAction,
+  type ReadSnapshot, type ReadIntents, type ReadSyncNotice } from "./read-sync";
 
 const HOME = process.env.HOME ?? homedir();
 
 /** Watermark + toast dedupe. ~/.local/state is deliberate: never inside a repo. */
 export const STATE_PATH = `${HOME}/.local/state/blip/state.json`;
+/** The one read action running outside the poll (see startReadAction). */
+export const READ_ACTION_PATH = `${HOME}/.local/state/blip/read-action.json`;
 /** Handles whose inbound messages are allowed to raise a desktop toast. */
 export const ALLOWLIST_PATH = `${HOME}/.config/blip/allowlist.json`;
 /** Handles and phrases whose conversations Blip does not show at all. */
@@ -2386,6 +2389,70 @@ export function runReadAction(args: string[], runner = spawnSync): { ok: boolean
   } catch { return { ok: false, error: "Mac read action could not start" }; }
 }
 
+/** How long a poll waits for a read action it just started. A normal action ends
+ *  in 1 to 3 s, so the poll that started it still reports the outcome. One that
+ *  has not ended by then is left running and a later poll picks it up, so a hung
+ *  imsg-read (180 s timeout) delays one poll by this much instead of three minutes. */
+export function readActionGraceMs(env = process.env): number {
+  const n = Number(env.BLIP_READ_GRACE_MS);
+  return Number.isFinite(n) && n >= 0 ? Math.min(Math.floor(n), 60000) : 5000;
+}
+
+export function loadReadAction(path = READ_ACTION_PATH): ReadAction | null {
+  try { return parseReadAction(JSON.parse(readFileSync(path, "utf8"))); } catch { return null; }
+}
+
+export function saveReadAction(action: ReadAction, path = READ_ACTION_PATH): boolean {
+  const temp = `${path}.${process.pid}.tmp`;
+  try {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    writeFileSync(temp, JSON.stringify(action), { mode: 0o600 });
+    renameSync(temp, path);
+    return true;
+  } catch {
+    try { unlinkSync(temp); } catch { /* temp may not exist */ }
+    return false;
+  }
+}
+
+export function clearReadAction(path = READ_ACTION_PATH): void {
+  try { unlinkSync(path); } catch { /* already gone */ }
+}
+
+/** Start imsg-read in its own process and return at once. The marker is written
+ *  FIRST (so a poll that sees it never starts a second action, which also keeps
+ *  Messages' process-global selection to one user), the worker writes `done` into it
+ *  when imsg-read ends, and only the collector turns that into state.json. */
+export function startReadAction(chat: string, unread: boolean, seen: string, args: string[], now = Date.now()): boolean {
+  if (!saveReadAction({ chat, unread, seen, startedAt: now })) return false;
+  try {
+    const child = spawn(process.execPath, [import.meta.path, "--read-worker", String(now), "--", ...args],
+      { detached: true, stdio: "ignore" });
+    child.on("error", () => { /* the deadline turns a worker that never ran into a retry */ });
+    child.unref();
+    return true;
+  } catch {
+    clearReadAction();
+    return false;
+  }
+}
+
+/** The worker half: run imsg-read (its 180 s timeout is its own), then report. */
+export function runReadWorker(startedAt: number, args: string[]): number {
+  if (!["--all", "--unread", "--chat"].includes(args[0] ?? "")) return 2;
+  const result = runReadAction(args);
+  const marker = loadReadAction();
+  // A marker that was replaced or cleaned while this ran belongs to someone else.
+  if (marker && marker.startedAt === startedAt) {
+    saveReadAction({ ...marker, done: { ok: result.ok, error: result.error, at: Date.now() } });
+  }
+  return 0;
+}
+
+function sleepMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /** The complete unread snapshot. It runs on EVERY poll, so it rides the persistent
  *  channel like `recent` does: one-shot it paid a Python start and a database open
  *  (~90 ms) on top of the query. A channel answer of 64 means the Mac's `serve`
@@ -2787,34 +2854,56 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   };
   const persisted = saveState(nextState);
 
-  // Actions are synchronous and serialized with the collector, never detached.
-  // Process one due intent per run so a failed chat cannot starve the rest.
+  // The action itself runs in its own process (startReadAction), so one hung Mac
+  // call cannot stall polling. This collector is still the only writer of
+  // state.json: it persists the attempt BEFORE the action starts and folds the
+  // result in when it is done, here or on a later poll. One action at a time.
   let syncError = "";
   if (persisted && readPush !== "off") {
-    // An attempted bulk action needs a complete snapshot before it can be
-    // expanded safely. Never repeat an unbounded --all, even after a restart.
-    const all = pendingReads["*"];
-    const candidates = all && all.attempts === 0 ? [["*", all] as const]
-      : Object.entries(pendingReads).filter(([chat]) => chat !== "*");
-    const due = candidates.filter(([, r]) => r.retryAt <= Date.now())
-      .sort((a, b) => a[1].retryAt - b[1].retryAt)[0];
-    if (due) {
-      const [chat, intent] = due;
-      // Persist the attempt before touching Messages. An interrupted --all
-      // must also resume as bounded per-chat work, never another --all.
-      pendingReads[chat] = retryReadIntent(intent, Date.now());
-      if (!saveState({ ...nextState, pendingReads })) {
-        syncError = "read attempt could not be saved; action was not started";
-      } else {
-        const result = chat === "*" ? runReadAction(["--all"])
-          : runReadAction([intent.unread ? "--unread" : "--chat", chat,
-            ...(!intent.unread && intent.seen ? ["--through", intent.seen] : [])]);
-        if (result.ok) delete pendingReads[chat];
-        else {
-          pendingReads[chat] = retryReadIntent(intent, Date.now(), result.error);
-          syncError = result.error;
+    const settle = (action: ReadAction): boolean => {
+      const r = settleReadAction(pendingReads, action, Date.now());
+      if (!r.settled) return false;
+      pendingReads = r.pending;
+      if (r.error) syncError = r.error;
+      clearReadAction();
+      if (!saveState({ ...nextState, pendingReads })) syncError = "read acknowledgement could not be saved; will verify again";
+      return true;
+    };
+    const running = loadReadAction();
+    let free = !running || settle(running);
+    if (free) {
+      // An attempted bulk action needs a complete snapshot before it can be
+      // expanded safely. Never repeat an unbounded --all, even after a restart.
+      const all = pendingReads["*"];
+      const candidates = all && all.attempts === 0 ? [["*", all] as const]
+        : Object.entries(pendingReads).filter(([chat]) => chat !== "*");
+      const due = candidates.filter(([, r]) => r.retryAt <= Date.now())
+        .sort((a, b) => a[1].retryAt - b[1].retryAt)[0];
+      if (due) {
+        const [chat, intent] = due;
+        // Persist the attempt before touching Messages. An interrupted --all
+        // must also resume as bounded per-chat work, never another --all.
+        pendingReads[chat] = retryReadIntent(intent, Date.now());
+        if (!saveState({ ...nextState, pendingReads })) {
+          syncError = "read attempt could not be saved; action was not started";
+        } else {
+          const args = chat === "*" ? ["--all"]
+            : [intent.unread ? "--unread" : "--chat", chat,
+              ...(!intent.unread && intent.seen ? ["--through", intent.seen] : [])];
+          const started = Date.now();
+          if (!startReadAction(chat, intent.unread, intent.seen, args, started)) {
+            syncError = "read action could not be started; will retry";
+          } else {
+            // Same-poll outcome for the common case; a slow one is picked up later.
+            const until = started + readActionGraceMs();
+            for (;;) {
+              const now = loadReadAction();
+              if (now?.done) { settle(now); break; }
+              if (Date.now() >= until) break;
+              sleepMs(50);
+            }
+          }
         }
-        if (!saveState({ ...nextState, pendingReads })) syncError = "read acknowledgement could not be saved; will verify again";
       }
     }
   }
@@ -2846,7 +2935,10 @@ export function collect(deep: boolean, markRead = false, readChat = "", seenTs =
   };
 }
 
-if (import.meta.main) {
+if (import.meta.main && process.argv[2] === "--read-worker") {
+  const sep = process.argv.indexOf("--");
+  process.exit(runReadWorker(Number(process.argv[3]), sep > 0 ? process.argv.slice(sep + 1) : []));
+} else if (import.meta.main) {
   const deep = process.argv.includes("--deep");
   const markRead = process.argv.includes("--mark-read");
   const ri = process.argv.indexOf("--read");
