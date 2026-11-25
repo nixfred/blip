@@ -52,10 +52,34 @@ code toast. Browser launch flags can be removed independently on a relaunch.
   minutes. A code tied to a domain also requires the matching HTTPS document
   origin. Old messages are not replayed when the helper starts.
 
+## Chrome limits
+
+Found by Ian Swope on Chrome 153 (#112), using Blip's own `field()`,
+`field_anchor()` and `segment_group()` against live fields. Detection and field
+bounds work. Two things do not:
+
+- **Chrome does not expose `autocomplete` over AT-SPI**, so
+  `autocomplete="one-time-code"` never reaches Blip. The field is judged by its
+  accessible name alone. A recognised name ("Verification code") says **Ready for
+  this field**; another one, including a non-English one, gets **Select a field,
+  then fill**. A `type="password"` box with an unrecognised name gets no prompt.
+  Brave and Chromium share Blink's accessibility mapping and likely behave the
+  same; that has not been checked.
+- **Digit boxes directly under the document are not grouped.** Chrome drops plain
+  wrapper `div`s from the tree, so the boxes' parent is the page itself, which
+  Blip will not scan, and one-character boxes are then refused. A `<form>` around
+  them (which real sign-in pages nearly always have) makes them work.
+
+The classifier is deliberately left strict: accepting more names means more chances
+to offer a code to the wrong box.
+
+## What has been tested
+
 Brave and Chromium were tested through AT-SPI, and GTK through `EditableText`.
 Zen (1.22.2b) was tested against a live sign-in page; Gecko ignores the
-accessibility text write there, so the code is typed as key events. Chrome and
-Firefox identifiers are recognized but have not been tested locally. Labels are
+accessibility text write there, so the code is typed as key events. Chrome
+detection was tested by a contributor (above), short of a real insertion; Firefox
+identifiers are recognized but have not been tested. Labels are
 currently English-oriented, and field coordinates depend on the browser/toolkit.
 No extension or DevTools connection is used by Blip.
 
