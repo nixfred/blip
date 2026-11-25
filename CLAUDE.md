@@ -713,6 +713,10 @@ what it is handed. Keep it that way.
 
 ## Working on it
 
+**Two remotes, both pushed by hand.** Every commit and tag goes to `origin` (GitHub) AND `forgejo` (the backup) in the
+same sitting, then `git ls-remote` on both must agree. No mirror syncs them: a forced push mirror erased a merge made on
+GitHub (#171, removed 2026-11-25). A pull request merged with GitHub's button is fetched and pushed to `forgejo`.
+
 ```
 bun test                                   # 860+ tests, ~30 s (read-sync.test.ts is 25 s of it: 16 sequences x 6 collector spawns)
 bun collector.ts --deep | jq .unread       # live against the Mac
