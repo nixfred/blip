@@ -54,6 +54,9 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-11-25  (direct)  docs/AUTOFILL.md documents the Chrome limits for one-time-code autofill and closes #112; the classifier stays strict.
+                 Reported with live evidence by Ian Swope, github.com/ianswope, X https://x.com/ianfs.
+
 2026-11-25  #171 (plus review fixes) The Mac read action runs in its own worker process, so a hung imsg-read can no longer stall polling
                  and toasts for up to 180 s (#125 item 2). Fred Nix, github.com/nixfred, X https://x.com/nixfred, written by Larry. Merged
                  on GitHub 24 Nov, then overwritten the same day when main was force-pushed back (the Forgejo push mirror, most likely);

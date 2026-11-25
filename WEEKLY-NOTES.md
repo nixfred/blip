@@ -89,7 +89,14 @@ reconstructed on Sunday from memory.
   new over 3,159 handles: 2 gained a name, 0 lost one, 1 went from a first name to the full name. Not watched: a live
   slow or hung read push through the new worker.
 - **Closed:** #125 (all three items done), with thanks to Damon Janis (https://x.com/damonjanis), whose #120 started it.
-  Open: #129, #112, #78. No release cut yet.
+  No release cut yet.
+- **#112 closed with documentation.** Ian Swope (https://x.com/ianfs) showed that Chrome never exposes `autocomplete` to
+  the desktop's accessibility layer, so one-time-code fields are judged by their label there. The rule stays strict on
+  purpose; `docs/AUTOFILL.md` now says what Chrome can and cannot do. Open now: #129, #78.
+- **Late thank-yous, owed:** Marshall Huss (https://x.com/mwhuss, #89), Ian (#107, #97), Erik Fillipsveen (#118), Jared
+  Moody (https://x.com/jaredmoody, #144), Jordan Walsh
+  (github.com/jordanpwalsh, #3; no X account published on GitHub, checked 25 Nov). Two missing changelog credits added
+  (#123 Erik, #108 Ian).
 
 ### Handles Fred still needs to answer (23 Nov)
 
