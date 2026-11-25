@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **A first-name card beside the full card is one person (#173, Nick, @k7cfo).** One Contacts source with `Alex` and
+  `Alex Rivera` on one number counted as two people, so the conversation showed a bare number and no photo. When one
+  name's words lead the other's, the fuller name now wins, in either card order; photos follow the same rule. Different
+  surnames still name nobody, and so do `Ann` and `Anna Smith`. A known catch: `John Smith` and `John Smith Jr` sharing
+  a number now show the Jr. Names are display only; sends still go to the number. **Re-run `blip-setup`.**
+
 - **Read pushes wait for Messages to rebuild its window (#172, Ian Swope).** Opening a conversation makes Messages
   close its window and build a new one, and `imsg-read` looked for it exactly once, 1.5 s later. On a loaded Mac every
   look landed in the gap, so every push failed with "no accessible window" while Messages sat open and fine. It now looks

@@ -326,7 +326,8 @@ what it is handed. Keep it that way.
 - **One person lives in several Contacts sources** (iCloud, Exchange, On My
   Mac) under slightly different spellings. That is NOT ambiguity — names
   (`name_for`) and photos (`cmd_avatar`) treat a collision only WITHIN one
-  source as ambiguous. Got this wrong twice (2.0.0 photos, 1.9.4 names →
+  source as ambiguous. Within a source, two cards are still one person when
+  one name's WORDS lead the other's (`_same_person`: the fuller name wins; #173). Got this wrong twice (2.0.0 photos, 1.9.4 names →
   "Rob T shows as a number").
   **Phone numbers match the way Contacts matches them.** The last-ten key is
   exact, tried first, and decides whenever it hits. Only when it finds nothing

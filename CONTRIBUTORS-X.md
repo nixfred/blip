@@ -58,6 +58,7 @@ Nobody right now.
 | Marcus Vorwaller | marcus | 6 (#158, #159, #160, #161, #162, #163) | NO X ACCOUNT TO TAG. Marcus said so himself on #163 (2026-11-12): "he can tag my GitHub handle and if he wants, point to haplab.com". Write "Marcus Vorwaller (github.com/marcus)" and optionally link haplab.com; never guess an X handle for him |
 | Gerald LaMontagne | lama7 | 2 | nothing on his GitHub profile or social accounts, his site sahd.lamafam.org lists no X, the one X account with his login is named "Lama" with 2 followers and is not guessed, 2026-11-09; asked on #157 |
 | Colton Fitzgerald | coltonfitzgerald | 1 | nothing on his GitHub profile or social accounts, coltonfitzgerald.me did not load, @coltonfitzgerald does not resolve on X, 2026-10-28; asked on #146 |
+| Nick | k7cfo | 1 | nothing on his GitHub profile or social accounts, no X link seen on qrz.com/db/k7cfo, 2026-11-25; asked on #173 (merged 2026-11-25, first PR) |
 | "Unhook Dev" | tolewis | 1 | nothing published, 2026-09-25 |
 
 ## Issue reporters who changed the code

@@ -64,6 +64,11 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
                  27.0.1 gateway (a push that failed 13 times went through). Larry added: stop after one hung osascript (13 looks could
                  have held the Messages lock for about 32 minutes) with its test. Bridge change: blip-setup re-run.
 
+2026-11-25  #173 A contact saved twice, once by first name only and once in full, now shows the full name and photo instead of a bare
+                 number. Nick, github.com/k7cfo, X: none found (checked 2026-11-25: GitHub profile and social accounts empty, his linked
+                 qrz.com/db/k7cfo page showed no X link; asked on #173 and Fred). His first PR. Checked by him on a macOS 26 gateway; 30
+                 name tests pass and the new one fails on the old code. Bridge change: blip-setup re-run.
+
 2026-11-23  RELEASE 2.8.0 (tag v2.8.0 on a251d5f): nine commits since 2.7.0, three merged PRs from two outside people (#168, #169, #170).
                  https://github.com/nixfred/blip/releases/tag/v2.8.0. Headlines: Blip's text on the same type ramp as the rest of the Omarchy
                  shell (#170), the window, sidebar and pinned avatars scaling with the text size (#169), a locked Mac as a quiet pill instead

@@ -327,9 +327,32 @@ def _name_key(name: str) -> str:
     return "".join(unicodedata.normalize("NFKC", name or "").casefold().split())
 
 
+def _same_person(a: str, b: str) -> str | None:
+    """The name to show when ONE source holds names `a` and `b` on one key, or
+    None when they are two people. The same name spelled twice (_name_key) is one
+    card saved twice; the first spelling stays. So is a name whose words lead the
+    other's: "Amber" beside "Amber Newsom" on one number is one person saved once
+    in a hurry and once in full, and the fuller name wins. Words, not letters:
+    "Ann" never leads "Anna Smith". Different words ("Dana Park", "Dana Reyes")
+    stay two people. Longer-wins keeps card order out of it: names that are one
+    person form a chain, each leading the next, so a running longest still meets
+    any name that does not belong (Amber, Amber Newsom, Amber Lee → nobody)."""
+    if not _name_key(a) or not _name_key(b):
+        return None
+    if _name_key(a) == _name_key(b):
+        return a
+    wa = unicodedata.normalize("NFKC", a).casefold().split()
+    wb = unicodedata.normalize("NFKC", b).casefold().split()
+    if wa == wb[: len(wa)]:
+        return b
+    if wb == wa[: len(wb)]:
+        return a
+    return None
+
+
 def _one_person(con: sqlite3.Connection, pks: set) -> list[int]:
     """The records in `pks`, oldest first, when they are one person under
-    _name_key; [] when they are two (or nameless). Photos follow the rule
+    _same_person; [] when they are two (or nameless). Photos follow the rule
     names follow: the first of the duplicates carrying a picture wins."""
     if not pks:
         return []
@@ -338,21 +361,25 @@ def _one_person(con: sqlite3.Connection, pks: set) -> list[int]:
     marks = ",".join("?" * len(pks))
     rows = con.execute(
         f"SELECT Z_PK, ZFIRSTNAME, ZLASTNAME, ZORGANIZATION, ZNICKNAME "
-        f"FROM ZABCDRECORD WHERE Z_PK IN ({marks})", sorted(pks)
+        f"FROM ZABCDRECORD WHERE Z_PK IN ({marks}) ORDER BY Z_PK", sorted(pks)
     ).fetchall()
-    keys = {_name_key(_card_name(*r[1:])) for r in rows}
-    return sorted(pks) if len(rows) == len(pks) and len(keys) == 1 and "" not in keys else []
+    if len(rows) != len(pks):
+        return []
+    name: str | None = _card_name(*rows[0][1:])
+    for r in rows[1:]:
+        name = _same_person(name, _card_name(*r[1:])) if name is not None else None
+    return sorted(pks) if name else []
 
 
 def _vote(local: dict, key, name: str) -> None:
     """One source's answer for a key: the single name it gives, or None once two
-    names have collided — and None STAYS None. The old one-liner let a third
+    people have collided — and None STAYS None. The old one-liner let a third
     card with the same number resurrect a name after two had cancelled out
-    (Alice, Bob → ambiguous; Carol → "Carol") (Astra #2). The same name spelled
-    twice (_name_key) is not a collision; the first spelling stays."""
+    (Alice, Bob → ambiguous; Carol → "Carol") (Astra #2). One person saved
+    twice (_same_person) is not a collision."""
     if key in local:
-        if local[key] is not None and _name_key(local[key]) != _name_key(name):
-            local[key] = None
+        if local[key] is not None:
+            local[key] = _same_person(local[key], name)
     else:
         local[key] = name
 

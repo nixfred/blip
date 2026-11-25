@@ -231,6 +231,33 @@ class OneCardSavedTwice(Base):
         self.book.card("", "", phones=["+15550100202"], photo=JPEG)
         self.assertEqual(self.imsg._avatar_candidates("+15550100202"), [])
 
+    def test_a_first_name_card_beside_the_full_card_is_one_person(self) -> None:
+        # "Alex" saved in a hurry, "Alex Rivera" saved properly, one number: the
+        # fuller name, in either card order, and both records are photo candidates.
+        a = self.book.card("Alex", "", phones=["+15550100203"])
+        b = self.book.card("Alex", "Rivera", phones=["(555) 010-0203"], photo=JPEG)
+        self.book.card("Sam", "Lee", phones=["+15550100204"])
+        self.book.card("Sam", "", phones=["+15550100204"])
+        self.assertEqual(self.imsg.name_for("+15550100203"), "Alex Rivera")
+        self.assertEqual(self.imsg.name_for("+15550100204"), "Sam Lee")
+        self.assertEqual(self.imsg._avatar_candidates("+15550100203"), [(self.book.path, a), (self.book.path, b)])
+
+    def test_leading_words_not_letters(self) -> None:
+        # "Ann" does not lead "Anna Smith": two people, so nobody.
+        self.book.card("Ann", "", phones=["+15550100205"])
+        self.book.card("Anna", "Smith", phones=["+15550100205"])
+        self.assertIsNone(self.imsg.name_for("+15550100205"))
+
+    def test_two_full_names_after_a_short_one_are_still_nobody(self) -> None:
+        # Alex leads both, but Alex Rivera and Alex Lee are two people, whichever came first.
+        for first, last in (("Alex", ""), ("Alex", "Rivera"), ("Alex", "Lee")):
+            self.book.card(first, last, phones=["+15550100206"], photo=JPEG)
+        for first, last in (("Alex", "Rivera"), ("Alex", "Lee"), ("Alex", "")):
+            self.book.card(first, last, phones=["+15550100207"])
+        self.assertIsNone(self.imsg.name_for("+15550100206"))
+        self.assertIsNone(self.imsg.name_for("+15550100207"))
+        self.assertEqual(self.imsg._avatar_candidates("+15550100206"), [])
+
 
 class AmbiguousExactNeverFallsThrough(Base):
     def test_an_ambiguous_exact_card_blocks_the_suffix_match(self) -> None:
