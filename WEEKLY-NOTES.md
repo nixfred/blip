@@ -71,8 +71,25 @@ reconstructed on Sunday from memory.
 - **Post:** Post 9 is drafted (docs/x-post-2026-11-23.txt). 2.7.0 (17 Nov) never had its own announcement post: Post 8 (through
   14 Nov) was READY and Fred posts; the 2.7.0 release is covered in one line of Post 9.
 
+### Wed 25 Nov: #172 and #173 merged, and #171 is back with its review fixes (unreleased)
+
+- **#172 Read pushes work on a loaded Mac again.** Ian Swope (https://x.com/ianfs, 25th merged PR). Every read push on his
+  gateway failed with "no accessible window": Messages rebuilds its window when it opens a chat and Blip looked once, in the
+  gap. He timed it (zero windows from about 0.5 s to 1.5 s) and verified the fix live; a push that had failed 13 times went
+  through. Added on merge: stop after one hung scripting call, with a test (13 looks could have lasted about 32 minutes).
+- **#173 One person saved twice is one person again.** Nick (github.com/k7cfo, first PR, no X account found). `Alex` beside
+  `Alex Rivera` on one number showed a bare number. The fuller name now wins when one name's words lead the other's. Checked
+  by him on a macOS 26 gateway. Known catch, accepted: a father and a `Jr` sharing a number now show the `Jr`.
+- **#171 A hung read push no longer stalls polling** (#125 item 2, mine). An independent review of the first version found a
+  real regression (a slow mark-all was treated as failed and opened conversations one by one) plus a dead worker blocking
+  reads for three minutes. Both fixed before it landed for good. It was merged on 24 Nov and then overwritten when `main`
+  was force-pushed back, most likely by the repository mirror; restored 25 Nov.
+- **Verified:** bun test 951 pass, 1 skip, 1 fail (needs ffmpeg, which the dev box lacks); all Mac bridge suites pass.
+
 ### Handles Fred still needs to answer (23 Nov)
 
+- Nick (github.com/k7cfo, #173): nothing published on GitHub and no X link seen on the qrz.com page he links (25 Nov). Asked
+  him on #173. Fred: do you know an X account for him?
 - Tim Pearson: handle verified from his own profile; he was offered an opt-out on #170. Nothing to ask Fred unless Tim declines.
 
 ## 2026-W47 (Mon 16 Nov to Sun 22 Nov): OPEN, post due Sun 22 Nov
