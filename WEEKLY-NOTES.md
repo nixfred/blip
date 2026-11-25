@@ -84,7 +84,12 @@ reconstructed on Sunday from memory.
   real regression (a slow mark-all was treated as failed and opened conversations one by one) plus a dead worker blocking
   reads for three minutes. Both fixed before it landed for good. It was merged on 24 Nov and then overwritten when `main`
   was force-pushed back, most likely by the repository mirror; restored 25 Nov.
-- **Verified:** bun test 951 pass, 1 skip, 1 fail (needs ffmpeg, which the dev box lacks); all Mac bridge suites pass.
+- **Verified:** bun test 951 pass, 1 skip, 1 fail (needs ffmpeg, which the dev box lacks); all Mac bridge suites pass; CI
+  green. Deployed to both desktops and the gateway Mac, polls healthy. Name check on the real gateway, old bridge against
+  new over 3,159 handles: 2 gained a name, 0 lost one, 1 went from a first name to the full name. Not watched: a live
+  slow or hung read push through the new worker.
+- **Closed:** #125 (all three items done), with thanks to Damon Janis (https://x.com/damonjanis), whose #120 started it.
+  Open: #129, #112, #78. No release cut yet.
 
 ### Handles Fred still needs to answer (23 Nov)
 
