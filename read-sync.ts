@@ -5,10 +5,16 @@ export type ReadSnapshot = Record<string, RemoteRead>;
 export interface ReadIntent { unread: boolean; seen: string; attempts: number; retryAt: number; error?: string; chats?: string[] }
 export type ReadIntents = Record<string, ReadIntent>;
 /** The one read action that may be running (or just finished) outside the poll.
- *  `done` is written by the worker, never by the collector, and state.json is
- *  written by the collector only: the two never race for a file. */
+ *  Two files, one writer each: the collector writes the marker, the worker writes
+ *  its result to a separate file named after `token`, and state.json is written by
+ *  the collector only. No file has two writers, so nothing can overwrite a result. */
 export interface ReadAction {
-  chat: string; unread: boolean; seen: string; startedAt: number;
+  chat: string; unread: boolean; seen: string; attempts: number; token: string; startedAt: number;
+  /** The worker's pid and /proc start time, so a recycled pid is not mistaken for it. */
+  pid?: number; pidStart?: string;
+  /** Filled in by the loader, never stored in the marker: is that process still
+   *  running (undefined = unknown), and what did it report? */
+  alive?: boolean;
   done?: { ok: boolean; error: string; at: number };
 }
 /** imsg-read's own timeout is 180 s; a worker still silent after this has died. */
@@ -170,27 +176,39 @@ export function parseReadAction(value: unknown): ReadAction | null {
   const v = value as ReadAction;
   if (!v || typeof v !== "object" || typeof v.chat !== "string" || !v.chat || v.chat.length > 512 ||
       typeof v.unread !== "boolean" || typeof v.seen !== "string" ||
+      !Number.isSafeInteger(v.attempts) || v.attempts < 0 ||
+      typeof v.token !== "string" || !/^[a-z0-9-]{1,64}$/.test(v.token) || // it names a file
       !Number.isFinite(v.startedAt) || v.startedAt < 0) return null;
   const d = v.done;
   if (d !== undefined && (!d || typeof d.ok !== "boolean" || typeof d.error !== "string" || !Number.isFinite(d.at))) return null;
-  return { chat: v.chat, unread: v.unread, seen: v.seen, startedAt: v.startedAt,
+  const worker = Number.isSafeInteger(v.pid) && v.pid! > 1 && typeof v.pidStart === "string" && v.pidStart
+    ? { pid: v.pid, pidStart: v.pidStart } : {};
+  return { chat: v.chat, unread: v.unread, seen: v.seen, attempts: v.attempts, token: v.token, startedAt: v.startedAt,
+    ...worker,
     ...(d ? { done: { ok: d.ok, error: d.error.slice(0, 240).replace(/[\x00-\x1f\x7f]/g, " "), at: d.at } } : {}) };
 }
 
 /** Fold a finished read action back into the queue. The caller (the collector,
  *  the only writer of state.json) persists the result.
  *  - still running: nothing changes, `settled` is false, and no other action starts.
- *  - a worker that never reported by the deadline counts as a failure.
+ *    A worker known to be alive is running however old the clock says it is (a
+ *    suspended laptop must not start a second copy; imsg-read has its own timeout).
+ *  - a worker that is gone without reporting counts as a failure, at once. One whose
+ *    process was never recorded gets the deadline, in either clock direction.
  *  - an intent replaced by a newer gesture while the action ran is left alone:
  *    the result belonged to the old one and the new one runs on its own turn.
  *  - success retires the intent; failure keeps it (never dropped) with the error and
  *    the backoff counted from when the action ended, not from when it began. */
 export function settleReadAction(pending: ReadIntents, action: ReadAction, now: number):
   { pending: ReadIntents; settled: boolean; error: string } {
-  if (!action.done && now - action.startedAt <= READ_ACTION_DEADLINE_MS) return { pending, settled: false, error: "" };
+  const running = action.alive ?? Math.abs(now - action.startedAt) <= READ_ACTION_DEADLINE_MS;
+  if (!action.done && running) return { pending, settled: false, error: "" };
   const result = action.done ?? { ok: false, error: "imsg-read did not finish; will retry", at: now };
   const cur = pending[action.chat];
-  if (!cur || cur.unread !== action.unread || cur.seen !== action.seen) return { pending, settled: true, error: "" };
+  // The attempt count tells an identical gesture queued again apart from the one that ran.
+  if (!cur || cur.unread !== action.unread || cur.seen !== action.seen || cur.attempts !== action.attempts) {
+    return { pending, settled: true, error: "" };
+  }
   const next = { ...pending };
   if (result.ok) { delete next[action.chat]; return { pending: next, settled: true, error: "" }; }
   const backoff = Math.max(0, cur.retryAt - action.startedAt);

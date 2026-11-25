@@ -54,6 +54,11 @@ LAST X POST: CONTRIBUTORS-X-POST.md (2026-09-11). Everything below the
 marker for Post 2 is in the Post 2 draft in X-POSTS.md.
 ------------------------------------------------------------------------
 
+2026-11-25  #171 (plus review fixes) The Mac read action runs in its own worker process, so a hung imsg-read can no longer stall polling
+                 and toasts for up to 180 s (#125 item 2). Fred Nix, github.com/nixfred, X https://x.com/nixfred, written by Larry. Merged
+                 on GitHub 24 Nov, then overwritten the same day when main was force-pushed back (the Forgejo push mirror, most likely);
+                 restored 25 Nov with the fixes from an independent review. bun test 951 pass, 1 fail (needs ffmpeg).
+
 2026-11-23  RELEASE 2.8.0 (tag v2.8.0 on a251d5f): nine commits since 2.7.0, three merged PRs from two outside people (#168, #169, #170).
                  https://github.com/nixfred/blip/releases/tag/v2.8.0. Headlines: Blip's text on the same type ramp as the rest of the Omarchy
                  shell (#170), the window, sidebar and pinned avatars scaling with the text size (#169), a locked Mac as a quiet pill instead

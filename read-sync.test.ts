@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { expandFailedMarkAll, readActionGraceMs } from "./collector";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { expandFailedMarkAll, processStartTime, readActionGraceMs } from "./collector";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { classifyReadSync, enqueueRefresh, isScreenLockedError, parseReadSnapshot, parseReadIntents, queueReadIntent, reconcileReadIntents, retryReadIntent, settleReadAction, parseReadAction, READ_ACTION_DEADLINE_MS } from "./read-sync";
 
@@ -556,6 +556,64 @@ describe("read sync status classification", () => {
 
 describe("the read action runs off the poll path (#125 item 2)", () => {
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  /** Wait for the detached worker's result file and return what it says. */
+  const finished = async (home: string) => {
+    const dir = join(home, ".local/state/blip");
+    for (let i = 0; i < 100; i++) {
+      const name = readdirSync(dir).find(n => n.startsWith("read-action.json.") && n.endsWith(".done"));
+      if (name) return JSON.parse(readFileSync(join(dir, name), "utf8"));
+      await sleep(50);
+    }
+    throw new Error("the read worker never reported");
+  };
+
+  test("a mark-all still running is not mistaken for a failed one", async () => {
+    const f = fixture(); f.run();
+    f.extraEnv.BLIP_READ_GRACE_MS = "0";
+    f.put("control.json", { hang: true });
+    f.run("--mark-read");
+    // attempts is 1 while it runs; expanding "*" now would queue a --chat per
+    // conversation and open each on the Mac after --all had already read it.
+    f.run();
+    expect(Object.keys(f.state().pendingReads)).toEqual(["*"]);
+    f.put("control.json", {});
+    await finished(f.home);
+    f.run();
+    expect(f.actions()).toEqual([["--all"]]);
+    expect(f.state().pendingReads).toEqual({});
+  }, 20000);
+
+  test("a worker that died is noticed on the next poll, not after the deadline", async () => {
+    const f = fixture(); f.run();
+    f.extraEnv.BLIP_READ_GRACE_MS = "0";
+    f.put("control.json", { hang: true });
+    f.run("--read", chat, "--seen", old);
+    const marker = join(f.home, ".local/state/blip/read-action.json");
+    const { pid, pidStart } = JSON.parse(readFileSync(marker, "utf8"));
+    expect(processStartTime(pid)).toBe(pidStart);
+    for (let i = 0; i < 100 && f.actions().length === 0; i++) await sleep(50);
+    process.kill(-pid, "SIGKILL"); // detached: the worker leads its own group, imsg-read included
+    for (let i = 0; i < 100 && processStartTime(pid) !== ""; i++) await sleep(50);
+    const out = f.run();
+    expect(out.error).toContain("did not finish");
+    expect(f.state().pendingReads[chat].error).toContain("did not finish");
+    expect(existsSync(marker)).toBe(false);
+  }, 20000);
+
+  test("pin does not queue behind a slow read action on the Mac", async () => {
+    const f = fixture(); f.run();
+    f.extraEnv.BLIP_READ_GRACE_MS = "0";
+    f.put("control.json", { hang: true });
+    f.run("--read", chat, "--seen", old);
+    for (let i = 0; i < 100 && f.actions().length === 0; i++) await sleep(50);
+    const t = Date.now();
+    const out = f.run("--act", "pin", "--target", chat);
+    expect(Date.now() - t).toBeLessThan(4000);
+    expect(out.error).toContain("still working");
+    expect(f.actions()).toHaveLength(1);
+    f.put("control.json", {});
+    await finished(f.home);
+  }, 20000);
   test("a hung imsg-read does not hold up polling, and its result is picked up later", async () => {
     const f = fixture(); f.run();
     f.extraEnv.BLIP_READ_GRACE_MS = "200";
@@ -577,11 +635,11 @@ describe("the read action runs off the poll path (#125 item 2)", () => {
     // The Mac answers; the next poll folds the result in and retires the intent.
     f.put("control.json", {});
     const marker = join(f.home, ".local/state/blip/read-action.json");
-    for (let i = 0; i < 100 && !(existsSync(marker) && JSON.parse(readFileSync(marker, "utf8")).done); i++) await sleep(50);
-    expect(JSON.parse(readFileSync(marker, "utf8")).done.ok).toBe(true);
+    expect((await finished(f.home)).ok).toBe(true);
     f.run();
     expect(f.state().pendingReads).toEqual({});
     expect(existsSync(marker)).toBe(false);
+    expect(readdirSync(dirname(marker)).filter(n => n.endsWith(".done"))).toEqual([]);
     expect(f.actions()).toHaveLength(1);
   }, 20000);
 
@@ -592,7 +650,7 @@ describe("the read action runs off the poll path (#125 item 2)", () => {
     f.run("--read", chat, "--seen", old);
     f.put("control.json", { fail: true });
     const marker = join(f.home, ".local/state/blip/read-action.json");
-    for (let i = 0; i < 100 && !(existsSync(marker) && JSON.parse(readFileSync(marker, "utf8")).done); i++) await sleep(50);
+    await finished(f.home);
     const out = f.run();
     expect(out.error).toContain("Accessibility");
     expect(f.state().pendingReads[chat].attempts).toBe(1);
@@ -610,7 +668,7 @@ describe("the read action runs off the poll path (#125 item 2)", () => {
 });
 
 describe("settleReadAction", () => {
-  const a = { chat, unread: false, seen: old, startedAt: 1000 };
+  const a = { chat, unread: false, seen: old, attempts: 1, token: "t1", startedAt: 1000 };
   const pend = { [chat]: { unread: false, seen: old, attempts: 1, retryAt: 3000 } };
   test("a running action changes nothing and blocks the next", () => {
     expect(settleReadAction(pend, a, 5000)).toEqual({ pending: pend, settled: false, error: "" });
@@ -633,14 +691,34 @@ describe("settleReadAction", () => {
     expect(r.pending[chat]).toBeDefined();
     expect(r.pending[chat]!.error).toContain("did not finish");
   });
+  test("a live worker is still running however old the clock says it is", () => {
+    // After suspend the wall clock jumps; a second copy must not start.
+    expect(settleReadAction(pend, { ...a, alive: true }, 1000 + READ_ACTION_DEADLINE_MS * 50).settled).toBe(false);
+  });
+  test("a worker known to be gone fails at once", () => {
+    const r = settleReadAction(pend, { ...a, alive: false }, 1001);
+    expect(r.settled).toBe(true);
+    expect(r.pending[chat]!.error).toContain("did not finish");
+  });
+  test("a clock set back does not block the queue", () => {
+    expect(settleReadAction(pend, { ...a, startedAt: 1000 + 3_600_000 }, 1000).settled).toBe(true);
+  });
+  test("an old result does not retire an identical intent queued again", () => {
+    const again = { [chat]: { unread: false, seen: old, attempts: 0, retryAt: 0 } };
+    const r = settleReadAction(again, { ...a, done: { ok: true, error: "", at: 2000 } }, 5000);
+    expect(r).toEqual({ pending: again, settled: true, error: "" });
+  });
   test("a result for an intent a newer gesture replaced is ignored", () => {
     const newer = { [chat]: { unread: true, seen: "", attempts: 0, retryAt: 0 } };
     const r = settleReadAction(newer, { ...a, done: { ok: true, error: "", at: 2000 } }, 5000);
     expect(r).toEqual({ pending: newer, settled: true, error: "" });
   });
   test("parseReadAction rejects junk and strips control characters", () => {
-    expect(parseReadAction({ chat: "", unread: false, seen: "", startedAt: 1 })).toBeNull();
-    expect(parseReadAction({ chat, unread: "no", seen: "", startedAt: 1 })).toBeNull();
+    expect(parseReadAction({ ...a, chat: "" })).toBeNull();
+    expect(parseReadAction({ ...a, unread: "no" })).toBeNull();
+    expect(parseReadAction({ ...a, attempts: -1 })).toBeNull();
+    expect(parseReadAction({ ...a, token: "../../state" })).toBeNull(); // it names a file
+    expect(parseReadAction({ ...a, alive: true })!.alive).toBeUndefined(); // never trusted from disk
     expect(parseReadAction({ ...a, done: { ok: true, error: "x\u0007y", at: 1 } })!.done!.error).toBe("x y");
   });
 });

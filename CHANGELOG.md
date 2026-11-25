@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **A hung read push no longer stalls polling (#171, #125 item 2).** `imsg-read` ran inside the collector with a 180 s
+  timeout, so one stuck Mac call held every poll, toast and refresh behind it for up to three minutes. The action now
+  runs in its own worker process. The collector waits 5 s for it, so a normal action reports in the same poll, and picks
+  a slower one up later. The queue is still durable: the attempt is saved first, a failed intent is never dropped, and
+  the collector is the only writer of `state.json`. A review of the first version found that a slow mark-all was treated
+  as a failed one (which opened conversations on the Mac one by one), and that a dead worker blocked read actions for
+  three minutes; both are fixed here, and pin and mute now say the Mac is busy instead of waiting a minute. One thing
+  changed for the worse and is accepted: a read queued behind a slow one starts on the next poll, not the instant the
+  first ends.
+
 ## 2.8.0 - 2026-11-23 - text that reads at the desktop's size
 
 Everything since 2.7.0: nine commits, three merged pull requests from two people. Blip's text now sits on the same type

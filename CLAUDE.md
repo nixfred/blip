@@ -232,13 +232,24 @@ what it is handed. Keep it that way.
   its own worker process (`startReadAction`, `collector.ts --read-worker`), because
   `imsg-read` has a 180 s timeout and one hung Mac call used to stall every poll
   and toast behind it (#125 item 2). It is detached from the POLL, never from its
-  ACKNOWLEDGEMENT: the collector writes `read-action.json` first (so no second
-  action starts while one runs), the worker only adds `done` to it, and the
-  collector remains the SOLE writer of state.json, folding the result in
-  (`settleReadAction`) on the poll that started it (it waits up to
-  `BLIP_READ_GRACE_MS`, default 5 s) or on a later one. A worker silent past 190 s
-  counts as a failure and the intent is kept. Do not let the worker write
-  state.json: two writers lose acknowledgements.
+  ACKNOWLEDGEMENT. One writer per file: the collector writes the marker
+  `read-action.json` first (so no second action starts while one runs), the worker
+  writes only its own `read-action.json.<token>.done`, and the collector remains
+  the SOLE writer of state.json, folding the result in (`settleReadAction`) on the
+  poll that started it (it waits up to `BLIP_READ_GRACE_MS`, default 5 s) or on a
+  later one. Two writers on any of those lose acknowledgements.
+  Four rules came out of the review of the first version:
+  (1) Settle at the TOP of `collect()`, before anything reads the queue, and never
+  expand a `*` that is still running: it has `attempts` 1 without having failed.
+  (2) The marker records the worker's pid and /proc start time. A live worker is
+  running however old the clock says it is (suspend must not start a second copy);
+  a worker gone without a result fails at once. The 190 s deadline covers only a
+  marker with no process recorded. Save state.json BEFORE removing the marker.
+  (3) A result belongs to the attempt that started it (unread, seen AND attempts).
+  (4) Pin and mute are refused while a worker runs: the Mac takes one Messages
+  action at a time, and waiting on its lock stalls the poll for 60 s.
+  Known and accepted: an intent queued behind a slow action starts on the next
+  poll, not the moment the action ends.
   A failed action survives restarts and retries with backoff (2–60 seconds).
   `--all` is attempted once; a failure or interruption keeps its click timestamp
   and becomes per-chat `--through` retries from the next complete snapshot.
