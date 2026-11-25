@@ -91,6 +91,11 @@ newest first.
   gateway (#160). Both are covered by tests and went through review; neither has had a real send in someone's own
   thread yet.
 
+- **Up and Down in the message field keep your selected bubble (#123, Erik Fillipsveen, closes #118).** Select a bubble
+  with PageUp or PageDown, press an arrow, and the selection was gone, though an empty field has no caret to move. Up,
+  Down, Home and End still move the caret and now leave the selection alone, as typing does. Erik asked before changing
+  it and Jon Kinney confirmed nothing depended on the old behaviour. (Added to these notes on 2026-11-25; it was missed
+  when 2.7.0 was cut.)
 
 - **A send now follows what the conversation's own messages say, not the Mac's chat label (#165, Jason Alexander).** A
   contact texting you on RCS while their chat row was still labelled iMessage got every send as iMessage, failing with
@@ -705,7 +710,8 @@ newest first.
   cleared cluster reported success. It now scopes the count to the cluster
   through `imsg`'s `chat_cluster_ids()`, the same rule the sidebar, pins and
   `thread --chat` already follow. Hit `push_read=thread` hardest, where it
-  looked like a push that simply never arrived.
+  looked like a push that simply never arrived. Reported and fixed by
+  @ianswope (#107, #108).
 
 - **Reading a group in Blip can now clear it on your phone too.** Per-thread
   read push was DMs only, because a group's identifier has no `imessage://`
