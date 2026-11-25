@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Read pushes wait for Messages to rebuild its window (#172, Ian Swope).** Opening a conversation makes Messages
+  close its window and build a new one, and `imsg-read` looked for it exactly once, 1.5 s later. On a loaded Mac every
+  look landed in the gap, so every push failed with "no accessible window" while Messages sat open and fine. It now looks
+  every half second for about 7 s, and gives up at once if the scripting call itself hangs. Ian timed the gap on macOS
+  27.0.1 and confirmed on his gateway that a push which had failed 13 times went through. **Re-run `blip-setup`.**
+
 - **A hung read push no longer stalls polling (#171, #125 item 2).** `imsg-read` ran inside the collector with a 180 s
   timeout, so one stuck Mac call held every poll, toast and refresh behind it for up to three minutes. The action now
   runs in its own worker process. The collector waits 5 s for it, so a normal action reports in the same poll, and picks

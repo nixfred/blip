@@ -56,7 +56,8 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from read_state import read_state
 
 MENU = 'menu 1 of menu bar item "Conversation" of menu bar 1'
-TIMEOUT = 150   # the first System Events call can be a consent prompt; give it the ~2 minutes macOS gives it (Astra C#8)
+WINDOW_TRIES = 13  # 1.5 s + 12 x 0.5 s: how long select_chat waits for Messages to rebuild its window
+TIMEOUT = 150  # the first System Events call can be a consent prompt; give it the ~2 minutes macOS gives it (Astra C#8)
 
 
 @contextmanager
@@ -913,8 +914,20 @@ def select_chat(handle: str) -> str:
         # Selection did not move: clicking now would mark whatever Messages
         # had selected, some OTHER conversation (Astra C#4).
         return f"could not open the conversation (open exited {r.returncode})"
+    # Opening a conversation makes Messages tear its window down and build a
+    # new one, and System Events counts ZERO windows in between. On the 27.0.1
+    # mini (2026-11-24) the gap ran from ~0.5 s to ~1.5 s after `open`, and longer
+    # under load, so a single look at 1.5 s failed every push with "no accessible
+    # window" while Messages sat open and fine. Look again for a few seconds.
     subprocess.run(["sleep", "1.5"], capture_output=True)
-    code, out = osa('tell application "System Events" to tell process "Messages" to count windows')
+    for attempt in range(WINDOW_TRIES):
+        code, out = osa('tell application "System Events" to tell process "Messages" to count windows')
+        if code == 0 and out.isdecimal() and int(out) >= 1:
+            break
+        if code == 124:  # osascript itself hung for TIMEOUT; asking again would hold the UI lock for half an hour
+            break
+        if attempt + 1 < WINDOW_TRIES:
+            subprocess.run(["sleep", "0.5"], capture_output=True)
     if code != 0 or not out.isdecimal() or int(out) < 1:
         # Zero windows with Messages running is what a locked screen looks
         # like; say so, or the owner is sent to a Messages that is open and fine.

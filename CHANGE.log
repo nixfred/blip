@@ -59,6 +59,11 @@ marker for Post 2 is in the Post 2 draft in X-POSTS.md.
                  on GitHub 24 Nov, then overwritten the same day when main was force-pushed back (the Forgejo push mirror, most likely);
                  restored 25 Nov with the fixes from an independent review. bun test 951 pass, 1 fail (needs ffmpeg).
 
+2026-11-25  #172 imsg-read looks for the Messages window for about 7 s after opening a chat instead of once at 1.5 s, which had failed every
+                 read push on a loaded Mac. Ian Swope, github.com/ianswope, X https://x.com/ianfs. Timed and verified live on his macOS
+                 27.0.1 gateway (a push that failed 13 times went through). Larry added: stop after one hung osascript (13 looks could
+                 have held the Messages lock for about 32 minutes) with its test. Bridge change: blip-setup re-run.
+
 2026-11-23  RELEASE 2.8.0 (tag v2.8.0 on a251d5f): nine commits since 2.7.0, three merged PRs from two outside people (#168, #169, #170).
                  https://github.com/nixfred/blip/releases/tag/v2.8.0. Headlines: Blip's text on the same type ramp as the rest of the Omarchy
                  shell (#170), the window, sidebar and pinned avatars scaling with the text size (#169), a locked Mac as a quiet pill instead

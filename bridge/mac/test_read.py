@@ -109,6 +109,29 @@ class ReadTests(unittest.TestCase):
              patch.object(read, "osa", return_value=(0, "0")):
             self.assertIn("no accessible window", read.select_chat("chat12345"))
 
+    def test_window_rebuilt_after_open_is_selection_success(self):
+        # Messages drops to zero windows for a moment while it opens the chat.
+        counts = iter([(0, "0"), (0, "0"), (0, "1")])
+        with patch.object(read.subprocess, "run", return_value=CompletedProcess([], 0)), \
+             patch.object(read, "osa", side_effect=lambda _s: next(counts)) as osa:
+            self.assertEqual(read.select_chat("chat12345"), "")
+        self.assertEqual(osa.call_count, 3)
+
+    def test_window_wait_is_bounded(self):
+        with patch.object(read.subprocess, "run", return_value=CompletedProcess([], 0)), \
+             patch.object(read, "osa", return_value=(0, "0")) as osa, \
+             patch.object(read, "screen_locked", return_value=False):
+            self.assertIn("no accessible window", read.select_chat("chat12345"))
+        self.assertEqual(osa.call_count, read.WINDOW_TRIES)
+
+    def test_window_wait_stops_when_system_events_hangs(self):
+        # Each look can block for TIMEOUT; one hung osascript must not become WINDOW_TRIES of them.
+        with patch.object(read.subprocess, "run", return_value=CompletedProcess([], 0)), \
+             patch.object(read, "osa", return_value=(124, "osascript timed out")) as osa, \
+             patch.object(read, "screen_locked", return_value=False):
+            self.assertIn("no accessible window", read.select_chat("chat12345"))
+        self.assertEqual(osa.call_count, 1)
+
     def test_windowless_messages_names_a_locked_screen(self):
         with patch.object(read.subprocess, "run", return_value=CompletedProcess([], 0)), \
              patch.object(read, "osa", return_value=(0, "0")), \
