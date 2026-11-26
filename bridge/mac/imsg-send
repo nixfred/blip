@@ -424,6 +424,60 @@ def run_applescript(script: str) -> tuple[int, str, str]:
     return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
 
 
+def _chat_group_id(chat_guid: str) -> str | None:
+    """chat.db's group_id for a chat guid: the key Messages' own
+    `imessage:open?groupid=` link takes. None when chat.db has no such row."""
+    if not os.path.exists(CHAT_DB):
+        return None
+    try:
+        con = sqlite3.connect(f"file:{CHAT_DB}?mode=ro", uri=True)
+        row = con.execute(
+            "SELECT group_id FROM chat WHERE guid=? LIMIT 1", (chat_guid,)
+        ).fetchone()
+    except sqlite3.DatabaseError:
+        return None
+    gid = row[0] if row else None
+    return gid if gid and re.fullmatch(r"[0-9A-Fa-f-]{8,64}", gid) else None
+
+
+def is_chat_not_loaded(err: str) -> bool:
+    """AppleScript -1728 on `chat id`: Messages only exposes the chats it has
+    loaded (about the 200 most recent), so an older group that chat.db holds
+    in full resolves under NO service prefix until Messages opens it."""
+    return "-1728" in err and "chat id" in err
+
+
+def load_chat(chat_guid: str) -> bool:
+    """Make Messages load an older group so `chat id` resolves. `open -g`
+    opens the conversation WITHOUT raising Messages, so nothing steals the
+    owner's focus. True once the guid resolves; False after ~5 s."""
+    gid = _chat_group_id(chat_guid)
+    if gid is None:
+        return False
+    try:
+        r = subprocess.run(["open", "-g", f"imessage:open?groupid={gid}"],
+                           capture_output=True, timeout=15)
+    except subprocess.TimeoutExpired:
+        return False
+    if r.returncode != 0:
+        return False
+    probe = (f'tell application "Messages" to get id of chat id "{as_q(chat_guid)}"\n')
+    for _ in range(10):
+        subprocess.run(["sleep", "0.5"], capture_output=True)
+        rc, _out, _err = run_applescript(probe)
+        if rc == 0:
+            return True
+    return False
+
+
+def send_script(script: str, chat_guid: str | None) -> tuple[int, str, str]:
+    """run_applescript, plus ONE retry for a group Messages has not loaded."""
+    rc, out, err = run_applescript(script)
+    if rc != 0 and chat_guid and is_chat_not_loaded(err) and load_chat(chat_guid):
+        rc, out, err = run_applescript(script)
+    return rc, out, err
+
+
 def consent_banner(recipient: str, text: str) -> None:
     """Loud reminder printed immediately before any actual send — on a TTY.
     Non-interactive callers (Blip over ssh) would otherwise log every
@@ -566,7 +620,7 @@ def main() -> None:
         staged = stage_stdin_file(args.name, args.file_bytes)
         consent_banner(recipient, f"[file: {os.path.basename(staged)}]")
         baseline = _max_attachment_rowid()
-        rc, out, err = run_applescript(build("file", staged))
+        rc, out, err = send_script(build("file", staged), args.chat_id)
         if rc != 0:
             unstage(staged)
             parts_failed.append(f"file ({err})")
@@ -588,7 +642,7 @@ def main() -> None:
                 print("file: sent (staged copy retained for GC).")
     if text:
         consent_banner(recipient, text)
-        rc, out, err = run_applescript(build("text", text))
+        rc, out, err = send_script(build("text", text), args.chat_id)
         if rc != 0:
             parts_failed.append(f"text ({err})")
         else:
